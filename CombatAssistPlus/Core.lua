@@ -6,6 +6,8 @@ local ERR = "|cffff4040"
 local R = "|r"
 local TAG = COLOR .. "CAP" .. R
 
+ns.version = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")) or "?"
+
 local DEFAULTS = {
   enabled = true,
 }
@@ -28,43 +30,6 @@ end
 -- ---------------------------------------------------------------------------
 
 local cmdHelp
-
--- `/cap status` is the debugging surface for every feature, so each module
--- contributes its own line rather than Core knowing what they are. A reporter
--- returns a string (or nil to say nothing); it must never throw and never
--- format a secret value.
-local reporters = {}
-function ns.RegisterStatus(order, fn)
-  assert(type(order) == "number", "RegisterStatus: order required")
-  assert(type(fn) == "function", "RegisterStatus: fn required")
-  reporters[#reporters + 1] = { order = order, fn = fn }
-  table.sort(reporters, function(a, b) return a.order < b.order end)
-end
-
-local function cmdStatus()
-  local _, class = UnitClass("player")
-  local specIndex = GetSpecialization and GetSpecialization()
-  local specName = specIndex and select(2, GetSpecializationInfo(specIndex)) or "?"
-  emit(("v%s loaded — %s %s, assist %s."):format(
-    C_AddOns.GetAddOnMetadata(ADDON, "Version") or "?",
-    specName, class or "?",
-    CombatAssistPlusDB.enabled and "on" or "off"))
-
-  local said = false
-  for _, r in ipairs(reporters) do
-    local ok, line = pcall(r.fn)
-    if not ok then
-      emit(ERR .. "  status reporter errored" .. R .. ": " .. tostring(line))
-      said = true
-    elseif line and line ~= "" then
-      emit("  " .. line)
-      said = true
-    end
-  end
-  if not said then
-    emit("Nothing is wired up yet. " .. KEY .. "/cap help" .. R .. " lists the commands.")
-  end
-end
 
 local function cmdToggle()
   CombatAssistPlusDB.enabled = not CombatAssistPlusDB.enabled
@@ -129,8 +94,6 @@ function cmdHelp()
   end
 end
 
-ns.RegisterCommand{ name = "status", order = 10,
-  desc = "Show version, spec and enabled state", handler = cmdStatus }
 ns.RegisterCommand{ name = "toggle", order = 20,
   desc = "Turn the assist on or off", handler = cmdToggle }
 ns.RegisterCommand{ name = "help", order = 99,
@@ -140,7 +103,7 @@ ns.RegisterCommand{ name = "help", order = 99,
 function ns.Dispatch(msg)
   local cmd, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
   cmd = (cmd or ""):lower()
-  if cmd == "" then cmdStatus(); return end
+  if cmd == "" then cmdHelp(); return end
   local c = byName[cmd]
   if c then c.handler(rest); return end
   for _, cand in ipairs(commandsInOrder()) do
@@ -160,6 +123,11 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
 loader:SetScript("OnEvent", function(self, _, name)
   if name ~= ADDON then return end
-  CombatAssistPlusDB = applyDefaults(CombatAssistPlusDB or {})
+  -- ns.db is assigned before anything that can throw. A capture stream drops every
+  -- write while ns.db is unset, silently, so a load-time error here would make a
+  -- whole session read back as "(no captures)" — the log has to survive it.
+  CombatAssistPlusDB = CombatAssistPlusDB or {}
+  ns.db = CombatAssistPlusDB
+  applyDefaults(CombatAssistPlusDB)
   self:UnregisterEvent("ADDON_LOADED")
 end)

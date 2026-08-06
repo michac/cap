@@ -46,13 +46,17 @@ panel:Show()
 -- ---------------------------------------------------------------------------
 
 -- The panel's keys are created here rather than in Core's DEFAULTS so this file
--- stays the only one that knows their shape.
+-- stays the only one that knows their shape — but the root table is Core's alone.
+-- Two identities for one root is how a write lands in an orphan that never
+-- reaches SavedVariables. This file runs at file scope, before ADDON_LOADED, so
+-- the scratch carries the shape until ns.db exists.
+local scratch = {}
 local function store()
-  CombatAssistPlusDB = CombatAssistPlusDB or {}
-  local s = CombatAssistPlusDB.frame
+  local root = ns.db or scratch
+  local s = root.frame
   if type(s) ~= "table" then
     s = {}
-    CombatAssistPlusDB.frame = s
+    root.frame = s
   end
   if type(s.x) ~= "number" then s.x = DEFAULT_X end
   if type(s.y) ~= "number" then s.y = DEFAULT_Y end
@@ -238,7 +242,7 @@ function ns.Frame.RowCount() return #rows end
 function ns.Frame.IsUnlocked() return unlocked end
 
 -- ---------------------------------------------------------------------------
--- Commands and status
+-- Commands
 -- ---------------------------------------------------------------------------
 
 local function describePosition(s)
@@ -285,15 +289,6 @@ ns.RegisterCommand{
   end,
 }
 
-ns.RegisterStatus(40, function()
-  local s = store()
-  return ("frame: %s at CENTER %s · %s · %d %s"):format(
-    s.placed and "placed" or "default",
-    describePosition(s),
-    unlocked and "unlocked" or "locked",
-    #rows, #rows == 1 and "bar" or "bars")
-end)
-
 -- ---------------------------------------------------------------------------
 -- Events
 -- ---------------------------------------------------------------------------
@@ -314,9 +309,8 @@ events:SetScript("OnEvent", function(_, event)
       ns.Emit("combat — frame locked.")
     end
   elseif ready then
-    --@unverified re-anchoring after a scale/resolution change is assumed to
-    -- re-run SetClampedToScreen; whether a panel parked at an edge is pulled
-    -- back on screen has never been observed.
+    -- The saved offset is normalised to UIParent at scale 1.0, so a scale or
+    -- resolution change makes the current anchor wrong until it is re-applied.
     applyPosition()
   end
 end)

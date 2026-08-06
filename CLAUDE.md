@@ -14,15 +14,26 @@ the installed copy is what `ghaddons` deploys.
 
 ## What it is
 
-Scaffold. A `.toc`, a namespace, SavedVariables and the schema-driven slash
-router (`/cap`), and nothing else — no combat behaviour, no frames, no events
-beyond `ADDON_LOADED`.
+A `.toc`, a namespace, SavedVariables and the schema-driven slash router
+(`/cap`), plus the M2 foundation: `Bind.lua` binds Blizzard's Cooldown Manager
+into a row list and holds a **health verdict** on that binding; `Frame.lua` is
+the movable panel the rows attach to; `Capture.lua` (vendored) and `Log.lua`
+report what the binding did to a capture log. It registers real events —
+specialization change, Cooldown-Manager churn, UI scale — not just
+`ADDON_LOADED`.
+
+⚠ **No combat behaviour, and none of it has ever executed in the client** — the
+only build that has ever loaded is the scaffold. Nothing here decides anything,
+and nothing here has been observed working: every sentence above describes what
+the source says, not what the game says. Treat it that way until a flight says
+otherwise.
 
 **What it's supposed to do lives outside this repo**, on the workspace side at
 `projects/combat-assist/specs/` — `spec.md` (the product definition),
 `backlog.md` (work items), `notes.md` (session log + decisions). That project
 root's `CLAUDE.md` describes how the three fit together. Read `spec.md` before
-building anything here; as of now it is deliberately undefined.
+building anything here — especially §3.1's three rules, which are what keep this
+from becoming a rotation engine.
 
 ## House rules
 
@@ -32,10 +43,14 @@ The two that bite first in a young addon:
 
 - **Commands come from the `ns.Commands` schema table** (`Core.lua`), never a
   hand-rolled parser. Max depth `/cap <verb> [<arg>]`. **No substring dispatch.**
-- **One capture path.** If this addon ever needs to get data out to the tools, it
-  writes `CombatAssistPlusDB.captures.<stream>` via `ns.Capture.Open(...)` and is
-  read with `wowkb.capture cap <stream>` — nothing else. The contract is
-  `.claude/skills/wow-developer/references/capture-and-dump-standard.md`.
+- **One capture path, and it is live.** `Log.lua` writes
+  `CombatAssistPlusDB.captures.bind` via `ns.Capture.Open(...)`; it is read with
+  `uv run python -m wowkb.capture cap bind` and by nothing else. A second stream
+  goes in the same `captures` table or it doesn't exist. The contract is
+  `.claude/skills/wow-developer/references/capture-and-dump-standard.md` —
+  `Capture.lua` here is vendored from it, so adapt the Lua freely but keep the
+  wire format byte-exact, because the shared Python reader is the only check on
+  it. ⚠ SavedVariables only flush on `/reload` or logout.
 
 ## Release workflow
 
@@ -52,7 +67,7 @@ install. It **refuses a dirty tree** — commit your feature work first.
 
 ⚠️ **A push does not reach the game.** `ghaddons` installs from the latest GitHub
 *release*, so nothing deploys until a release is cut. In-game confirm: `/reload`,
-then `/cap status`.
+then bare `/cap` — help printing proves the router loaded.
 
 Check the live version with `uv run python -m wowkb.addon list` — never hardcode
 it in prose.

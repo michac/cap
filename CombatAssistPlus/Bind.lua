@@ -2,10 +2,10 @@
 -- spec, talent and hero-tree changes.
 --
 -- Identity resolves out of combat only. A value that reads secret or throws is
--- "no answer", never "no ability": the previous binding is kept and the pass is
--- reported partial. See knowledge/addon-dev/cooldown-manager.md rules 2, 9, 15.
+-- "no answer", never "no ability": the pass is reported partial and the row is
+-- absent from it. See knowledge/addon-dev/cooldown-manager.md rules 2, 9, 15.
 --
--- Registers its own commands and `/cap status` line — never edits Core.lua.
+-- State and a read API only — it registers no commands and never edits Core.lua.
 local ADDON, ns = ...
 
 local CAT = Enum and Enum.CooldownViewerCategory
@@ -20,38 +20,33 @@ local VIEWERS = {
 
 local RESOLVE_DELAY = 0.2
 local LOGIN_GRACE = 5
-local WARN_CAP = 3
-
-local MESSAGES = {
-  ["no-addon"] = "Blizzard's Cooldown Manager UI is not loaded, so there is nothing to bind to. cap will stay dark.",
-  ["unavailable"] = "the Cooldown Manager reports itself unavailable. cap needs it and will stay dark.",
-  ["disabled"] = "the Cooldown Manager is turned off. Turn it on in Options and cap will bind on its own.",
-  ["empty"] = "the Cooldown Manager is on but tracks nothing on this spec. Add cooldowns to it; cap has nothing to bind to until you do.",
-  ["hidden"] = "the Cooldown Manager has cooldowns configured but is drawing no rows. Check its Edit Mode placement and visibility; cap binds to what is drawn.",
-}
 
 local state = {
   rows = {},      -- cooldownID -> row
-  order = {},     -- rows in viewer order, retained-stale rows last
+  order = {},     -- rows in viewer order
   bySpell = {},   -- spellID -> rows, from the rule-15 union
   byPool = {},    -- spellID -> rows, from linkedSpellIDs
   generation = 0,
   signature = "",
   frames = 0,
   viewers = 0,
+  viewersShown = 0,
   unreadable = 0,
   complete = false,
   pending = false,
   pendingReason = nil,
+  -- The only thing separating "quiet because nothing needed rebinding" from
+  -- "quiet because 40 requests coalesced into one".
+  deferred = 0,
+  deferredLast = 0,
   lastAt = nil,
   lastReason = nil,
-  armed = false,
   health = { kind = "unknown" },
 }
 
 local listeners = {}
+local watchers = {}
 local combatFlag = false
-local warnedKind, warnCount = nil, 0
 local resolveTimerArmed = false
 local graceStarted = false
 
@@ -134,7 +129,6 @@ local function buildRow(viewerDef, frame, cooldownID, index)
     pool = pool,
     spellIDs = ids,
     isKnown = isKnown,
-    stale = false,
   }
 end
 
@@ -159,7 +153,7 @@ local function signatureOf(order)
   local parts = {}
   for i = 1, #order do
     local row = order[i]
-    parts[i] = row.cooldownID .. ":" .. row.primary .. ":" .. (row.stale and "s" or "f")
+    parts[i] = row.cooldownID .. ":" .. row.primary
   end
   return table.concat(parts, ",")
 end
@@ -176,7 +170,7 @@ local function categorySetTotal()
   local total, answered = 0, false
   for _, v in ipairs(VIEWERS) do
     local ok, set = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, v.category, false)
-    if ok and type(set) == "table" then
+    if ok and type(set) == "table" and not issecrettable(set) then
       answered = true
       total = total + #set
     end
@@ -184,23 +178,13 @@ local function categorySetTotal()
   return total, answered
 end
 
-local function announce(health)
-  if not state.armed then return end
-  if not health.kind then warnedKind = nil; return end
-  if health.kind == warnedKind then return end
-  warnedKind = health.kind
-  if warnCount >= WARN_CAP then return end
-  warnCount = warnCount + 1
-  local msg = MESSAGES[health.kind] or ("the Cooldown Manager is not usable (" .. tostring(health.kind) .. ").")
-  if health.detail then msg = msg .. " (" .. health.detail .. ")" end
-  ns.Emit(msg)
-  if warnCount == WARN_CAP then
-    ns.Emit("further Cooldown Manager warnings suppressed — /cap status carries the current state.")
-  end
-end
-
-local function evaluate()
-  local health = { rows = #state.order, frames = state.frames, viewers = state.viewers }
+local function evaluate(why)
+  local health = {
+    rows = #state.order,
+    frames = state.frames,
+    viewers = state.viewers,
+    viewersShown = state.viewersShown,
+  }
   health.configured, health.configuredOk = categorySetTotal()
 
   if not (C_CooldownViewer and _G.EssentialCooldownViewer) then
@@ -214,15 +198,24 @@ local function evaluate()
       health.kind = "disabled"
     elseif health.configuredOk and health.configured == 0 then
       health.kind = "empty"
-    elseif state.lastAt and state.frames == 0 then
+    -- The item frame's IsShown is constant-true when hide-when-inactive is off, so
+    -- only the viewer's own IsShown can tell a hidden viewer from a drawn one.
+    elseif state.lastAt and state.viewers > 0 and state.viewersShown == 0 then
       health.kind = "hidden"
     elseif state.lastAt and #state.order == 0 then
       health.kind = "empty"
+    else
+      -- "unknown" (never evaluated), "ok" (evaluated, healthy) and an absent value
+      -- have to stay three different things to a reader.
+      health.kind = "ok"
     end
   end
 
   state.health = health
-  announce(health)
+  for i = 1, #watchers do
+    local ok, err = pcall(watchers[i], health, why)
+    if not ok then ns.Emit("bind watcher errored: " .. tostring(err)) end
+  end
   return health
 end
 
@@ -230,16 +223,20 @@ local function resolve(reason)
   if inCombat() then
     state.pending = true
     state.pendingReason = reason
+    state.deferred = state.deferred + 1
     return "queued"
   end
 
   local rows, order = {}, {}
   local frames, viewersSeen, unreadable, complete = 0, 0, 0, true
+  local viewersShown = 0
 
   for _, v in ipairs(VIEWERS) do
     local viewer = _G[v.global]
     local list
     if viewer then
+      local shown, shownClass = readField(viewer, "IsShown")
+      if shownClass == "plain" and shown then viewersShown = viewersShown + 1 end
       local ok, result = pcall(viewer.GetItemFrames, viewer)
       if ok and type(result) == "table" then list = result end
     end
@@ -273,20 +270,12 @@ local function resolve(reason)
   -- Nothing observed is not the same as nothing there.
   if frames == 0 then complete = false end
 
-  if not complete then
-    for cooldownID, row in pairs(state.rows) do
-      if not rows[cooldownID] then
-        row.stale = true
-        rows[cooldownID] = row
-        order[#order + 1] = row
-      end
-    end
-  end
-
   state.rows, state.order = rows, order
-  state.frames, state.viewers, state.unreadable, state.complete = frames, viewersSeen, unreadable, complete
+  state.frames, state.viewers, state.viewersShown, state.unreadable, state.complete =
+    frames, viewersSeen, viewersShown, unreadable, complete
   state.lastAt, state.lastReason = GetTime(), reason
   state.pending, state.pendingReason = false, nil
+  state.deferredLast, state.deferred = state.deferred, 0
   reindex()
 
   local signature = signatureOf(order)
@@ -295,7 +284,7 @@ local function resolve(reason)
     state.generation = state.generation + 1
     notify()
   end
-  evaluate()
+  evaluate(reason)
   return "ran"
 end
 
@@ -322,16 +311,20 @@ watcher:SetScript("OnEvent", function(_, event)
   end
   if event == "PLAYER_REGEN_ENABLED" then
     combatFlag = false
-    if state.pending then schedule(state.pendingReason or event) end
+    -- Unconditional, because every in-combat resolve returns early: a pull that
+    -- queued nothing would otherwise produce no resolve at either edge, and a
+    -- post-combat reading identical to the pre-combat one would prove nothing.
+    schedule(state.pendingReason or event)
     return
   end
-  -- The CDM loads its data asynchronously, so the first health verdict waits.
+  -- The CDM loads its data asynchronously, so the first health verdict waits. The
+  -- timer is what guarantees one health sample taken after that load, whether or
+  -- not any other event happens to land.
   if event == "PLAYER_ENTERING_WORLD" and not graceStarted then
     graceStarted = true
     combatFlag = InCombatLockdown()
     C_Timer.After(LOGIN_GRACE, function()
-      state.armed = true
-      evaluate()
+      evaluate("login-grace")
     end)
   end
   schedule(event)
@@ -417,8 +410,72 @@ function Bind.Health()
   return state.health
 end
 
+-- One plain table per bound row, in viewer order. Snapshot counts rows; this says WHICH,
+-- and without it a reader can check the binding is populous but never that it is correct.
+-- Every field was fenced through plain() or readField at construction, so none can be secret.
+function Bind.RowDigest()
+  local out = {}
+  for i = 1, #state.order do
+    local row = state.order[i]
+    out[i] = {
+      cooldownID = row.cooldownID,
+      viewer = row.short,
+      slot = row.index,
+      primary = row.primary,
+      base = row.base,
+      override = row.override,
+      tooltip = row.tooltip,
+      live = row.live,
+      isKnown = row.isKnown,
+      pool = (#row.pool > 0) and table.concat(row.pool, ",") or nil,
+    }
+  end
+  return out
+end
+
+-- A flat plain-Lua copy: no frames and no reference into state, so a consumer may
+-- hold or serialise it without pinning a game object.
+function Bind.Snapshot()
+  local health = state.health or {}
+
+  local counts = {}
+  for _, row in ipairs(state.order) do
+    counts[row.short] = (counts[row.short] or 0) + 1
+  end
+  -- An array in VIEWERS order, never a map: this renders into a dedup key, and
+  -- pairs() order is unstable, so a map would break dedup nondeterministically.
+  local byViewer = {}
+  for i = 1, #VIEWERS do
+    byViewer[i] = { short = VIEWERS[i].short, count = counts[VIEWERS[i].short] or 0 }
+  end
+
+  return {
+    rows = #state.order,
+    byViewer = byViewer,
+    frames = state.frames,
+    viewers = state.viewers,
+    generation = state.generation,
+    complete = state.complete,
+    unreadable = state.unreadable,
+    pending = state.pending,
+    deferredLast = state.deferredLast,
+    lastAt = state.lastAt,
+    reason = state.lastReason,
+    kind = health.kind,
+    detail = health.detail,
+    viewersShown = health.viewersShown,
+    configured = health.configured,
+    configuredOk = health.configuredOk,
+  }
+end
+
 function Bind.Resolve(reason)
   return resolve(reason or "manual")
+end
+
+-- Re-runs the verdict only; the rows are left exactly as the last resolve left them.
+function Bind.Evaluate(why)
+  return evaluate(why or "manual")
 end
 
 function Bind.OnChanged(fn)
@@ -426,92 +483,11 @@ function Bind.OnChanged(fn)
   return fn
 end
 
--- ---------------------------------------------------------------------------
--- Reporting
--- ---------------------------------------------------------------------------
-
-local function specLabel()
-  local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
-  local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo
-  local name = "?"
-  if getSpec and getInfo then
-    local okIndex, index = pcall(getSpec)
-    if okIndex and plain(index) then
-      local okInfo, _, specName = pcall(getInfo, index)
-      if okInfo and type(specName) == "string" then name = specName end
-    end
-  end
-
-  local talents = C_ClassTalents
-  if talents and talents.GetActiveHeroTalentSpec then
-    local okHero, subTreeID = pcall(talents.GetActiveHeroTalentSpec)
-    if okHero and plain(subTreeID) then
-      local hero = tostring(subTreeID)
-      local okConfig, configID = pcall(talents.GetActiveConfigID)
-      if okConfig and plain(configID) and C_Traits and C_Traits.GetSubTreeInfo then
-        local okTree, info = pcall(C_Traits.GetSubTreeInfo, configID, subTreeID)
-        if okTree and type(info) == "table" and type(info.name) == "string" then hero = info.name end
-      end
-      name = name .. " (" .. hero .. ")"
-    end
-  end
-  return name
+-- Fires on every evaluation, moved or not. Not a widened OnChanged, and must not
+-- be merged into one: OnChanged promises the row signature moved, so a row
+-- listener may assume the rows differ. Folding sampling in would make every such
+-- listener re-do its work on samples that changed nothing.
+function Bind.OnEvaluated(fn)
+  watchers[#watchers + 1] = fn
+  return fn
 end
-
-local function breakdown()
-  local counts, stale = {}, 0
-  for _, v in ipairs(VIEWERS) do counts[v.short] = 0 end
-  for _, row in ipairs(state.order) do
-    counts[row.short] = (counts[row.short] or 0) + 1
-    if row.stale then stale = stale + 1 end
-  end
-  local parts = {}
-  for _, v in ipairs(VIEWERS) do parts[#parts + 1] = v.short .. " " .. counts[v.short] end
-  return table.concat(parts, " "), stale
-end
-
-local function ago(when)
-  if not when then return "never" end
-  local delta = GetTime() - when
-  if delta < 1 then return "just now" end
-  return ("%ds ago"):format(math.floor(delta))
-end
-
-ns.RegisterStatus(30, function()
-  local health = state.health or {}
-  local counts, stale = breakdown()
-  local parts = {}
-
-  if health.kind == "unknown" then
-    parts[#parts + 1] = "cdm: not resolved yet"
-  elseif health.kind then
-    parts[#parts + 1] = ("cdm: NOT USABLE (%s%s) — holding %d rows"):format(
-      health.kind, health.detail and (": " .. health.detail) or "", #state.order)
-  else
-    parts[#parts + 1] = ("cdm: bound — %d rows on %d viewers (%s)"):format(
-      #state.order, state.viewers, counts)
-  end
-
-  parts[#parts + 1] = specLabel()
-  parts[#parts + 1] = ("resolved %s after %s, gen %d"):format(
-    ago(state.lastAt), tostring(state.lastReason or "-"), state.generation)
-
-  if state.lastAt and not state.complete then
-    parts[#parts + 1] = ("PARTIAL — %d unreadable, %d rows kept from the last good pass"):format(
-      state.unreadable, stale)
-  end
-  if state.pending then
-    parts[#parts + 1] = "rebind queued" .. (inCombat() and " (in combat)" or "")
-  end
-  if health.configuredOk then
-    parts[#parts + 1] = ("%d in the CDM set, %d frames walked"):format(health.configured, state.frames)
-  end
-
-  return table.concat(parts, " · ")
-end)
-
--- The per-row detail this module can report is a DUMP, and a dump is a button on
--- the `/cap dump` panel writing to the capture stream — never a slash subcommand
--- printing to chat, which has no copy/paste and so cannot leave the client.
--- House rule 4. Until that panel exists, `/cap status` is the whole surface.
-
