@@ -21,7 +21,6 @@ local VIEWERS = {
 local RESOLVE_DELAY = 0.2
 local LOGIN_GRACE = 5
 local WARN_CAP = 3
-local ROW_DUMP_CAP = 40
 
 local MESSAGES = {
   ["no-addon"] = "Blizzard's Cooldown Manager UI is not loaded, so there is nothing to bind to. cap will stay dark.",
@@ -431,12 +430,6 @@ end
 -- Reporting
 -- ---------------------------------------------------------------------------
 
-local function spellLabel(id)
-  local ok, name = pcall(C_Spell.GetSpellName, id)
-  if ok and type(name) == "string" and name ~= "" then return name end
-  return "?"
-end
-
 local function specLabel()
   local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
   local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo
@@ -517,70 +510,8 @@ ns.RegisterStatus(30, function()
   return table.concat(parts, " · ")
 end)
 
--- ---------------------------------------------------------------------------
--- Commands
--- ---------------------------------------------------------------------------
+-- The per-row detail this module can report is a DUMP, and a dump is a button on
+-- the `/cap dump` panel writing to the capture stream — never a slash subcommand
+-- printing to chat, which has no copy/paste and so cannot leave the client.
+-- House rule 4. Until that panel exists, `/cap status` is the whole surface.
 
-local function describe(row)
-  local ids = {}
-  for id in pairs(row.spellIDs) do ids[#ids + 1] = id end
-  table.sort(ids)
-  local line = ("[%d] %s/%s %s (%d) ids{%s}"):format(
-    row.cooldownID, row.short, row.family, spellLabel(row.primary), row.primary, table.concat(ids, ","))
-  if #row.pool > 0 then line = line .. " pool{" .. table.concat(row.pool, ",") .. "}" end
-  if row.isKnown == false then line = line .. " unknown-to-spec" end
-  if row.stale then line = line .. " STALE" end
-  return line
-end
-
-local function cmdBind(rest)
-  local arg = (rest or ""):match("^%s*(%S*)") or ""
-
-  if arg == "now" then
-    local result = resolve("/cap bind now")
-    ns.Emit(result == "ran" and "bind: resolved."
-      or "bind: queued — identity resolves out of combat.")
-    return
-  end
-
-  if arg == "rows" then
-    if #state.order == 0 then ns.Emit("bind: no rows.") return end
-    local shown = math.min(#state.order, ROW_DUMP_CAP)
-    for i = 1, shown do ns.Emit("  " .. describe(state.order[i])) end
-    if shown < #state.order then
-      ns.Emit(("  … %d more"):format(#state.order - shown))
-    end
-    return
-  end
-
-  if arg ~= "" then
-    local spellID = tonumber(arg)
-    if not spellID then
-      ns.Emit("bind: expected 'rows', 'now' or a spellID.")
-      return
-    end
-    local hits = Bind.RowsForSpell(spellID, true)
-    if #hits == 0 then
-      ns.Emit(("bind: %d (%s) is on no CDM row."):format(spellID, spellLabel(spellID)))
-      return
-    end
-    ns.Emit(("bind: %d (%s) is on %d row(s)."):format(spellID, spellLabel(spellID), #hits))
-    for _, row in ipairs(hits) do ns.Emit("  " .. describe(row)) end
-    return
-  end
-
-  local health = evaluate()
-  local counts, stale = breakdown()
-  ns.Emit(("bind: %s · %s · %d rows (%s) · %d stale · gen %d"):format(
-    health.kind or "ok", specLabel(), #state.order, counts, stale, state.generation))
-  ns.Emit(("  viewers %d, frames walked %d, unreadable %d, last pass %s"):format(
-    state.viewers, state.frames, state.unreadable, state.complete and "complete" or "PARTIAL"))
-  ns.Emit(("  CDM set %s · resolved %s after %s%s"):format(
-    health.configuredOk and tostring(health.configured) or "unreadable",
-    ago(state.lastAt), tostring(state.lastReason or "-"),
-    state.pending and " · rebind queued" or ""))
-  ns.Emit("  /cap bind rows lists them; /cap bind <spellID> looks one up.")
-end
-
-ns.RegisterCommand{ name = "bind", order = 30, args = "[rows|now|<spellID>]",
-  desc = "Report what the Cooldown Manager binding resolved", handler = cmdBind }
