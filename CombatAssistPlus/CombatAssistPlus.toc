@@ -1,0 +1,9 @@
+## Interface: 120007
+## Title: Combat Assist Plus
+## Notes: Combat assistance overlay. Scaffold — no gameplay behaviour yet.
+## Author: Michael Christiansen
+## Version: 0.1.0
+## SavedVariables: CombatAssistPlusDB
+## IconTexture: Interface\ICONS\Ability_Warrior_BattleShout
+
+Core.lua
