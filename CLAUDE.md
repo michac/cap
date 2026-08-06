@@ -16,8 +16,13 @@ the installed copy is what `ghaddons` deploys.
 
 Scaffold. A `.toc`, a namespace, SavedVariables and the schema-driven slash
 router (`/cap`), and nothing else — no combat behaviour, no frames, no events
-beyond `ADDON_LOADED`. The design has not been written yet; when it is, it goes
-in `projects/combat-assist/` on the workspace side, not here.
+beyond `ADDON_LOADED`.
+
+**What it's supposed to do lives outside this repo**, on the workspace side at
+`projects/combat-assist/specs/` — `spec.md` (the product definition),
+`backlog.md` (work items), `notes.md` (session log + decisions). That project
+root's `CLAUDE.md` describes how the three fit together. Read `spec.md` before
+building anything here; as of now it is deliberately undefined.
 
 ## House rules
 
