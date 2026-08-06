@@ -7,3 +7,5 @@
 ## IconTexture: Interface\ICONS\Ability_Warrior_BattleShout
 
 Core.lua
+Bind.lua
+Frame.lua
