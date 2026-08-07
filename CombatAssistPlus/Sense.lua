@@ -153,6 +153,12 @@ end
 
 local evaluate
 
+-- A refused cid is logged ONCE and counted thereafter. The count alone cannot tell
+-- "correctly ignoring a silenced row" from "resolving the wrong cid", and those are the
+-- pass and the fail of the same criterion; the identity can, and every viewer raises
+-- these on every row, so logging each occurrence would drown the stream.
+local refusedSeen = {}
+
 local function onAlert(frame, event)
   local name = EDGE_NAMES[event]
   if not name or not state.track then return end
@@ -170,11 +176,13 @@ local function onAlert(frame, event)
     evaluate(now, "edge")
   else
     state.refused = state.refused + 1
+    if not refusedSeen[cid] then
+      refusedSeen[cid] = true
+      edgeStream:Line(("t%.1f refused cid:%d first:%s"):format(now, cid, name))
+    end
   end
 end
 
---@unverified the alert hook is read from Blizzard's source and has never been executed
--- here; `hooks` and `edges` on the edge stream are the flight's acceptance for it.
 local function installHooks()
   if not ns.Bind then return 0 end
   local added = 0
@@ -438,6 +446,7 @@ local function rebind(generation)
 
   state.track = ns.Track.New(cat)
   state.track:Bind(ns.Track.Binding(resolved, rows, state.reads))
+  refusedSeen = {}
   if state.combat then state.track:Combat(GetTime(), true) end
 
   installHooks()
