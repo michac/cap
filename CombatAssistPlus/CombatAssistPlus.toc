@@ -9,5 +9,11 @@
 Core.lua
 Capture.lua
 Bind.lua
+Catalog.lua
+Catalogs\Demonology.lua
 Log.lua
+Tier.lua
+Track.lua
+Sense.lua
 Frame.lua
+Mode.lua

@@ -47,6 +47,14 @@ stds.wow = {
     -- to the bare globals, so both spellings are live.
     "C_SpecializationInfo", "GetSpecialization", "GetSpecializationInfo",
     "C_ClassTalents", "C_Traits",
+    -- The gate reads — Sense.lua.  `C_Spell` answers affordability and the
+    -- out-of-combat cooldown baseline, `C_SpellActivationOverlay` the proc, and
+    -- `UnitPower` the secondary resource; which of them is readable when is
+    -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8, §4.12.
+    "C_Spell", "C_SpellActivationOverlay", "UnitPower", "UnitPowerMax",
+    -- The alert choke point cap latches readiness off — Sense.lua.  It cannot be
+    -- removed once installed, which is why the hook table is weak-keyed.
+    "hooksecurefunc",
   },
   -- The addon's true global writes.  Every module binds its namespace as a local
   -- (`local ADDON, ns = ...`), so there is no shared-namespace global to declare —
@@ -72,3 +80,9 @@ max_line_length = false
 -- first vararg is what makes the second one legible, and Core.lua does use it.
 -- Ignored BY NAME, so a dead local under any other name still warns.
 ignore = { "211/ADDON" }
+
+-- The suite runs under busted, whose describe/it/assert are globals no addon file
+-- has.  Declared here rather than left to luacheck's `*_spec.lua` filename heuristic:
+-- this config gates a release, and a gate should not rest on a tool's default it
+-- never asked for.
+files["CombatAssistPlus/tests/"] = { std = "+busted" }

@@ -76,8 +76,6 @@ end
 -- The hero tree answers four ways and a reader must tell them apart: a name · `#<id>`
 -- (an id we could not name) · `-` (none chosen) · `?` (the read refused). Game reads, so
 -- they resolve here rather than inside Render.
---@unverified a nil GetActiveHeroTalentSpec means "no hero tree chosen" — never observed,
--- and this split is what settles it: no hero tree must log `-`, where `?` means refused.
 local function specAndHero()
   local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
   local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo

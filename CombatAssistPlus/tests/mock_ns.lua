@@ -1,0 +1,104 @@
+-- mock_ns.lua — the busted harness.
+--
+-- Deliberately thin. The modules under test are PURE, so there is no client to fake:
+-- what this provides is the `local ADDON, ns = ...` vararg shim and a fresh namespace
+-- per spec file. Anything that would need a CreateFrame stub does not belong here —
+-- it belongs on the impure side, which is tested in the client and nowhere else.
+local H = {}
+
+local ROOT = "CombatAssistPlus/"
+
+--- Load a module into a namespace, through the addon vararg shim the game uses.
+function H.load(ns, relPath)
+  local chunk = assert(loadfile(ROOT .. relPath))
+  return chunk("CombatAssistPlus", ns)
+end
+
+--- A namespace with the pure core loaded and the Demonology catalog registered.
+function H.fresh()
+  local ns = {}
+  H.load(ns, "Catalog.lua")
+  H.load(ns, "Tier.lua")
+  H.load(ns, "Track.lua")
+  H.load(ns, "Catalogs/Demonology.lua")
+  return ns
+end
+
+--- The 21-row Demonology set recorded by cap v0.2.0 in the live client.
+function H.rows()
+  return assert(loadfile(ROOT .. "tests/fixtures/demonology-rows.lua"))()
+end
+
+function H.catalog(ns)
+  return ns.Catalog.All()[1]
+end
+
+--- A Track bound to the client-authored row set — the same call Sense makes.
+function H.track(ns)
+  local cat = H.catalog(ns)
+  local rows = H.rows()
+  local _, resolved = ns.Catalog.CheckBound(cat, rows)
+  local t = ns.Track.New(cat)
+  t:Bind(ns.Track.Binding(resolved, rows))
+  return t, cat, resolved
+end
+
+--- The cooldownID an entry bound to, so a test can raise the edge the client would.
+function H.cid(resolved, entryID)
+  return assert(resolved.byEntry[entryID], entryID .. " did not bind").cooldownID
+end
+
+--- A deep-ish copy, so a test that breaks a catalog to prove a check fires cannot
+--- leak the damage into the next test.
+function H.copy(v)
+  if type(v) ~= "table" then return v end
+  local out = {}
+  for k, val in pairs(v) do out[k] = H.copy(val) end
+  return out
+end
+
+--- Findings reduced to a set of check names, which is what an assertion cares about.
+function H.checks(found)
+  local out = {}
+  for _, f in ipairs(found) do out[f.check] = (out[f.check] or 0) + 1 end
+  return out
+end
+
+--- A world in which every gate refuses. This is the harness's most important helper:
+--- a fixture that hands the code a value cannot reproduce the state the client
+--- actually produces under restriction, and that has already cost this workspace a
+--- hundred green tests elsewhere.
+function H.blindWorld()
+  local U = "unknown"
+  local blind = setmetatable({}, { __index = function() return U end })
+  return {
+    ready = blind, affordable = blind, proc = blind,
+    auraUp = blind, talent = blind, window = blind, identity = blind,
+    elapsed = blind,
+    resource = U, resourceMax = U,
+  }
+end
+
+--- A world where everything reads, so a test can vary one gate at a time.
+function H.world(over)
+  local yes = setmetatable({}, { __index = function() return true end })
+  local no = setmetatable({}, { __index = function() return false end })
+  local w = {
+    ready = yes, affordable = yes, proc = no,
+    auraUp = no, talent = yes, window = no,
+    identity = setmetatable({}, { __index = function() return "base" end }),
+    elapsed = setmetatable({}, { __index = function() return 0 end }),
+    resource = 0, resourceMax = 5,
+  }
+  for k, v in pairs(over or {}) do w[k] = v end
+  return w
+end
+
+--- A per-key table with a default, for overriding one entry's gate.
+function H.map(default, over)
+  local t = setmetatable({}, { __index = function() return default end })
+  for k, v in pairs(over or {}) do rawset(t, k, v) end
+  return t
+end
+
+return H
