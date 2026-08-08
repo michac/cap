@@ -20,6 +20,7 @@ function H.fresh()
   H.load(ns, "Catalog.lua")
   H.load(ns, "Tier.lua")
   H.load(ns, "Track.lua")
+  H.load(ns, "Treatment.lua")
   H.load(ns, "Catalogs/Demonology.lua")
   return ns
 end
@@ -38,7 +39,7 @@ function H.track(ns)
   local cat = H.catalog(ns)
   local rows = H.rows()
   local _, resolved = ns.Catalog.CheckBound(cat, rows)
-  local t = ns.Track.New(cat)
+  local t = ns.Track.New()
   t:Bind(ns.Track.Binding(resolved, rows))
   return t, cat, resolved
 end
@@ -73,9 +74,9 @@ function H.blindWorld()
   local blind = setmetatable({}, { __index = function() return U end })
   return {
     ready = blind, affordable = blind, proc = blind,
-    auraUp = blind, talent = blind, window = blind, identity = blind,
+    auraUp = blind, talent = blind, identity = blind,
     elapsed = blind,
-    resource = U, resourceMax = U,
+    resource = U, resourceMax = U, combat = U,
   }
 end
 
@@ -85,10 +86,10 @@ function H.world(over)
   local no = setmetatable({}, { __index = function() return false end })
   local w = {
     ready = yes, affordable = yes, proc = no,
-    auraUp = no, talent = yes, window = no,
+    auraUp = no, talent = yes,
     identity = setmetatable({}, { __index = function() return "base" end }),
     elapsed = setmetatable({}, { __index = function() return 0 end }),
-    resource = 0, resourceMax = 5,
+    resource = 0, resourceMax = 5, combat = true,
   }
   for k, v in pairs(over or {}) do w[k] = v end
   return w

@@ -22,11 +22,22 @@ report what the binding did to a capture log. It registers real events —
 specialization change, Cooldown-Manager churn, UI scale — not just
 `ADDON_LOADED`.
 
-⚠ **No combat behaviour, and none of it has ever executed in the client** — the
-only build that has ever loaded is the scaffold. Nothing here decides anything,
-and nothing here has been observed working: every sentence above describes what
-the source says, not what the game says. Treat it that way until a flight says
-otherwise.
+On top of it, the tier signal: `Catalog.lua` + `Catalogs/Demonology.lua` (the
+closed vocabulary and the spec's five checks), `Tier.lua` and `Track.lua` (pure),
+`Treatment.lua` (tier → look — **the only place the visual numbers exist**),
+`Sense.lua` (hooks, clock, client reads), `Channel.lua` (**the only place the two
+sealed comparisons live** — cap offers, the client decides) and `Overlay.lua`
+(cap's own frames, anchored to the CDM icons, painted from `Sense.OnVerdicts`).
+
+⚠ **What has run in the client stops at `Sense.lua`.** The binding and the tier
+verdicts were flown; **`Treatment.lua`, `Channel.lua` and `Overlay.lua` have never
+executed there** — no pixel this addon draws has been observed. The pure modules are
+covered by `busted`; the overlay is not testable at a desk and is verified by a
+flight and an eyeball, with `wowkb.capture cap draw` as the only instrument.
+
+⚠ **And neither channel has a readback.** `SetText`/`SetAlpha` accept a secret and hand
+nothing back, so `draw`'s `C{}` reports only whether cap **armed** a cue — never whether a
+marker appeared. Anything stronger than that has to come from an eyeball.
 
 **What it's supposed to do lives outside this repo**, on the workspace side at
 `projects/combat-assist/specs/` — `spec.md` (the product definition),

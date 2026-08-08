@@ -1,7 +1,7 @@
--- track_spec.lua — the readiness latch, the elapsed arithmetic and the six windows,
--- authored from the Demonology catalog document §2 rather than from Track.lua.
+-- track_spec.lua — the readiness latch and the elapsed stamp, authored from the
+-- Demonology catalog document rather than from Track.lua.
 --
--- The two blocks that carry their weight are the three-state ones. A latch that reads
+-- The three-state blocks are the ones that carry their weight. A latch that reads
 -- `false` where it means "nobody told me" lights or blanks a whole roster for a pull,
 -- and both failures look like a working addon from the outside.
 local H = require("CombatAssistPlus.tests.mock_ns")
@@ -115,8 +115,8 @@ describe("Track", function()
     end)
   end)
 
-  describe("elapsed and remaining", function()
-    it("has no elapsed for an ability never observed", function()
+  describe("elapsed", function()
+    it("has none for an ability never observed", function()
       assert.is_nil(world().elapsed.E1)
     end)
 
@@ -125,26 +125,27 @@ describe("Track", function()
       assert.equal(12, world(112).elapsed.E1)
     end)
 
-    it("counts the declared base cooldown down, and floors at zero", function()
+    it("counts no cooldown down — the client owns every remaining time", function()
+      -- The declared base cooldown, and the arithmetic over it, are gone: a channel is
+      -- exact where cap's own count drifts under anything that shortens a cooldown.
       track:Edge(100, cid("E1"), "OnCooldown")
-      assert.equal(50, world(110).remaining.E1)
-      assert.equal(0, world(200).remaining.E1)
+      assert.is_nil(world(110).remaining)
     end)
+  end)
 
-    it("takes a measured base cooldown over the declared one", function()
-      track:SeedCooldown("E1", 45)
-      track:Edge(100, cid("E1"), "OnCooldown")
-      assert.equal(35, world(110).remaining.E1)
-    end)
-
-    it("has no remaining for an entry the catalog declares no cooldown for", function()
-      track:Cast(100, cid("E5"))
-      assert.equal(10, world(110).elapsed.E5)
-      assert.is_nil(world(110).remaining.E5)
+  describe("combat", function()
+    it("rides the world as a gate, answered rather than refused", function()
+      assert.is_false(world().combat)
+      track:Combat(100, true)
+      assert.is_true(world(101).combat)
+      track:Combat(200, false)
+      assert.is_false(world(201).combat)
     end)
   end)
 
   describe("casts", function()
+    -- Nothing reads this yet: it is the counter behind `casts == n`, which is legal in a
+    -- sequence trigger and refused in a band, so M5 is its first consumer.
     it("counts only inside a pull, and resets at each combat entry", function()
       track:Cast(5, cid("E10"))
       track:Combat(10, true)
@@ -170,98 +171,21 @@ describe("Track", function()
   end)
 
   --------------------------------------------------------------------------------
-  -- The six windows — catalog.md §2, one case each plus its refusal
-  --------------------------------------------------------------------------------
-  local covered = {}
-
-  local function windowCase(name, desc, fn)
-    covered[name] = true
-    it(name .. " " .. desc, fn)
-  end
-
-  describe("windows", function()
-    windowCase("tyrant_setup", "is exactly 'Tyrant is ready'", function()
-      track:Edge(10, cid("E1"), "Available")
-      assert.is_true(world().window.tyrant_setup)
-      track:Edge(20, cid("E1"), "OnCooldown")
-      assert.is_false(world().window.tyrant_setup)
-    end)
-
-    windowCase("tyrant_far", "needs not-ready AND more than 20s left", function()
-      track:Edge(100, cid("E1"), "OnCooldown")
-      assert.is_true(world(110).window.tyrant_far, "50s left is far")
-      assert.is_false(world(145).window.tyrant_far, "15s left is the hold zone, not far")
-    end)
-
-    it("leaves the hold zone expressed by NEITHER tyrant window, so no band says 'not'", function()
-      track:Edge(100, cid("E1"), "OnCooldown")
-      local w = world(145)
-      assert.is_false(w.window.tyrant_setup)
-      assert.is_false(w.window.tyrant_far)
-    end)
-
-    windowCase("tyrant_active", "is ~15s from the observed cast", function()
-      track:Edge(100, cid("E1"), "OnCooldown")
-      assert.is_true(world(112).window.tyrant_active)
-      assert.is_false(world(120).window.tyrant_active)
-    end)
-
-    windowCase("dogs_out", "is ~12s from the observed Dreadstalkers cast", function()
-      track:Edge(100, cid("E2"), "OnCooldown")
-      assert.is_true(world(108).window.dogs_out)
-      assert.is_false(world(115).window.dogs_out)
-    end)
-
-    windowCase("cores_dry", "is the negation of the Demonbolt proc, legal only here", function()
-      assert.is_true(world(100, { proc = H.map(false) }).window.cores_dry)
-      assert.is_false(world(100, { proc = H.map(true) }).window.cores_dry)
-    end)
-
-    windowCase("opener", "is in combat before the first observed cast", function()
-      -- False rather than unknown, and the order is why: `combat` answers definitively,
-      -- and a term known false settles the window whatever the rest of it refuses.
-      assert.is_false(world(100).window.opener)
-      track:Combat(100, true)
-      assert.is_true(world(101).window.opener)
-      track:Cast(102, cid("E10"))
-      assert.is_false(world(103).window.opener)
-    end)
-
-    it("is unknown, never false, when the read it rests on refused", function()
-      -- E1's readiness never seeded: tyrant_setup must not read as "Tyrant is not ready".
-      assert.equal("unknown", world().window.tyrant_setup)
-      assert.equal("unknown", world().window.tyrant_far)
-    end)
-
-    it("negation of a refusal stays a refusal", function()
-      assert.equal("unknown", world(100, { proc = H.map("unknown") }).window.cores_dry)
-    end)
-
-    it("has a case for every window the catalog declares", function()
-      local missing = {}
-      for name in pairs(cat.windows) do
-        if not covered[name] then missing[#missing + 1] = name end
-      end
-      table.sort(missing)
-      assert.same({}, missing)
-    end)
-  end)
-
-  --------------------------------------------------------------------------------
   -- The world feeds Tier, and gate health is what a flight reads
   --------------------------------------------------------------------------------
   describe("the world Tier consumes", function()
-    it("promotes Tyrant to HIGH once the dogs are out and it is ready", function()
+    it("promotes Tyrant to HIGH once the Dreadstalkers are on cooldown and it is ready", function()
       track:Edge(100, cid("E2"), "OnCooldown")
       track:Edge(101, cid("E1"), "Available")
       local out = ns.Tier.Evaluate(resolved, world(105))
       assert.equal("HIGH", out.byEntry.E1.tier)
     end)
 
-    it("leaves Tyrant at MEDIUM once the window has closed", function()
+    it("leaves Tyrant at MEDIUM once the Dreadstalkers are back up", function()
       track:Edge(100, cid("E2"), "OnCooldown")
       track:Edge(101, cid("E1"), "Available")
-      local out = ns.Tier.Evaluate(resolved, world(120))
+      track:Edge(120, cid("E2"), "Available")
+      local out = ns.Tier.Evaluate(resolved, world(125))
       assert.equal("MEDIUM", out.byEntry.E1.tier)
     end)
 
@@ -286,23 +210,23 @@ describe("Track", function()
       assert.equal(0, health.gates.ready.unknown)
     end)
 
-    it("counts a window that could not be evaluated", function()
-      local _, health = world()
-      assert.is_true(health.windows.unknown > 0)
-      assert.equal(6, health.windows.known + health.windows.unknown)
+    it("tallies a gate against the SUBJECT entry, not the one that named it", function()
+      -- Bound WITH the reads map. Nothing asks E1's affordability and nothing asks E5's
+      -- readiness, so a tally that counted every gate for every entry would report a
+      -- working catalog as blind — the failure this measurement exists to detect.
+      local t = ns.Track.New()
+      t:Bind(ns.Track.Binding(resolved, H.rows(), ns.Catalog.Reads(cat)))
+      local _, health = t:World(100)
+      assert.equal(2, health.gates.identity.known + health.gates.identity.unknown)
+      assert.equal(2, health.gates.affordable.known + health.gates.affordable.unknown)
+      assert.is_true(health.gates.ready.known + health.gates.ready.unknown < health.entries)
     end)
 
-    it("counts only the gates the catalog asks of each entry", function()
-      -- Bound WITH the reads map: one entry names `identity`, so a blind identity read
-      -- is 1 refusal and not 8. Counting a gate nobody asks for reports a working
-      -- catalog as blind, which is the failure this measurement exists to detect.
-      local rows = H.rows()
-      local t = ns.Track.New(cat)
-      t:Bind(ns.Track.Binding(resolved, rows, ns.Catalog.Reads(cat)))
-      local _, health = t:World(100)
-      local ident = health.gates.identity
-      assert.equal(1, ident.known + ident.unknown)
-      assert.is_true(health.gates.ready.known + health.gates.ready.unknown < health.entries)
+    it("counts E2's readiness, which only E1's band asks for", function()
+      local t = ns.Track.New()
+      t:Bind(ns.Track.Binding(resolved, H.rows(), ns.Catalog.Reads(cat)))
+      assert.is_true(t.entries.E2.needs.ready, "E1 names `not ready(E2)`")
+      assert.is_nil(t.entries.E1.needs.affordable, "nothing asks E1's affordability")
     end)
 
     it("separates a false read from a refused one", function()

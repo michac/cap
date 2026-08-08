@@ -55,6 +55,12 @@ stds.wow = {
     -- The alert choke point cap latches readiness off — Sense.lua.  It cannot be
     -- removed once installed, which is why the hook table is weak-keyed.
     "hooksecurefunc",
+    -- The two sealed comparisons — Channel.lua.  `C_UnitAuras` is the stack quantiser
+    -- and `C_CurveUtil` builds the Step curve a duration object evaluates; the enum
+    -- members they need (`Enum.LuaCurveType`, `Enum.DurationTimeModifier`) ride the
+    -- `Enum` global already declared above.  Mechanisms:
+    -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8.
+    "C_UnitAuras", "C_CurveUtil",
   },
   -- The addon's true global writes.  Every module binds its namespace as a local
   -- (`local ADDON, ns = ...`), so there is no shared-namespace global to declare —

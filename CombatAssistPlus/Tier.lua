@@ -1,10 +1,10 @@
 -- Tier.lua — first-match bands over a plain-data world. Pure: no game reads, no clock.
 --
 -- Two properties the format depends on and this enforces:
---   * entries never see each other — an entry is evaluated from its own terms alone;
---   * a gate is THREE-STATE. `unknown` is not `false`: it fails every band (conditions
---     are positive, so that composes) and is counted, so a quiet field and a blind one
---     are distinguishable in the log.
+--   * no term names another entry's VERDICT — a band names abilities, never tiers;
+--   * a gate is THREE-STATE. `unknown` is not `false`, and negation does not rescue it:
+--     `not <unknown>` stays unknown, an unknown fails its band, and the refusals are
+--     counted, so a quiet field and a blind one are distinguishable in the log.
 --
 -- Keyed by ENTRY, never by cooldownID: two entries share one row on a transforming
 -- ability, and collapsing them would pick a winner in a return type.
@@ -27,13 +27,9 @@ end
 
 local evaluators = {}
 
--- "this" is the entry the band belongs to. A window has no `this` and names its subject
--- outright, which is what lets one evaluator serve both surfaces.
-local function subject(term, e)
-  local id = term[2]
-  if id == "this" then return e and e.id end
-  return id
-end
+-- Catalog owns `this` → entry-id, so a band and the check that admitted it cannot
+-- disagree about which ability a term named.
+local subject = ns.Catalog.Subject
 
 evaluators.ready = function(term, e, w)
   return three(w.ready and w.ready[subject(term, e)])
@@ -47,6 +43,13 @@ evaluators.proc = function(term, e, w)
   return three(w.proc and w.proc[subject(term, e)])
 end
 
+-- ⚠ `auraUp`'s argument is an AURA SPELL ID, not an entry subject, so it deliberately does
+-- NOT go through `Catalog.Subject` — `this` would resolve to an entry id, and `w.auraUp` is
+-- keyed by spell id off `Track`'s aura latch, which filters its ids against the numeric set
+-- `Catalog.Reads` collected. An entry id there is not merely wrong, it is undetectable: the
+-- row never enters `auraIDs`, nothing latches, nothing tallies, and the band is silently
+-- dead. `Catalog.GATES.auraUp` says `subject = "aura"` and check 3 refuses a string here,
+-- which is the other half of the same rule.
 evaluators.auraUp = function(term, e, w)
   return three(w.auraUp and w.auraUp[term[2]])
 end
@@ -55,14 +58,14 @@ evaluators.talent = function(term, e, w)
   return three(w.talent and w.talent[term[2]])
 end
 
-evaluators.window = function(term, e, w)
-  return three(w.window and w.window[term[2]])
+evaluators.combat = function(term, e, w)
+  if w.combat == nil or w.combat == UNKNOWN then return UNKNOWN end
+  return w.combat and true or false
 end
 
--- The one gate that is not a game read: the target mode the player set. It cannot be
--- refused the way a sealed value can, but it is still three-valued — before cap has a
--- mode it is unknown, and an unknown mode must fail its band like anything else rather
--- than defaulting to single and quietly asserting an opinion nobody chose.
+-- The one gate that is not a game read, and still three-valued: before cap has a mode it
+-- is unknown, and it must fail its band rather than default to single and assert an
+-- opinion nobody chose.
 evaluators.mode = function(term, e, w)
   if w.mode == nil or w.mode == UNKNOWN then return UNKNOWN end
   return w.mode == term[2]
@@ -93,7 +96,10 @@ evaluators.resource = function(term, e, w)
   return cmp(have, term[3])
 end
 
+-- Restricted to `this` here as well as at check time, so a table reaching Tier some
+-- other way cannot get an estimate about an ability it may not estimate about.
 evaluators.elapsed = function(term, e, w)
+  if term[2] ~= "this" then return UNKNOWN end
   local t = w.elapsed and w.elapsed[subject(term, e)]
   if type(t) ~= "number" then return UNKNOWN end
   local cmp = comparators[term[3]]
@@ -101,15 +107,11 @@ evaluators.elapsed = function(term, e, w)
   return cmp(t, term[4])
 end
 
-Tier.Comparators = comparators
-
---- One term, three-valued, honouring `negate`. Bands may not negate (Catalog.Check
---- refuses it); windows are the one place that flag is legal, and Track evaluates them
---- through here so the two surfaces cannot drift apart on what a term means.
+--- One term, three-valued, honouring `negate`. Negation never rescues an unknown — a
+--- refused read is not evidence the situation is absent (spec.md §3.5).
 ---
 --- Assigned in a statement, never `fn and fn(...) or UNKNOWN`: a term that correctly
---- evaluates to `false` comes back UNKNOWN through that idiom, which is exactly the
---- distinction this file exists to keep.
+--- evaluates to `false` comes back UNKNOWN through that idiom.
 function Tier.Term(term, e, w)
   local fn = evaluators[term[1]]
   local v = UNKNOWN
@@ -119,7 +121,8 @@ function Tier.Term(term, e, w)
 end
 
 --- A band holds when EVERY term is true. An empty condition list is unconditional,
---- which is how a floor declares "always, at this tier".
+--- which is how a floor declares "always, at this tier". A term known false settles the
+--- band whatever else refused; an unknown with nothing false fails it and reports blind.
 local function bandHolds(band, e, w)
   local sawUnknown = false
   for _, term in ipairs(band.when or {}) do
@@ -157,15 +160,16 @@ local function gradeOf(e, w)
   return { channel = g.channel, direction = g.direction, of = g.of }
 end
 
---- A cue is offered only when its gate holds. The threshold is the client's to test,
---- so what leaves here is an offer, never a decision about the count.
-local function cueOf(e, w)
-  local cue = e.cue
-  if not cue then return nil end
-  local gate = { when = cue.gate }
-  local holds = bandHolds(gate, e, w)
-  if not holds then return nil end
-  return { tier = cue.tier, threshold = cue.threshold }
+--- A cue is offered only when its gate precondition holds — a band, so an unknown
+--- withholds it. The channel is the client's, so what leaves here is an offer.
+local function cuesOf(e, w)
+  local out = {}
+  for _, cue in ipairs(e.cues or {}) do
+    if bandHolds({ when = cue.gate }, e, w) then
+      out[#out + 1] = { polarity = cue.polarity, tier = cue.tier, channel = cue.channel }
+    end
+  end
+  return out
 end
 
 --------------------------------------------------------------------------------
@@ -174,17 +178,17 @@ end
 
 --- `bound` is Catalog.Resolve's output; `world` is Sense's plain snapshot.
 ---
---- `highs` counts HIGH BANDS only, and `cuesOffered` counts HIGH cues handed to the
---- client, separately and on purpose: whether a cue is actually on screen depends on a
---- count cap never learns, so folding the two would report a number nothing observed.
---- The honest reading of §3.5's HIGH-at-once distribution is the interval between them.
+--- Three counts, kept apart on purpose. `highs` is HIGH BANDS; `cuesOffered` is POSITIVE
+--- HIGH cues handed to the client, which may or may not have drawn them; `holdsOffered`
+--- is negative cues, and folding those in would report a press count that includes holds.
+--- The honest reading of §3.5's HIGH-at-once distribution is highs plus the cue interval.
 function Tier.Evaluate(bound, world)
-  local out = { byEntry = {}, highs = 0, cuesOffered = 0, unknowns = 0 }
+  local out = { byEntry = {}, highs = 0, cuesOffered = 0, holdsOffered = 0, unknowns = 0 }
   local w = world or {}
 
   for _, item in ipairs(bound.entries or {}) do
     local e, row = item.entry, item.row
-    local verdict = { entry = e.id, row = row, tier = nil, band = nil }
+    local verdict = { entry = e.id, row = row, tier = nil, band = nil, cues = nil }
 
     for bi, band in ipairs(e.bands or {}) do
       local holds, blind = bandHolds(band, e, w)
@@ -200,8 +204,14 @@ function Tier.Evaluate(bound, world)
       verdict.grade = gradeOf(e, w)
       if verdict.tier == "HIGH" then out.highs = out.highs + 1 end
     end
-    verdict.cue = cueOf(e, w)
-    if verdict.cue and verdict.cue.tier == "HIGH" then out.cuesOffered = out.cuesOffered + 1 end
+    verdict.cues = cuesOf(e, w)
+    for _, cue in ipairs(verdict.cues) do
+      if cue.polarity == "negative" then
+        out.holdsOffered = out.holdsOffered + 1
+      elseif cue.tier == "HIGH" then
+        out.cuesOffered = out.cuesOffered + 1
+      end
+    end
 
     out.byEntry[e.id] = verdict
   end

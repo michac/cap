@@ -109,17 +109,16 @@ local function readResource()
   return have, max
 end
 
---- Readiness and the client's own base cooldown, out of combat only —
---- `C_Spell.GetSpellCooldown` is secret in combat.
+--- Readiness out of combat only — `C_Spell.GetSpellCooldown` is secret in combat.
 local function readCooldown(spellID)
-  if not (C_Spell and C_Spell.GetSpellCooldown) then return nil, nil end
+  if not (C_Spell and C_Spell.GetSpellCooldown) then return nil end
   local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
-  if not ok then return nil, nil end
+  if not ok then return nil end
   local start = field(info, "startTime")
   local duration = field(info, "duration")
-  if type(start) ~= "number" or type(duration) ~= "number" then return nil, nil end
-  if duration <= GCD_FLOOR then return true, nil end
-  return (start + duration - GetTime()) <= 0, duration
+  if type(start) ~= "number" or type(duration) ~= "number" then return nil end
+  if duration <= GCD_FLOOR then return true end
+  return (start + duration - GetTime()) <= 0
 end
 
 local function readMaxCharges(spellID)
@@ -234,6 +233,7 @@ function Sense.Render(snap)
     "n:" .. num(snap.entries),
     "h:" .. num(out.highs),
     "cue:" .. num(out.cuesOffered),
+    "hold:" .. num(out.holdsOffered),
     "blind:" .. num(out.unknowns),
   }
 
@@ -242,7 +242,7 @@ function Sense.Render(snap)
     local v = (out.byEntry or {})[id]
     if v and v.tier then
       tiers[#tiers + 1] = id .. ":" .. v.tier .. "/" .. num(v.band)
-    elseif v and v.cue then
+    elseif v and v.cues and #v.cues > 0 then
       tiers[#tiers + 1] = id .. ":cue"
     end
   end
@@ -251,7 +251,6 @@ function Sense.Render(snap)
   for _, name in ipairs(GATE_ORDER) do
     g[#g + 1] = name .. ":" .. pair((health.gates or {})[name])
   end
-  g[#g + 1] = "win:" .. pair(health.windows)
 
   local s = { snap.settled and ("settled/" .. token(snap.settledBy)) or "unsettled" }
   if snap.dark then s[#s + 1] = "DARK" end
@@ -294,17 +293,19 @@ local function write(snap, body, why, edge)
   local text = ("t%.1f "):format(GetTime())
     .. (edge and ("# " .. edge .. " ") or "") .. body .. " why:" .. token(why)
   if edge then tierStream:Mark(text) else tierStream:Line(text) end
-  lastBody = body
+  -- Spent only once the line can have landed: the stream DROPS every write while `ns.db`
+  -- is unset, and burning the dedup key on a dropped line suppresses the first real one.
+  if ns.db then lastBody = body end
 
   rowSeq = rowSeq + 1
   local health = snap.health or {}
   local row = {
     rec = "tier", t = GetTime(), seq = rowSeq, why = why,
     entries = snap.entries, highs = (snap.out or {}).highs,
-    cues = (snap.out or {}).cuesOffered, blind = (snap.out or {}).unknowns,
+    cues = (snap.out or {}).cuesOffered, holds = (snap.out or {}).holdsOffered,
+    blind = (snap.out or {}).unknowns,
     settled = snap.settled, settledBy = snap.settledBy, dark = snap.dark,
     combat = state.combat, mode = snap.mode,
-    winKnown = (health.windows or {}).known, winUnknown = (health.windows or {}).unknown,
   }
   for _, name in ipairs(GATE_ORDER) do
     local slot = (health.gates or {})[name]
@@ -323,11 +324,46 @@ local function write(snap, body, why, edge)
   tierStream:Meta("samples", rowSeq)
 end
 
+local verdictListeners = {}
+local listenerFailed = {}
+local listenerErrors = 0
+
+--- Subscribe a surface to the verdicts. Fired at the end of every recompute with
+--- `Sense.Verdicts()`'s answer plus the edge that caused it, so cap has ONE clock and a
+--- surface never opens a second — nor a second set of combat events to learn the edge.
+function Sense.OnVerdicts(fn)
+  verdictListeners[#verdictListeners + 1] = fn
+  return fn
+end
+
+--- Fired on the early return too: a spec swap into a catalog-less build drops `bound`, and
+--- a surface that never hears about it keeps the last roster lit forever. Each listener is
+--- PROTECTED — this runs inside the 10 Hz tick and inside a posthook on Blizzard's alert
+--- path, where a bare error re-throws forever. Reported once per listener, counted after.
+local function fireVerdicts(edge)
+  local out, bound = Sense.Verdicts()
+  for i = 1, #verdictListeners do
+    local ok, err = pcall(verdictListeners[i], out, bound, edge)
+    if not ok then
+      listenerErrors = listenerErrors + 1
+      tierStream:Meta("listenerErrors", listenerErrors)
+      if not listenerFailed[i] then
+        listenerFailed[i] = true
+        ns.Emit("verdict listener " .. i .. " errored: " .. tostring(err))
+        tierStream:Mark(("t%.1f # listener-error i:%d %s"):format(GetTime(), i, token(err)))
+      end
+    end
+  end
+end
+
 --- One recompute. `edge` marks a transition the log exists to record, so it is written
 --- whether or not the body moved — a bare marker against an unchanged state emits no
 --- numbers, and unchanged is often the case a flight confirms.
 function evaluate(now, why, edge)
-  if not (state.bound and state.track and ns.db) then return end
+  if not (state.bound and state.track and ns.db) then
+    fireVerdicts(edge)
+    return
+  end
 
   local world, health = state.track:World(now, buildReads())
   local out = ns.Tier.Evaluate(state.bound, world)
@@ -342,12 +378,18 @@ function evaluate(now, why, edge)
   local body = Sense.Render(snap)
   if edge or body ~= lastBody then write(snap, body, why, edge) end
   state.lastOut = out
+  fireVerdicts(edge)
   return out
 end
 
---- The tier verdicts a surface should draw, or nil when cap must draw nothing. M3b has
---- no surface; this is the seam M3c paints through, and the one place the settle and the
---- dark-for-the-fight rule are enforced rather than re-derived per surface.
+--- The catalog in force, for a surface stamping its own capture stream.
+function Sense.CatalogName()
+  return state.catalog and state.catalog.name or nil
+end
+
+--- The tier verdicts a surface should draw, or nil when cap must draw nothing. The one
+--- place the settle and the dark-for-the-fight rule are enforced, rather than re-derived
+--- once per surface.
 function Sense.Verdicts()
   if not (state.bound and state.settled and not state.dark) then return nil end
   return state.lastOut, state.bound
@@ -395,9 +437,7 @@ local function seedBaseline()
     local id, spellID = item.entry.id, item.row.primary
     local maxCharges = readMaxCharges(spellID)
     if maxCharges then state.track:SeedCharges(id, maxCharges) end
-    local ready, duration = readCooldown(spellID)
-    state.track:SeedReady(item.row.cooldownID, ready)
-    if duration then state.track:SeedCooldown(id, duration) end
+    state.track:SeedReady(item.row.cooldownID, readCooldown(spellID))
   end
 end
 
@@ -425,7 +465,10 @@ local function rebind(generation)
   end
 
   if cat ~= state.catalog then
-    report("check", ns.Catalog.Check(cat))
+    -- Check 5 disclosures ride the same reporter and cannot fail.
+    local findings, estimates = ns.Catalog.Check(cat)
+    report("check", findings)
+    report("check", estimates)
     state.reads = ns.Catalog.Reads(cat)
     state.power = Enum and Enum.PowerType and cat.power and Enum.PowerType[cat.power] or nil
   end
@@ -444,7 +487,7 @@ local function rebind(generation)
   for _, item in ipairs(resolved.entries) do state.order[#state.order + 1] = item.entry.id end
   table.sort(state.order)
 
-  state.track = ns.Track.New(cat)
+  state.track = ns.Track.New()
   state.track:Bind(ns.Track.Binding(resolved, rows, state.reads))
   refusedSeen = {}
   if state.combat then state.track:Combat(GetTime(), true) end
@@ -527,8 +570,8 @@ events:SetScript("OnEvent", function(_, event, _, _, spellID)
     return
   end
 
-  -- UNIT_SPELLCAST_SUCCEEDED: the only counter behind `opener`. The alert channel is
-  -- silent for an ability with no cooldown, so the floor would never close the window.
+  -- UNIT_SPELLCAST_SUCCEEDED: the only source Track's `casts` counter has. The alert
+  -- channel is silent for an ability with no cooldown, so the floor raises nothing here.
   if state.track and plain(spellID) and ns.Bind then
     for _, row in ipairs(ns.Bind.RowsForSpell(spellID)) do
       if state.track:Cast(now, row.cooldownID) then
@@ -538,8 +581,8 @@ events:SetScript("OnEvent", function(_, event, _, _, spellID)
   end
 end)
 
--- Windows expire on the clock — `dogs_out` closes 12 s after an edge that already fired —
--- so an event-only cadence would hold a window open until something else happened.
+-- The four client reads raise no event of their own, so an event-only cadence would
+-- hold the last verdict until something unrelated happened.
 local elapsed = 0
 events:SetScript("OnUpdate", function(_, delta)
   elapsed = elapsed + delta
