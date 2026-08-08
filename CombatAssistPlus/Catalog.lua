@@ -2,8 +2,9 @@
 --
 -- Pure: nothing here reads the game. `Check` runs over the authored table at load;
 -- `CheckBound` needs the live rows and runs from a bind. They are separate because
--- entries DROP at bind, so breadth over the authored table measures a catalog the
--- player is not running.
+-- coverage is a question about the rows the player is actually running — which entries
+-- survived the bind, and which live rows nothing accounts for — and the authored table
+-- cannot answer it.
 --
 -- Format and rationale: ../../specs/spec.md §3.5 and ../../specs/demonology/catalog.md,
 -- which is normative — if this disagrees with the document, this is wrong.
@@ -48,7 +49,6 @@ Catalog.CHANNELS = {
   stacks = { register = "threshold" },
 }
 
-Catalog.MIN_HIGH_CAPABLE = 3
 Catalog.MAX_WINDOWS = 6
 
 local registry = {}
@@ -105,13 +105,6 @@ local function eachBandTerm(cat, fn)
   end
 end
 
-local function highCapable(e)
-  for _, band in ipairs(e.bands or {}) do
-    if band.tier == "HIGH" then return true end
-  end
-  return e.cue ~= nil and e.cue.tier == "HIGH"
-end
-
 --------------------------------------------------------------------------------
 -- Reads — which gate does this catalog actually ask for, and of which entry
 --------------------------------------------------------------------------------
@@ -162,7 +155,9 @@ function Catalog.Reads(cat)
 end
 
 --------------------------------------------------------------------------------
--- Check — pure, over the AUTHORED table. spec.md §3.5 checks 2-6.
+-- Check — pure, over the AUTHORED table. spec.md §3.5 checks 2-4, plus the shape and
+-- vocabulary failures a closed vocabulary implies. Check 1 (coverage) needs the live
+-- rows and lives in CheckBound; check 5 (estimate disclosure) cannot fail.
 --------------------------------------------------------------------------------
 
 --- Returns a list of findings; empty means the catalog loads. A finding is
@@ -237,21 +232,10 @@ function Catalog.Check(cat)
     end
   end
 
-  -- Check 2: breadth.
-  local nHigh = 0
-  for _, e in ipairs(cat.entries) do
-    if highCapable(e) then nHigh = nHigh + 1 end
-  end
-  if nHigh < Catalog.MIN_HIGH_CAPABLE then
-    fail("breadth", nil,
-      ("%d HIGH-capable entries, the floor is %d — one ability owning HIGH is a ranked list")
-        :format(nHigh, Catalog.MIN_HIGH_CAPABLE))
-  end
-
-  -- Checks 3 and 4: every band term is a GATE, named, of the right arity, and
-  -- positive. A channel term reaching a band is the register-legality failure; an
-  -- unknown name is check 3, since the vocabulary is what makes "another entry's
-  -- tier" inexpressible.
+  -- Check 2, register legality: every band term is a GATE, named, of the right arity,
+  -- and positive. A channel term reaching a band is the register-legality failure; an
+  -- unknown name is a vocabulary failure, and the closed vocabulary is what makes
+  -- "another entry's tier" inexpressible in the first place.
   eachBandTerm(cat, function(e, term, where)
     local name = termName(term)
     if name == nil then
@@ -278,7 +262,7 @@ function Catalog.Check(cat)
     end
   end)
 
-  -- Check 4 again, on the other side: a grade or a threshold must name a real channel.
+  -- Check 2 again, on the other side: a grade or a threshold must name a real channel.
   for _, e in ipairs(cat.entries) do
     local g = e.grade
     if g then
@@ -288,13 +272,13 @@ function Catalog.Check(cat)
     end
     local cue = e.cue
     if cue then
-      -- Check 5: cue honesty.
+      -- Check 4: cue schema.
       if Catalog.TIERS[cue.tier] == nil then
         fail("cue-honesty", e.id, "cue declares no tier — a cue is drawn in the tier it stands for")
       end
       if cue.tier == "HIGH" and (type(cue.gate) ~= "table" or #cue.gate == 0) then
         fail("cue-honesty", e.id,
-          "a HIGH cue with no gate precondition is permanently lit, which fails §3.1 like a bare HIGH band")
+          "a HIGH cue with no gate precondition is permanently lit — check 4 requires every cue to carry one")
       end
       local th = cue.threshold
       if type(th) ~= "table" or th.channel ~= "stacks" then
@@ -303,11 +287,6 @@ function Catalog.Check(cat)
         fail("register", e.id, "a stacks threshold needs a numeric aura id and a numeric minimum")
       end
     end
-  end
-
-  -- Check 6: a named floor.
-  if type(cat.floor) ~= "number" then
-    fail("floor", nil, "catalog names no floor — the ability to press when nothing is lit")
   end
 
   -- A `resource` term with no declared power type can never be answered, so every band
@@ -325,7 +304,7 @@ function Catalog.Check(cat)
 end
 
 --------------------------------------------------------------------------------
--- CheckBound — needs the live rows. Coverage, and breadth RE-RUN after drops.
+-- CheckBound — needs the live rows. Coverage (spec.md §3.5 check 1) and nothing else.
 --------------------------------------------------------------------------------
 
 --- Which entries survive this build, and which rows nothing accounts for.
@@ -371,8 +350,8 @@ function Catalog.Resolve(cat, rows)
   return out
 end
 
---- Findings a bind can produce that a load cannot: coverage, and breadth measured on
---- the entries that actually survived.
+--- The one finding a bind can produce that a load cannot: coverage, measured against the
+--- rows the player is actually running.
 function Catalog.CheckBound(cat, rows)
   local resolved = Catalog.Resolve(cat, rows)
   local found = {}
@@ -390,18 +369,5 @@ function Catalog.CheckBound(cat, rows)
     end
   end
 
-  -- Check 2, re-run: breadth over what survived.
-  local nHigh = 0
-  for _, bound in ipairs(resolved.entries) do
-    if highCapable(bound.entry) then nHigh = nHigh + 1 end
-  end
-  if nHigh < Catalog.MIN_HIGH_CAPABLE then
-    fail("breadth", nil,
-      ("%d HIGH-capable entries survived the bind (of %d authored), the floor is %d")
-        :format(nHigh, #(cat.entries or {}), Catalog.MIN_HIGH_CAPABLE))
-  end
-
   return found, resolved
 end
-
-Catalog.HighCapable = highCapable

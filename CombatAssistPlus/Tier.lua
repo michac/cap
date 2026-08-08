@@ -177,7 +177,7 @@ end
 --- `highs` counts HIGH BANDS only, and `cuesOffered` counts HIGH cues handed to the
 --- client, separately and on purpose: whether a cue is actually on screen depends on a
 --- count cap never learns, so folding the two would report a number nothing observed.
---- The honest reading of §3.1's breadth measurement is the interval between them.
+--- The honest reading of §3.5's HIGH-at-once distribution is the interval between them.
 function Tier.Evaluate(bound, world)
   local out = { byEntry = {}, highs = 0, cuesOffered = 0, unknowns = 0 }
   local w = world or {}

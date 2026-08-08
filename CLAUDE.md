@@ -32,8 +32,8 @@ otherwise.
 `projects/combat-assist/specs/` — `spec.md` (the product definition),
 `backlog.md` (work items), `notes.md` (session log + decisions). That project
 root's `CLAUDE.md` describes how the three fit together. Read `spec.md` before
-building anything here — especially §3.1's three rules, which are what keep this
-from becoming a rotation engine.
+building anything here — especially §1's three principles, which everything else in
+the spec is downstream of.
 
 ## House rules
 

@@ -1,4 +1,4 @@
--- catalog_spec.lua — the vocabulary and the six checks.
+-- catalog_spec.lua — the vocabulary and the five checks.
 --
 -- Authored from ../../../../specs/spec.md §3.5 and the Demonology catalog document,
 -- never from Catalog.lua. Every "this check fires" case breaks the catalog in the one
@@ -32,17 +32,6 @@ describe("Catalog", function()
   end)
 
   describe("each check can fail", function()
-    it("breadth — when no entry is HIGH-capable", function()
-      local broken = H.copy(cat)
-      for _, e in ipairs(broken.entries) do
-        for _, band in ipairs(e.bands or {}) do
-          if band.tier == "HIGH" then band.tier = "MEDIUM" end
-        end
-        if e.cue then e.cue.tier = "MEDIUM" end
-      end
-      assert.equal(1, H.checks(ns.Catalog.Check(broken)).breadth)
-    end)
-
     it("vocabulary — when a band names a term that is not a gate", function()
       local broken = H.copy(cat)
       broken.entries[1].bands[1].when = { { "tierOf", "E2" } }
@@ -82,12 +71,6 @@ describe("Catalog", function()
       end
       assert.is_truthy(H.checks(ns.Catalog.Check(broken))["cue-honesty"])
     end)
-
-    it("floor — when the catalog names none", function()
-      local broken = H.copy(cat)
-      broken.floor = nil
-      assert.equal(1, H.checks(ns.Catalog.Check(broken)).floor)
-    end)
   end)
 
   describe("bound against the 21 rows the client actually recorded", function()
@@ -108,11 +91,6 @@ describe("Catalog", function()
       assert.is_true(dropped.E4)
       assert.is_true(dropped.E9)
       assert.equal(2, #resolved.dropped)
-    end)
-
-    it("still passes breadth after the drops", function()
-      local found = ns.Catalog.CheckBound(cat, rows)
-      assert.is_nil(H.checks(found).breadth)
     end)
 
     it("binds Call Dreadstalkers' two rows to different things", function()
