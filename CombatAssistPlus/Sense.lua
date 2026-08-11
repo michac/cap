@@ -1,6 +1,6 @@
--- Sense.lua — the impure half of the tier signal: hooks, clock and client reads.
+-- Sense.lua — the impure half of the readable signal: hooks, clock and client reads.
 --
--- Everything that decides anything lives in Track and Tier, which are pure and tested at
+-- Everything that decides anything lives in Track and Signal, which are pure and tested at
 -- a desk. This file installs one alert hook per item frame, seeds the out-of-combat
 -- baseline, asks the client for the gates Track cannot observe, and writes what came back
 -- to the capture log. It draws nothing.
@@ -63,16 +63,6 @@ local function field(t, key)
   local ok, v = pcall(function() return t[key] end)
   if not ok or not plain(v) then return nil end
   return v
-end
-
--- `insufficientPower`, NOT `isUsable`: `isUsable` was measured true for a spell visibly
--- on cooldown, so it answers "can I afford it" and nothing else — which is exactly the
--- question `affordable` asks, through the other return.
-local function readAffordable(spellID)
-  if not (C_Spell and C_Spell.IsSpellUsable) then return nil end
-  local ok, _, insufficient = pcall(C_Spell.IsSpellUsable, spellID)
-  if not ok or not plain(insufficient) then return nil end
-  return not insufficient
 end
 
 local function readProc(spellID)
@@ -187,8 +177,6 @@ local function installHooks()
   local added = 0
   for _, row in ipairs(ns.Bind.Rows()) do
     local frame = row.frame
-    -- Glow rides this walk rather than opening a second one over the same rows.
-    if ns.Glow then ns.Glow.Arm(frame) end
     if frame and not hooked[frame] and type(frame.TriggerAlertEvent) == "function" then
       hooked[frame] = true
       hooksecurefunc(frame, "TriggerAlertEvent", onAlert)
@@ -222,7 +210,7 @@ local function pair(t)
   return num(t.known) .. "/" .. num(t.known + t.unknown)
 end
 
-local GATE_ORDER = { "ready", "elapsed", "affordable", "proc", "identity", "auraUp", "resource", "mode" }
+local PREDICATE_ORDER = { "ready", "proc", "identity", "resource" }
 
 --- The body a line carries. No clock, no game reads, no `pairs()` over anything whose
 --- order would move — a key that reorders breaks dedup nondeterministically.
@@ -233,34 +221,31 @@ function Sense.Render(snap)
 
   local t = {
     "n:" .. num(snap.entries),
-    "h:" .. num(out.highs),
-    "cue:" .. num(out.cuesOffered),
-    "hold:" .. num(out.holdsOffered),
+    "on:" .. num(out.emphasized),
+    "mark:" .. num(out.markers),
     "blind:" .. num(out.unknowns),
   }
 
-  local tiers = {}
+  local entries = {}
   for _, id in ipairs(snap.order or {}) do
     local v = (out.byEntry or {})[id]
-    if v and v.tier then
-      tiers[#tiers + 1] = id .. ":" .. v.tier .. "/" .. num(v.band)
-    elseif v and v.cues and #v.cues > 0 then
-      tiers[#tiers + 1] = id .. ":cue"
+    if v then
+      local marks = (#(v.markers or {}) > 0) and ("+" .. table.concat(v.markers, ",")) or ""
+      entries[#entries + 1] = id .. ":" .. (v.emphasized and "on" or "off") .. marks
     end
   end
 
   local g = {}
-  for _, name in ipairs(GATE_ORDER) do
-    g[#g + 1] = name .. ":" .. pair((health.gates or {})[name])
+  for _, name in ipairs(PREDICATE_ORDER) do
+    g[#g + 1] = name .. ":" .. pair((health.predicates or {})[name])
   end
 
   local s = { snap.settled and ("settled/" .. token(snap.settledBy)) or "unsettled" }
   if snap.dark then s[#s + 1] = "DARK" end
-  s[#s + 1] = "mode:" .. token(snap.mode)
 
-  return "T{" .. table.concat(t, " ") .. "}"
-    .. " E{" .. (#tiers > 0 and table.concat(tiers, " ") or "-") .. "}"
-    .. " G{" .. table.concat(g, " ") .. "}"
+  return "S{" .. table.concat(t, " ") .. "}"
+    .. " E{" .. (#entries > 0 and table.concat(entries, " ") or "-") .. "}"
+    .. " R{" .. table.concat(g, " ") .. "}"
     .. " S{" .. table.concat(s, " ") .. "}"
 end
 
@@ -271,21 +256,20 @@ end
 local lastBody
 
 local function buildReads()
-  local affordable, proc, identity = {}, {}, {}
-  local byEntry = (state.reads or {}).byEntry or {}
+  local proc, identity = {}, {}
+  local byAbility = (state.reads or {}).byAbility or {}
 
-  for _, item in ipairs(state.bound.entries) do
-    local id, needs = item.entry.id, byEntry[item.entry.id] or {}
-    if needs.affordable then affordable[id] = readAffordable(item.row.primary) end
+  for _, item in ipairs(state.bound.abilities) do
+    local id, needs = item.ability.id, byAbility[item.ability.id] or {}
     if needs.proc then proc[id] = readProc(item.row.primary) end
     if needs.identity then identity[id] = readIdentity(item.row.cooldownID) end
   end
 
   local have, max = readResource()
   return {
-    affordable = affordable, proc = proc, identity = identity,
+    proc = proc, identity = identity,
     resource = have, resourceMax = max,
-    mode = ns.Mode and ns.Mode.Get() or nil,
+    needsResource = state.reads and state.reads.resource,
   }
 end
 
@@ -302,15 +286,15 @@ local function write(snap, body, why, edge)
   rowSeq = rowSeq + 1
   local health = snap.health or {}
   local row = {
-    rec = "tier", t = GetTime(), seq = rowSeq, why = why,
-    entries = snap.entries, highs = (snap.out or {}).highs,
-    cues = (snap.out or {}).cuesOffered, holds = (snap.out or {}).holdsOffered,
+    rec = "signal", t = GetTime(), seq = rowSeq, why = why,
+    entries = snap.entries, emphasized = (snap.out or {}).emphasized,
+    markers = (snap.out or {}).markers,
     blind = (snap.out or {}).unknowns,
     settled = snap.settled, settledBy = snap.settledBy, dark = snap.dark,
-    combat = state.combat, mode = snap.mode,
+    combat = state.combat,
   }
-  for _, name in ipairs(GATE_ORDER) do
-    local slot = (health.gates or {})[name]
+  for _, name in ipairs(PREDICATE_ORDER) do
+    local slot = (health.predicates or {})[name]
     if slot then
       row["g_" .. name] = slot.known
       row["u_" .. name] = slot.unknown
@@ -368,14 +352,14 @@ function evaluate(now, why, edge)
   end
 
   local world, health = state.track:World(now, buildReads())
-  local out = ns.Tier.Evaluate(state.bound, world)
+  local out = ns.Signal.Evaluate(state.bound, world)
 
   local snap = {
     entries = #state.bound.entries,
     order = state.order,
     out = out, health = health,
     settled = state.settled, settledBy = state.settledBy,
-    dark = state.dark, mode = world.mode,
+    dark = state.dark,
   }
   local body = Sense.Render(snap)
   if edge or body ~= lastBody then write(snap, body, why, edge) end
@@ -384,18 +368,16 @@ function evaluate(now, why, edge)
   return out
 end
 
---- The catalog's cooldown roster (spec.md §3.4): the ordered entry ids that earn a bar, or
---- nil where no catalog is in force. Deliberately the list and not the catalog — a surface
---- that draws bars has no business reaching bands or cues through the live table.
+--- The one independent bar entry, or nil where no catalog is in force.
 function Sense.Roster()
-  return state.catalog and state.catalog.bars or nil
+  return state.catalog and state.catalog.bar or nil
 end
 
 function Sense.CatalogName()
   return state.catalog and state.catalog.name or nil
 end
 
---- The tier verdicts a surface should draw, or nil when cap must draw nothing. The one
+--- The signal verdicts a surface should draw, or nil when cap must draw nothing. The one
 --- place the settle and the dark-for-the-fight rule are enforced, rather than re-derived
 --- once per surface.
 function Sense.Verdicts()
@@ -441,8 +423,8 @@ end
 --- has no baseline at all, and both defaults are wrong. A row the client will not answer
 --- for is left unknown rather than assumed.
 local function seedBaseline()
-  for _, item in ipairs(state.bound.entries) do
-    local id, spellID = item.entry.id, item.row.primary
+  for _, item in ipairs(state.bound.abilities) do
+    local id, spellID = item.ability.id, item.row.primary
     local maxCharges = readMaxCharges(spellID)
     if maxCharges then state.track:SeedCharges(id, maxCharges) end
     state.track:SeedReady(item.row.cooldownID, readCooldown(spellID))
@@ -474,9 +456,8 @@ local function rebind(generation)
 
   if cat ~= state.catalog then
     -- Check 5 disclosures ride the same reporter and cannot fail.
-    local findings, estimates = ns.Catalog.Check(cat)
+    local findings = ns.Catalog.Check(cat)
     report("check", findings)
-    report("check", estimates)
     state.reads = ns.Catalog.Reads(cat)
     state.power = Enum and Enum.PowerType and cat.power and Enum.PowerType[cat.power] or nil
   end
@@ -496,10 +477,8 @@ local function rebind(generation)
   table.sort(state.order)
 
   state.track = ns.Track.New()
-  state.track:Bind(ns.Track.Binding(resolved, rows, state.reads))
+  state.track:Bind(ns.Track.Binding(resolved, state.reads))
   refusedSeen = {}
-  if state.combat then state.track:Combat(GetTime(), true) end
-
   installHooks()
   if not InCombatLockdown() then seedBaseline() end
 end
@@ -554,8 +533,7 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
-events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-events:SetScript("OnEvent", function(_, event, _, _, spellID)
+events:SetScript("OnEvent", function(_, event)
   local now = GetTime()
 
   if event == "PLAYER_REGEN_DISABLED" then
@@ -564,7 +542,6 @@ events:SetScript("OnEvent", function(_, event, _, _, spellID)
     -- Unsettled at combat entry means dark for the whole fight: committing to a roster
     -- mid-pull would change what is emphasised while the player is reading it.
     state.dark = not state.settled
-    if state.track then state.track:Combat(now, true) end
     evaluate(now, event, "combat start")
     return
   end
@@ -573,20 +550,10 @@ events:SetScript("OnEvent", function(_, event, _, _, spellID)
     state.combat = false
     markEdgeCombat("end")
     state.dark = false
-    if state.track then state.track:Combat(now, false) end
     evaluate(now, event, "combat end")
     return
   end
 
-  -- UNIT_SPELLCAST_SUCCEEDED: the only source Track's `casts` counter has. The alert
-  -- channel is silent for an ability with no cooldown, so the floor raises nothing here.
-  if state.track and plain(spellID) and ns.Bind then
-    for _, row in ipairs(ns.Bind.RowsForSpell(spellID)) do
-      if state.track:Cast(now, row.cooldownID) then
-        edgeStream:Line(("t%.1f Cast cid:%d spell:%d"):format(now, row.cooldownID, spellID))
-      end
-    end
-  end
 end)
 
 -- The four client reads raise no event of their own, so an event-only cadence would

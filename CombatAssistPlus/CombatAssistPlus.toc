@@ -12,12 +12,10 @@ Bind.lua
 Catalog.lua
 Catalogs\Demonology.lua
 Log.lua
-Tier.lua
+Signal.lua
 Track.lua
 Treatment.lua
 Sense.lua
-Channel.lua
-Glow.lua
 Bars.lua
 Overlay.lua
 Frame.lua

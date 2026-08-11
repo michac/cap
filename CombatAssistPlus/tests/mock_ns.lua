@@ -18,7 +18,7 @@ end
 function H.fresh()
   local ns = {}
   H.load(ns, "Catalog.lua")
-  H.load(ns, "Tier.lua")
+  H.load(ns, "Signal.lua")
   H.load(ns, "Track.lua")
   H.load(ns, "Treatment.lua")
   H.load(ns, "Catalogs/Demonology.lua")
@@ -48,13 +48,13 @@ function H.track(ns)
   local rows = H.rows()
   local _, resolved = ns.Catalog.CheckBound(cat, rows)
   local t = ns.Track.New()
-  t:Bind(ns.Track.Binding(resolved, rows))
+  t:Bind(ns.Track.Binding(resolved, ns.Catalog.Reads(cat)))
   return t, cat, resolved
 end
 
 --- The cooldownID an entry bound to, so a test can raise the edge the client would.
-function H.cid(resolved, entryID)
-  return assert(resolved.byEntry[entryID], entryID .. " did not bind").cooldownID
+function H.cid(resolved, abilityID)
+  return assert(resolved.byAbility[abilityID], abilityID .. " did not bind").cooldownID
 end
 
 --- A deep-ish copy, so a test that breaks a catalog to prove a check fires cannot
@@ -81,10 +81,8 @@ function H.blindWorld()
   local U = "unknown"
   local blind = setmetatable({}, { __index = function() return U end })
   return {
-    ready = blind, affordable = blind, proc = blind,
-    auraUp = blind, talent = blind, identity = blind,
-    elapsed = blind,
-    resource = U, resourceMax = U, combat = U,
+    ready = blind, proc = blind, identity = blind,
+    resource = U, resourceMax = U,
   }
 end
 
@@ -93,11 +91,9 @@ function H.world(over)
   local yes = setmetatable({}, { __index = function() return true end })
   local no = setmetatable({}, { __index = function() return false end })
   local w = {
-    ready = yes, affordable = yes, proc = no,
-    auraUp = no, talent = yes,
+    ready = yes, proc = no,
     identity = setmetatable({}, { __index = function() return "base" end }),
-    elapsed = setmetatable({}, { __index = function() return 0 end }),
-    resource = 0, resourceMax = 5, combat = true,
+    resource = 0, resourceMax = 5,
   }
   for k, v in pairs(over or {}) do w[k] = v end
   return w

@@ -1,6 +1,4 @@
--- Bars.lua — spec.md §3.4's cooldown bars: one per catalog roster entry, stacked in the
--- movable panel Frame.lua owns, carrying §3.1's tier signal on the fill. Impure. `Bars.Plan`
--- is the pure seam: which entries get a bar, in what order, and what each is drawn in.
+-- Bars.lua — the independent Tyrant countdown experiment. `Bars.Plan` is the pure seam.
 --
 -- The remaining time never enters Lua — the client is handed a duration object and draws
 -- from it (security-taint-and-restricted-data.md §4.8.1 findings 2, 3, 5). Those sinks are
@@ -42,14 +40,13 @@ local probe
 function Bars.Plan(roster, out)
   local plan = {}
   local byEntry = (out or {}).byEntry or {}
-  for _, id in ipairs(roster or {}) do
+  local ids = type(roster) == "string" and { roster } or (roster or {})
+  for _, id in ipairs(ids) do
     local v = byEntry[id]
     local row = v and v.row
     plan[#plan + 1] = {
       id = id,
       spellID = row and row.primary or nil,
-      tier = v and v.tier or nil,
-      treatment = ns.Treatment.For(v),
     }
   end
   return plan
@@ -211,10 +208,11 @@ end
 --- Four states, three sets of pixels: ready is full and unnumbered, armed is the client's
 --- fill and the client's number, and both empty states carry cap's own `--`.
 local function paint(r, desc, state)
-  local rr, gg, bb, aa = ns.Treatment.Fill(desc.treatment)
+  local F = ns.Treatment.BAR.fill
+  local rr, gg, bb, aa = F.r, F.g, F.b, F.a
   -- The spell is in the key because the label is: one entry covering both halves of a choice
   -- node rebinds to the other half without the roster changing.
-  local k = (desc.tier or "-") .. ("/%0.2f/"):format(aa) .. state .. "/" .. tostring(desc.spellID)
+  local k = ("%0.2f/"):format(aa) .. state .. "/" .. tostring(desc.spellID)
   if r.painted == k then return end
   r.painted = k
   r.sb:SetStatusBarColor(rr, gg, bb, aa)
