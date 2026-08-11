@@ -28,7 +28,7 @@ C.Register{
 
   entries = {
     {
-      id = "E1", spell = 265187, family = "spells", bar = true,
+      id = "E1", spell = 265187, family = "spells",
       bands = {
         { tier = "HIGH", when = { { "ready", "this" }, { "ready", "E2", negate = true } } },
         { tier = "MEDIUM", when = { { "ready", "this" } } },
@@ -46,7 +46,7 @@ C.Register{
       },
     },
     {
-      id = "E2", spell = DREADSTALKERS, family = "spells", bar = true,
+      id = "E2", spell = DREADSTALKERS, family = "spells",
       bands = {
         { tier = "HIGH", when = { { "ready", "this" }, { "affordable", "this" } } },
       },
@@ -62,7 +62,7 @@ C.Register{
       },
     },
     {
-      id = "E3", spell = 1276452, family = "spells", bar = true,
+      id = "E3", spell = 1276452, family = "spells",
       alt = { 1276467 },
       bands = {
         { tier = "HIGH", when = { { "ready", "this" }, { "ready", "E1" } } },
@@ -70,7 +70,7 @@ C.Register{
       },
     },
     {
-      id = "E4", spell = 1276672, family = "spells", bar = true,
+      id = "E4", spell = 1276672, family = "spells",
       bands = {
         { tier = "HIGH", when = { { "ready", "this" }, { "ready", "E1" } } },
         { tier = "MEDIUM", when = { { "ready", "this" } } },
@@ -153,5 +153,7 @@ C.Register{
     { spell = 460551, why = "passive — applied by Demonbolt, not pressed" },
   },
 
-  bars = { "E1", "E2", "E3", "E4" },
+  -- The cooldown roster (spec.md §3.4), in the order the panel stacks. Authoritative, and
+  -- the reasoning for each of the four is ../../../specs/demonology/catalog.md §4.
+  bars = { "E1", "E2", "E3", "E8" },
 }

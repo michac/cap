@@ -290,6 +290,20 @@ describe("Catalog", function()
       broken.entries[1].bands[1].tier = "URGENT"
       assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
     end)
+
+    it("refuses a bar naming something this catalog does not declare as an entry", function()
+      -- A §3.4 bar is read off a bound row, so an id with no entry has nothing to read and
+      -- would draw an empty bar for the life of the build.
+      local broken = H.copy(cat)
+      broken.bars = { "E1", "E99" }
+      assert.equal(1, H.checks(ns.Catalog.Check(broken)).shape)
+    end)
+
+    it("refuses an entry declaring `bar` — the roster is `bars`, and it carries the order", function()
+      local broken = H.copy(cat)
+      broken.entries[1].bar = true
+      assert.equal(1, H.checks(ns.Catalog.Check(broken)).shape)
+    end)
   end)
 
   --------------------------------------------------------------------------------

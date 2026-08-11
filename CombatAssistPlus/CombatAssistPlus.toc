@@ -17,6 +17,8 @@ Track.lua
 Treatment.lua
 Sense.lua
 Channel.lua
+Glow.lua
+Bars.lua
 Overlay.lua
 Frame.lua
 Mode.lua

@@ -40,7 +40,8 @@ stds.wow = {
     "C_CooldownViewer", "C_CVar",
     -- Deferred work — Bind.lua coalesces its re-resolve onto a timer.
     "C_Timer",
-    -- Enum.CooldownViewerCategory — Bind.lua's viewer table.
+    -- Enum.CooldownViewerCategory — Bind.lua's viewer table; and
+    -- Enum.FontStringScaleAnimationMode — Overlay.lua's count marker.
     "Enum",
     -- Player identity: the spec and hero tree a capture line is labelled with —
     -- Log.lua, which reaches for the C_SpecializationInfo pair first and falls back
@@ -61,6 +62,11 @@ stds.wow = {
     -- `Enum` global already declared above.  Mechanisms:
     -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8.
     "C_UnitAuras", "C_CurveUtil",
+    -- The §3.4 bars — Bars.lua.  `C_StringUtil.CreateSecondsFormatter` is the formatter a
+    -- duration object formats its own remaining time through; the duration itself comes
+    -- from `C_Spell` above and the enum members ride the `Enum` global.  Mechanism:
+    -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8.1 finding 2.
+    "C_StringUtil",
   },
   -- The addon's true global writes.  Every module binds its namespace as a local
   -- (`local ADDON, ns = ...`), so there is no shared-namespace global to declare —

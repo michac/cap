@@ -25,6 +25,14 @@ function H.fresh()
   return ns
 end
 
+--- The pure core plus `Bars`, whose `Plan` is pure. Bars subscribes to the verdicts at load,
+--- so the harness supplies that one seam — OUR module, never a client API.
+function H.withBars(ns)
+  ns.Sense = { OnVerdicts = function() end }
+  H.load(ns, "Bars.lua")
+  return ns.Bars
+end
+
 --- The 21-row Demonology set recorded by cap v0.2.0 in the live client.
 function H.rows()
   return assert(loadfile(ROOT .. "tests/fixtures/demonology-rows.lua"))()

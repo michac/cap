@@ -187,6 +187,8 @@ local function installHooks()
   local added = 0
   for _, row in ipairs(ns.Bind.Rows()) do
     local frame = row.frame
+    -- Glow rides this walk rather than opening a second one over the same rows.
+    if ns.Glow then ns.Glow.Arm(frame) end
     if frame and not hooked[frame] and type(frame.TriggerAlertEvent) == "function" then
       hooked[frame] = true
       hooksecurefunc(frame, "TriggerAlertEvent", onAlert)
@@ -382,7 +384,13 @@ function evaluate(now, why, edge)
   return out
 end
 
---- The catalog in force, for a surface stamping its own capture stream.
+--- The catalog's cooldown roster (spec.md §3.4): the ordered entry ids that earn a bar, or
+--- nil where no catalog is in force. Deliberately the list and not the catalog — a surface
+--- that draws bars has no business reaching bands or cues through the live table.
+function Sense.Roster()
+  return state.catalog and state.catalog.bars or nil
+end
+
 function Sense.CatalogName()
   return state.catalog and state.catalog.name or nil
 end

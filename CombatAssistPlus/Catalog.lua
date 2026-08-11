@@ -270,10 +270,22 @@ function Catalog.Check(cat)
     if type(e.spell) ~= "number" then
       fail("shape", e.id, "entry has no numeric spell id")
     end
+    if e.bar ~= nil then
+      fail("shape", e.id, "entry declares `bar`; the cooldown roster is the catalog's `bars` list, which carries its order")
+    end
     for _, band in ipairs(e.bands or {}) do
       if Catalog.TIERS[band.tier] == nil then
         fail("shape", e.id, ("band declares tier %s, which is not a tier"):format(tostring(band.tier)))
       end
+    end
+  end
+
+  -- The cooldown roster (spec.md §3.4) is `cat.bars`, and it is authoritative because a
+  -- panel stacks: the order is part of the declaration and a per-entry flag carries none.
+  -- An id here that is not an entry has no row to read and would draw an empty bar.
+  for _, id in ipairs(cat.bars or {}) do
+    if not seenIDs[id] then
+      fail("shape", tostring(id), "bars names an id this catalog does not declare as an entry")
     end
   end
 

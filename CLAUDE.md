@@ -27,17 +27,20 @@ closed vocabulary and the spec's five checks), `Tier.lua` and `Track.lua` (pure)
 `Treatment.lua` (tier → look — **the only place the visual numbers exist**),
 `Sense.lua` (hooks, clock, client reads), `Channel.lua` (**the only place the two
 sealed comparisons live** — cap offers, the client decides) and `Overlay.lua`
-(cap's own frames, anchored to the CDM icons, painted from `Sense.OnVerdicts`).
+(cap's own frames, anchored to the CDM icons, painted from `Sense.OnVerdicts`). On the same
+verdicts, `Bars.lua` draws §3.4's cooldown bars into `Frame.lua`'s panel — the client is handed
+a duration object and cap is never told what it drew.
 
 ⚠ **What has run in the client stops at `Sense.lua`.** The binding and the tier
-verdicts were flown; **`Treatment.lua`, `Channel.lua` and `Overlay.lua` have never
-executed there** — no pixel this addon draws has been observed. The pure modules are
+verdicts were flown; **`Treatment.lua`, `Channel.lua`, `Overlay.lua`, `Glow.lua` and
+`Bars.lua` have never executed there** — no pixel this addon draws has been observed. The pure modules are
 covered by `busted`; the overlay is not testable at a desk and is verified by a
 flight and an eyeball, with `wowkb.capture cap draw` as the only instrument.
 
-⚠ **And neither channel has a readback.** `SetText`/`SetAlpha` accept a secret and hand
-nothing back, so `draw`'s `C{}` reports only whether cap **armed** a cue — never whether a
-marker appeared. Anything stronger than that has to come from an eyeball.
+⚠ **And no channel here has a readback.** `SetText`/`SetAlpha` accept a secret and hand
+nothing back, and every duration sink is aspect-less — so `draw`'s `C{}` and `B{}` report only
+whether cap **armed** a cue or a bar, never whether either appeared. Anything stronger than
+that has to come from an eyeball.
 
 **What it's supposed to do lives outside this repo**, on the workspace side at
 `projects/combat-assist/specs/` — `spec.md` (the product definition),

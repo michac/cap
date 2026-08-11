@@ -12,12 +12,12 @@ local ADDON, ns = ...
 
 local issecretvalue = issecretvalue
 
--- The overlay sits PAD outside the icon on every side, so the ring frames it rather than
--- covering its edge pixels; the veil is inset back onto the icon rect.
+-- The overlay sits PAD outside the icon on every side and the veil is inset back onto the
+-- icon rect. The ring gets its own host frame because the pulse is an alpha animation and
+-- must not reach the veil or either marker.
 local PAD = 2
 local STRATA = "HIGH"
 local LEVEL = 4
-local COUNT_SIZE = 18
 
 -- One marker each per row, claimed in sorted entry order so a row two entries bind
 -- resolves identically on every login.
@@ -30,10 +30,16 @@ local stream = ns.Capture.Open("draw", { sessions = 8, cap = 2000, dedup = false
 
 local pool = {}
 
+-- What the two build-time probes below settled, reported on `ring:` and `mark:`. Neither
+-- says a pixel moved; each says which route the code took when a name it needs is absent.
+local ringMode
+local countMode
+
 local state = {
   bound = nil,
   order = {},
   rowOf = {},
+  phaseOf = {},
   dark = false,
 }
 
@@ -44,10 +50,10 @@ local state = {
 -- White, so `SetVertexColor` multiplies to exactly the treatment's hue. `SetColorTexture`
 -- is fed a literal and never a game value: it POISONS the anchor chain on a secret
 -- (§4.8.1 finding 12), which the colour and alpha channels below do not.
-local function buildRing(f, thickness)
+local function buildQuad(host, thickness)
   local parts = {}
   local function bar(a, b, horizontal)
-    local t = f:CreateTexture(nil, "OVERLAY")
+    local t = host:CreateTexture(nil, "OVERLAY")
     t:SetColorTexture(1, 1, 1, 1)
     if horizontal then
       t:SetPoint(a)
@@ -56,8 +62,8 @@ local function buildRing(f, thickness)
     else
       -- Inset by the thickness so the verticals stop short of the horizontals: an
       -- overlapping corner double-draws and reads brighter than the rest of the ring.
-      t:SetPoint(a, f, a, 0, -thickness)
-      t:SetPoint(b, f, b, 0, thickness)
+      t:SetPoint(a, host, a, 0, -thickness)
+      t:SetPoint(b, host, b, 0, thickness)
       t:SetWidth(thickness)
     end
     t:Hide()
@@ -68,6 +74,99 @@ local function buildRing(f, thickness)
   bar("TOPLEFT", "BOTTOMLEFT", false)
   bar("TOPRIGHT", "BOTTOMRIGHT", false)
   return { thickness = thickness, parts = parts }
+end
+
+--@unverified the FlipBook Lua setter NAMES. They are Tier 1 in the generated docs
+-- (SimpleAnimFlipBookAPIDocumentation.lua:75-125) but an XML attribute name is not a Lua
+-- setter name and guessing wrong is SILENT (frames-textures-animation.md §7.1), so each is
+-- probed and a miss falls back to the quad ring and names the absent method on `ring:`.
+local FLIP_SETTERS = { "SetFlipBookRows", "SetFlipBookColumns", "SetFlipBookFrames" }
+
+local function buildFlip(host)
+  local R = ns.Treatment.RING
+  local t = host:CreateTexture(nil, "OVERLAY")
+  t:SetAtlas(R.atlas)
+  -- `GetAtlas()` says the region is atlas-backed and nothing about what was drawn; a name
+  -- that did not resolve leaves it nil (frames-textures-animation.md §5.1).
+  local got = t:GetAtlas()
+  if type(got) ~= "string" or got:lower() ~= R.atlas:lower() then
+    t:Hide()
+    return nil, "atlas"
+  end
+  t:SetBlendMode(R.blend)
+  t:SetPoint("CENTER", host, "CENTER")
+  local g = t:CreateAnimationGroup()
+  local ok, a = pcall(g.CreateAnimation, g, "FlipBook")
+  if not ok or a == nil then
+    t:Hide()
+    return nil, "flipbook"
+  end
+  for _, name in ipairs(FLIP_SETTERS) do
+    if type(a[name]) ~= "function" then
+      t:Hide()
+      return nil, name
+    end
+  end
+  a:SetFlipBookRows(R.rows)
+  a:SetFlipBookColumns(R.columns)
+  a:SetFlipBookFrames(R.frames)
+  a:SetDuration(R.seconds)
+  g:SetLooping("REPEAT")
+  -- Runs for the life of the frame, tier or no tier: the host's alpha and Show/Hide are
+  -- what gate visibility, so a tier change has nothing here to stop.
+  g:Play()
+  return t
+end
+
+-- The mode is remembered across frames: the flipbook either resolves for the process or it
+-- does not, so a downgrade partway through is an anomaly and `ring:` carries the last word.
+local function buildRingArt(f)
+  if ringMode == nil or ringMode == "flip" then
+    local tex, why = buildFlip(f.ringHost)
+    if tex then
+      ringMode = "flip"
+      f.flip = tex
+      return
+    end
+    ringMode = "quad:" .. why
+  end
+  f.quads = {}
+  for _, thickness in ipairs(ns.Treatment.Thicknesses()) do
+    f.quads[#f.quads + 1] = buildQuad(f.ringHost, thickness)
+  end
+end
+
+-- The tier's alpha is BAKED INTO the endpoints: an Alpha animation drives the same channel
+-- `SetAlpha` writes (frames-textures-animation.md §7.3), so a wrapper would be two writers
+-- on one channel. The consequence is that this must be re-armed whenever the tier or the
+-- grade moves, which is exactly when the paint path runs.
+local function buildPulse(host)
+  local g = host:CreateAnimationGroup()
+  g:SetLooping("BOUNCE")
+  local a = g:CreateAnimation("Alpha")
+  a:SetSmoothing("IN_OUT")
+  return { group = g, alpha = a }
+end
+
+-- ⚠ ORDER IS THE WHOLE FUNCTION. `Stop()` restores the alpha captured at the last `Play()`,
+-- so the tier's alpha goes after the stop (a write before it is reverted) and before the
+-- play (that write is what the next stop restores to). The no-pulse path exits between them.
+local function armPulse(f, d)
+  f.pulse.group:Stop()
+  local ring = d.ring
+  f.ringHost:SetAlpha(ring and ring.a or 0)
+  local p = ns.Treatment.Pulse(d)
+  if not p then return end
+  f.pulse.alpha:SetFromAlpha(p.from)
+  f.pulse.alpha:SetToAlpha(p.to)
+  f.pulse.alpha:SetDuration(p.seconds)
+  --@unverified does `SetStartDelay` re-pay on every BOUNCE iteration, or only the first?
+  -- The KB has the setter and not the answer (frames-textures-animation.md §7.3). If it
+  -- re-pays, the period is `cycle + delay`, one tier's rows stop sharing a rate, and `P{}`'s
+  -- `p<hz>` names a rate nothing runs at. Either way a re-arm re-pays it, so a row changing
+  -- faster than its own delay never reaches a first pulse — LOW's worst case ~1.98 s.
+  f.pulse.alpha:SetStartDelay((f.phase or 0) * p.cycle)
+  f.pulse.group:Play()
 end
 
 local function buildVeil(f)
@@ -104,22 +203,60 @@ local function buildHold(f)
   return parts
 end
 
+-- Justification is written rather than inherited, and `CENTER`/`MIDDLE` are the XSD
+-- defaults (frames-textures-animation.md §6.2) — so this is defence against a template that
+-- overrode them, not a hole being filled. It goes ABOVE the early return: the unpulsed path
+-- still draws the glyph. An absent name leaves it unpulsed and says so on `mark:`.
+local function buildCountPulse(fs)
+  fs:SetJustifyH("CENTER")
+  fs:SetJustifyV("MIDDLE")
+  local mode = Enum and Enum.FontStringScaleAnimationMode and Enum.FontStringScaleAnimationMode.Vertex
+  if mode == nil or type(fs.SetScaleAnimationMode) ~= "function" then return nil end
+  fs:SetScaleAnimationMode(mode)
+  local g = fs:CreateAnimationGroup()
+  local ok, a = pcall(g.CreateAnimation, g, "Scale")
+  if not ok or a == nil or type(a.SetScaleFrom) ~= "function" then return nil end
+  local P = ns.Treatment.COUNT.pulse
+  a:SetScaleFrom(P.from, P.from)
+  a:SetScaleTo(P.to, P.to)
+  a:SetDuration(P.seconds)
+  a:SetSmoothing("IN_OUT")
+  a:SetOrigin("CENTER", 0, 0)
+  g:SetLooping("BOUNCE")
+  g:Play()
+  return g
+end
+
 -- ⚠ A LEAF, and it carries no plate. `SetText` with a secret marks anchoring secret and
 -- propagates DOWN, so this is anchored TO the frame and nothing is ever anchored to it;
 -- a plate would also be visible while the quantiser's string is empty, which is exactly
 -- the state that must show nothing. The outline is what replaces it.
 local function buildCount(f)
+  local C = ns.Treatment.COUNT
   local fs = f:CreateFontString(nil, "OVERLAY", "NumberFontNormalLarge")
   local path = fs:GetFont()
-  if path then fs:SetFont(path, COUNT_SIZE, "OUTLINE") end
+  -- The returned bool is the only failure signal `SetFont` has, and a refusal leaves the
+  -- string on the template's font silently.
+  local sized = path and fs:SetFont(path, C.size, "OUTLINE") or false
   fs:SetPoint("TOP", f, "TOP", 0, -PAD)
   fs:Hide()
+  countMode = (sized and "font" or "nofont") .. "/" .. (buildCountPulse(fs) and "pulse" or "nopulse")
   return fs
 end
 
--- One ring per thickness the treatment table declares, built once and shown by tier. The
--- paint path then writes only Show/Hide, SetVertexColor and SetAlpha — no geometry, so
--- nothing it does mid-pull rests on a protected setter that has not been measured there.
+-- The ring's own host, so the pulse's alpha reaches the ring and nothing else. It is meant
+-- to sit one level BELOW the overlay so both markers draw over it — but `layer` is what
+-- puts it there, and a default child level is parent+1. A ring and a veil never coexist.
+local function buildRingHost(f)
+  local host = CreateFrame("Frame", nil, f)
+  host:SetAllPoints(f)
+  host:Hide()
+  return host
+end
+
+-- Built once per row and shown by tier. The paint path then writes only Show/Hide,
+-- SetVertexColor, SetAlpha and the pulse endpoints — no geometry, so nothing it does
+-- mid-pull rests on a protected setter that has not been measured there.
 local function acquire(cid)
   local f = pool[cid]
   if f then return f end
@@ -127,26 +264,42 @@ local function acquire(cid)
   f = CreateFrame("Frame", nil, UIParent)
   f:Hide()
   f.veil = buildVeil(f)
-  f.rings = {}
-  for _, thickness in ipairs(ns.Treatment.Thicknesses()) do
-    f.rings[#f.rings + 1] = buildRing(f, thickness)
-  end
+  f.ringHost = buildRingHost(f)
+  buildRingArt(f)
+  f.pulse = buildPulse(f.ringHost)
   f.hold = buildHold(f)
   f.count = buildCount(f)
   pool[cid] = f
   return f
 end
 
--- `SetFrameStrata` is protected and, unlike SetPoint/Show/Hide, has not been measured on
--- an addon frame in combat. Nothing here reaches it there: a row is only drawn once Sense
--- has settled, and a settle happens out of combat only, so every frame in the pool was
--- created and layered before the pull. The combat check is belt-and-braces on that, not
--- the thing holding the guarantee.
+-- `SetFrameStrata` and `SetFrameLevel` are protected and, unlike SetPoint/Show/Hide, are
+-- unmeasured on an addon frame in combat. Nothing reaches them there: a row draws only once
+-- Sense has settled and a settle happens out of combat, so the pool is layered before the
+-- pull — the combat check is belt-and-braces, not the guarantee. ⚠ Skipping it also skips
+-- the ring host's level, the ONLY thing putting the ring under both markers.
 local function layer(f)
   if f.layered or InCombatLockdown() then return end
   f:SetFrameStrata(STRATA)
   f:SetFrameLevel(LEVEL)
+  f.ringHost:SetFrameLevel(LEVEL - 1)
   f.layered = true
+end
+
+-- Blizzard sizes its own proc-alert frame at 1.4x the button and centres it there
+-- (ActionButtonSpellAlerts.lua:20), so the ring is sized off the ITEM frame. `GetWidth` is
+-- SecretWhenAnchoringSecret (§3.2), so a refused read leaves it unsized — and unshown.
+local function sizeRing(f, item)
+  local ok, w = pcall(item.GetWidth, item)
+  if not ok or w == nil or issecretvalue(w) or type(w) ~= "number" then return end
+  if w <= 0 then return end
+  local s = w * ns.Treatment.RING.scale
+  if f.ringSize == s then return end
+  f.flip:SetSize(s, s)
+  f.ringSize = s
+  -- The paint path is what shows the ring, and it runs only on a change of drawn key — so
+  -- a size that arrives later than the first paint has to ask for one.
+  f.painted = nil
 end
 
 -- Item frames are POOLED, so a cooldownID's frame can change under us. Re-anchor whenever
@@ -163,7 +316,10 @@ local function anchor(f, cid)
     f:SetPoint("TOPLEFT", item, "TOPLEFT", -PAD, PAD)
     f:SetPoint("BOTTOMRIGHT", item, "BOTTOMRIGHT", PAD, -PAD)
     f.anchoredTo = item
+    f.painted = nil
   end
+  -- Every pass: a UI rescale re-lays the item frame without handing cap a different one.
+  if f.flip then sizeRing(f, item) end
   return item, confirmed
 end
 
@@ -181,17 +337,26 @@ end
 -- ---------------------------------------------------------------------------
 
 local function paint(f, d)
-  local want = d.ring and d.ring.thickness
-  for _, ring in ipairs(f.rings) do
-    if ring.thickness == want then
-      for _, t in ipairs(ring.parts) do
-        t:SetVertexColor(d.ring.r, d.ring.g, d.ring.b)
-        t:SetAlpha(d.ring.a)
-        t:Show()
-      end
+  local ring = d.ring
+  if not ring then
+    armPulse(f, d)
+    f.ringHost:Hide()
+  else
+    if f.flip then
+      f.flip:SetVertexColor(ring.r, ring.g, ring.b)
     else
-      for _, t in ipairs(ring.parts) do t:Hide() end
+      for _, quad in ipairs(f.quads) do
+        local on = quad.thickness == ring.thickness
+        for _, t in ipairs(quad.parts) do
+          if on then t:SetVertexColor(ring.r, ring.g, ring.b) end
+          if on then t:Show() else t:Hide() end
+        end
+      end
     end
+    -- Armed before the size is known, so an unsized ring plays on a host the next line
+    -- hides. One arming path is worth more than the frames a hidden group costs.
+    armPulse(f, d)
+    if f.flip and not f.ringSize then f.ringHost:Hide() else f.ringHost:Show() end
   end
 
   if (d.veil or 0) > 0 then
@@ -210,10 +375,9 @@ end
 -- Cues — cap offers, the client decides, and cap is never told
 -- ---------------------------------------------------------------------------
 
---- The marker a cue is drawn as, or nil where the vocabulary has none: polarity is carried
---- by SHAPE, so the hold glyph may never stand for a press and a count may never stand for
---- a wait. Both live forms are thresholded, which is what check 4 guarantees for the
---- negative half and what the count's `>= n` is by construction.
+--- The marker a cue is drawn as, keyed on the (polarity, channel) PAIR, or nil where no
+--- marker exists for that pairing yet. Both live forms are thresholded, which is what
+--- check 4 guarantees for the negative half and what the count's `>= n` is by construction.
 local function slotFor(cue)
   local ch = cue.channel or {}
   if #ch ~= 4 then return nil end
@@ -279,9 +443,20 @@ end
 -- paint path off the hot loop.
 local function cell(d)
   if d.ring then
-    return (d.tier or "?") .. "/a" .. pct(d.ring.a) .. "t" .. d.ring.thickness
+    -- `t` is the FALLBACK ring's thickness: printed only when the fallback is on screen.
+    return (d.tier or "?") .. "/a" .. pct(d.ring.a)
+      .. ((ringMode == "flip") and "" or ("t" .. d.ring.thickness))
+      .. "p" .. tostring(d.ring.pulse or 0)
   end
   return (d.tier or "-") .. "/v" .. pct(d.veil)
+end
+
+-- Which of two entries a shared row is drawn as: tier first, emphasis only to break a
+-- tie inside one tier.
+local function outranks(a, b)
+  local ra, rb = ns.Treatment.Rank(a), ns.Treatment.Rank(b)
+  if ra ~= rb then return ra > rb end
+  return ns.Treatment.Brightness(a) > ns.Treatment.Brightness(b)
 end
 
 -- ---------------------------------------------------------------------------
@@ -298,11 +473,14 @@ end
 ---
 --- ⚠ A `P{}` cell is ONE ENTRY's own treatment, and two entries can bind one row. The
 --- entry whose treatment was actually painted carries `*`; a cell without one lost its row
---- to a brighter sibling and is on no icon.
+--- to a higher-tier sibling and is on no icon.
 ---
 --- ⚠ `C{}` reports what CAP DID — every cue offered, and whether cap armed the channel or
 --- could not. There is no "appeared" and there never can be: the client owns that answer
 --- and does not report it back, so a log naming one would be a fabrication.
+---
+--- ⚠ `B{}` carries §3.4's bars under exactly that rule: `armed` means cap handed the client
+--- a duration object, never that a bar drew.
 function Overlay.Render(snap)
   snap = snap or {}
   local d = {
@@ -314,12 +492,19 @@ function Overlay.Render(snap)
     "nf:" .. num(snap.noframe),
     "cue:" .. num(snap.cues),
     "arm:" .. num(snap.armed),
+    "glow:" .. (snap.glow or "-"),
+    "nosize:" .. num(snap.nosize),
+    "ring:" .. (snap.ring or "-"),
+    "mark:" .. (snap.mark or "-"),
+    "bar:" .. (snap.bar or "-"),
   }
   local cells = snap.cells or {}
   local marks = snap.marks or {}
+  local bars = snap.bars or {}
   return "D{" .. table.concat(d, " ") .. "}"
     .. " P{" .. ((#cells > 0) and table.concat(cells, " ") or "-") .. "}"
     .. " C{" .. ((#marks > 0) and table.concat(marks, " ") or "-") .. "}"
+    .. " B{" .. ((#bars > 0) and table.concat(bars, " ") or "-") .. "}"
 end
 
 local lastBody
@@ -355,6 +540,13 @@ end
 -- The draw pass
 -- ---------------------------------------------------------------------------
 
+-- The bars are their own surface on the same pass and report through the same line, the way
+-- `glow:` does — `Bars.lua` listens first, so what this reads is this pass's answer.
+local function barReport()
+  if not ns.Bars then return nil, nil end
+  return ns.Bars.Report()
+end
+
 local function hideAll(edge)
   if state.dark and not edge then return end
   state.dark = true
@@ -362,9 +554,11 @@ local function hideAll(edge)
     f:Hide()
     f.painted = nil
   end
+  local bars, bar = barReport()
   write(Overlay.Render{
-    entries = 0, rows = 0, anchored = 0, confirmed = 0, hidden = 0, noframe = 0,
-    cues = 0, armed = 0,
+    entries = 0, rows = 0, anchored = 0, confirmed = 0, hidden = 0, noframe = 0, nosize = 0,
+    cues = 0, armed = 0, glow = ns.Glow and ns.Glow.Status() or nil,
+    ring = ringMode, mark = countMode, bars = bars, bar = bar,
   }, edge)
 end
 
@@ -372,7 +566,7 @@ end
 --- because the sort is what makes the log line a stable dedup key.
 local function rebuild(bound)
   state.bound = bound
-  state.order, state.rowOf = {}, {}
+  state.order, state.rowOf, state.phaseOf = {}, {}, {}
   local live = {}
   for _, item in ipairs(bound.entries or {}) do
     state.order[#state.order + 1] = item.entry.id
@@ -380,6 +574,18 @@ local function rebuild(bound)
     live[item.row.cooldownID] = true
   end
   table.sort(state.order)
+
+  -- One phase per ROW, off the sorted order, so no two pulses start together and a row
+  -- takes the same offset on every login. Why they must not start together: Treatment's
+  -- note on `PULSE`.
+  local n = 0
+  for _, id in ipairs(state.order) do
+    local cid = state.rowOf[id]
+    if state.phaseOf[cid] == nil then
+      n = n + 1
+      state.phaseOf[cid] = ns.Treatment.Phase(n)
+    end
+  end
   -- An overlay whose row left the bound set is hidden and KEPT: the pool is keyed by
   -- cooldownID, and a spec swapped away from and back to re-uses it.
   for cid, f in pairs(pool) do
@@ -400,15 +606,15 @@ local function draw(out, bound, edge)
   if bound ~= state.bound then rebuild(bound) end
 
   -- One descriptor per ROW. Two entries bind one row on a transforming ability and an
-  -- icon can only be drawn one way, so the row takes the brighter of the two — which is
-  -- one icon carrying the higher of two tiers, not a ranking within one (spec.md §3.1).
+  -- icon can only be drawn one way, so the row is drawn in the higher of the two tiers —
+  -- one icon carrying the higher of two, not a ranking within one (spec.md §3.1).
   -- `winner` records which entry that was, because the log prints all of them.
   local perEntry, best, winner = {}, {}, {}
   for _, id in ipairs(state.order) do
     local cid = state.rowOf[id]
     local d = ns.Treatment.For(out.byEntry[id])
     perEntry[id] = d
-    if not best[cid] or ns.Treatment.Brightness(d) > ns.Treatment.Brightness(best[cid]) then
+    if not best[cid] or outranks(d, best[cid]) then
       best[cid] = d
       winner[cid] = id
     end
@@ -437,12 +643,13 @@ local function draw(out, bound, edge)
   -- `hidden` and `noframe` are different failures and are counted apart: a hidden item
   -- frame means the overlay is correctly dark, and no item frame at all means the
   -- anchoring never happened. Conflated, a total anchoring failure reads as a pass.
-  local rows, anchored, confirmed, hidden, noframe = 0, 0, 0, 0, 0
+  local rows, anchored, confirmed, hidden, noframe, nosize = 0, 0, 0, 0, 0, 0
   local mark = {}
   for cid, d in pairs(best) do
     rows = rows + 1
     local f = acquire(cid)
     layer(f)
+    f.phase = state.phaseOf[cid] or 0
     local item, ok = anchor(f, cid)
     if not item then
       mark[cid] = "!"
@@ -458,6 +665,9 @@ local function draw(out, bound, edge)
       end
 
       if itemShown(item) then
+        -- ⚠ Counted apart for the reason `off:` and `nf:` are: an unsized ring draws NOTHING
+        -- and a tiered row has no veil either, so unreported it reads exactly like a pass.
+        if d.ring and f.flip and not f.ringSize then nosize = nosize + 1 end
         local k = cell(d)
         if f.painted ~= k then
           paint(f, d)
@@ -492,10 +702,14 @@ local function draw(out, bound, edge)
       .. tostring((o.cue.channel or {})[1]) .. ":" .. o.state
   end
 
+  local barCells, barProbe = barReport()
   write(Overlay.Render{
     entries = #state.order, rows = rows,
     anchored = anchored, confirmed = confirmed, hidden = hidden, noframe = noframe,
+    nosize = nosize,
     cells = cells, cues = #offers, armed = armed, marks = marks,
+    glow = ns.Glow and ns.Glow.Status() or nil,
+    ring = ringMode, mark = countMode, bars = barCells, bar = barProbe,
   }, edge)
 end
 
