@@ -16,8 +16,8 @@ describe("product characterization / Destruction pilot", function()
     }).byEntry.conflagrate
   end
 
-  it("places available Conflagrate in SOON through four shards", function()
-    assert.equal("SOON", verdict(1, 4).tier)
+  it("places available Conflagrate in ROTATION through four shards", function()
+    assert.equal("ROTATION", verdict(1, 4).tier)
   end)
 
   it("places available Conflagrate in FALLBACK above four shards", function()

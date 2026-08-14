@@ -15,9 +15,9 @@ describe("engine / signal", function()
       proc = H.map(false, { demonbolt = true }), resource = 1,
     }
     local out = ns.Signal.Evaluate(resolved, world)
-    assert.equal("SOON", out.byEntry.tyrant.tier)
+    assert.equal("ROTATION", out.byEntry.tyrant.tier)
     assert.same({ "dreadstalkers", "grimoire" }, out.byEntry.tyrant.markers)
-    assert.equal("SOON", out.byEntry.demonbolt.tier)
+    assert.equal("ROTATION", out.byEntry.demonbolt.tier)
   end)
 
   it("withholds output when a readable fact refuses", function()
@@ -36,7 +36,7 @@ describe("engine / signal", function()
   it("selects a discrete lower tier rather than grading strength", function()
     local low = ns.Signal.Evaluate(resolved, H.world{ proc = H.map(true), resource = 1 })
     local high = ns.Signal.Evaluate(resolved, H.world{ proc = H.map(true), resource = 5 })
-    assert.equal("SOON", low.byEntry.demonbolt.tier)
+    assert.equal("ROTATION", low.byEntry.demonbolt.tier)
     assert.equal("FALLBACK", high.byEntry.demonbolt.tier)
     local blind = ns.Signal.Evaluate(resolved, H.world{ proc = H.map(true), resource = "unknown" })
     assert.is_nil(blind.byEntry.demonbolt.tier)
@@ -45,20 +45,20 @@ describe("engine / signal", function()
   it("allows several entries to occupy one tier", function()
     local duplicate = H.copy(resolved)
     duplicate.entries[2].entry.bands = {
-      { tier = "SOON", when = { { "proc", "demonbolt" } } },
+      { tier = "ROTATION", when = { { "proc", "demonbolt" } } },
     }
     local out = ns.Signal.Evaluate(duplicate, H.world{ proc = H.map(true) })
-    assert.equal("SOON", out.byEntry.tyrant.tier)
-    assert.equal("SOON", out.byEntry.demonbolt.tier)
+    assert.equal("ROTATION", out.byEntry.tyrant.tier)
+    assert.equal("ROTATION", out.byEntry.demonbolt.tier)
   end)
 
   it("tries same-tier alternatives but never falls below an uncertain higher tier", function()
     local bands = resolved.entries[2].entry.bands
-    bands[1] = { tier = "SOON", when = { { "resource", "<=", 3 } } }
-    table.insert(bands, 2, { tier = "SOON", when = { { "proc", "demonbolt" } } })
+    bands[1] = { tier = "ROTATION", when = { { "resource", "<=", 3 } } }
+    table.insert(bands, 2, { tier = "ROTATION", when = { { "proc", "demonbolt" } } })
     local same = ns.Signal.Evaluate(resolved,
       H.world{ proc = H.map(true), resource = "unknown" })
-    assert.equal("SOON", same.byEntry.demonbolt.tier)
+    assert.equal("ROTATION", same.byEntry.demonbolt.tier)
 
     bands[2] = { tier = "FALLBACK", when = { { "proc", "demonbolt" } } }
     local lower = ns.Signal.Evaluate(resolved,

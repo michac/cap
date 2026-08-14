@@ -5,8 +5,8 @@ describe("engine / presentation", function()
   local ns
   before_each(function() ns = H.fresh() end)
 
-  it("maps each discrete tier to one whole lane treatment", function()
-    assert.same({ "ASAP", "SOON", "FALLBACK" }, ns.Treatment.ORDER)
+  it("draws each discrete tier as one whole lane treatment", function()
+    assert.same({ "COOLDOWN", "ROTATION", "FALLBACK" }, ns.Treatment.ORDER)
     for _, tier in ipairs(ns.Treatment.ORDER) do
       local d = ns.Treatment.For{ tier = tier }
       assert.is_true(d.emphasized, tier .. " draws nothing")

@@ -27,7 +27,7 @@ describe("engine / catalog", function()
     broken = H.copy(cat)
     broken.entries[2].bands = {
       { tier = "FALLBACK", when = { { "proc", "demonbolt" } } },
-      { tier = "SOON", when = { { "proc", "demonbolt" } } },
+      { tier = "ROTATION", when = { { "proc", "demonbolt" } } },
     }
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).tier)
   end)
@@ -35,7 +35,7 @@ describe("engine / catalog", function()
   it("allows several alternative bands in the same tier", function()
     local expanded = H.copy(cat)
     expanded.entries[1].bands[#expanded.entries[1].bands + 1] = {
-      tier = "SOON", when = { { "ready", "tyrant" } },
+      tier = "ROTATION", when = { { "ready", "tyrant" } },
     }
     assert.same({}, ns.Catalog.Check(expanded))
   end)

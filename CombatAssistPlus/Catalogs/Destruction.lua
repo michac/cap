@@ -18,7 +18,7 @@ ns.Catalog.Register{
     {
       id = "conflagrate", ability = "conflagrate",
       bands = {
-        { tier = "SOON", when = { { "ready", "conflagrate" }, { "resource", "<=", 4 } } },
+        { tier = "ROTATION", when = { { "ready", "conflagrate" }, { "resource", "<=", 4 } } },
         { tier = "FALLBACK", when = { { "ready", "conflagrate" } } },
       },
       markers = {

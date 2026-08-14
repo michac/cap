@@ -23,7 +23,7 @@ ns.Catalog.Register{
       -- Canonical readiness-tier example. Its marker forms are the canonical readable
       -- fact-to-context examples; their gameplay meaning remains provisional here.
       bands = {
-        { tier = "SOON", when = { { "ready", "tyrant" } } },
+        { tier = "ROTATION", when = { { "ready", "tyrant" } } },
       },
       markers = {
         -- These mean exactly what the readable rows establish: dogs were committed and
@@ -37,7 +37,7 @@ ns.Catalog.Register{
       id = "demonbolt", ability = "demonbolt",
       -- Canonical proc-plus-secondary-resource tier example.
       bands = {
-        { tier = "SOON", when = { { "proc", "demonbolt" }, { "resource", "<=", 3 } } },
+        { tier = "ROTATION", when = { { "proc", "demonbolt" }, { "resource", "<=", 3 } } },
         { tier = "FALLBACK", when = { { "proc", "demonbolt" } } },
       },
     },

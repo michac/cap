@@ -44,12 +44,11 @@ describe("engine / style", function()
     end
   end)
 
-  it("maps every engine tier onto a lane the style declares", function()
-    for _, tier in ipairs(ns.Treatment.ORDER) do
-      local lane = ns.Treatment.LANE[tier]
-      assert.is_string(lane, tier .. " maps to no lane")
+  it("names every engine tier after a lane the style declares", function()
+    assert.is_nil(ns.Treatment.LANE, "the tier→lane map should be gone, not mapped to itself")
+    for _, lane in ipairs(ns.Treatment.ORDER) do
       assert.is_table(ns.Style.lanes[lane], lane .. " is not a declared lane")
-      assert.equal(lane, ns.Treatment.For{ tier = tier }.lane)
+      assert.equal(lane, ns.Treatment.For{ tier = lane }.lane)
     end
     assert.is_false(ns.Treatment.For{}.emphasized)
     assert.is_false(ns.Treatment.For{ tier = "NOSUCHTIER" }.emphasized)

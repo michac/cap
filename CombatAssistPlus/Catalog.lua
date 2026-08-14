@@ -6,7 +6,7 @@ local Catalog = {}
 ns.Catalog = Catalog
 
 local registry = {}
-local TIERS = { ASAP = 3, SOON = 2, FALLBACK = 1 }
+local TIERS = { COOLDOWN = 3, ROTATION = 2, FALLBACK = 1 }
 Catalog.TIERS = TIERS
 local PREDICATES = {
   ready = { arity = 1, subject = true },
