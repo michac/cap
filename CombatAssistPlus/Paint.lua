@@ -171,11 +171,17 @@ end
 -- V4 · veil
 -- ---------------------------------------------------------------------------
 
-function Paint.Veil(host)
+--- `inset` is how far the host extends PAST the icon it decorates. The veil covers the icon
+--- face, so a host anchored outside it must be inset by the same amount or the dim overhangs
+--- on all four sides. Sublevel 0 puts it UNDER the lane border, which draws at sublevel 0 too
+--- but is created later — a veil above the border would dim cap's own emphasis.
+function Paint.Veil(host, inset)
   local v = ns.Style.veil
-  local t = host:CreateTexture(nil, "OVERLAY", nil, 1)
+  inset = inset or 0
+  local t = host:CreateTexture(nil, "OVERLAY", nil, 0)
   t:SetColorTexture(v.rgb[1], v.rgb[2], v.rgb[3], v.alpha)
-  t:SetAllPoints(host)
+  t:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -inset)
+  t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -inset, inset)
   t:Hide()
   return t
 end
@@ -194,12 +200,19 @@ local function setArt(texture, name)
   texture:SetTexture(texturePath(name), nil, nil, "TRILINEAR")
 end
 
+-- A badge registers itself, but only its PARENT knows when the row went away: Overlay hides
+-- the pooled frame, which leaves the badge shown-but-invisible and stepping forever. The
+-- visibility test is the deregistration, so the ticker can actually reach zero and cancel.
 local function tick()
   local now = GetTime()
   local any = false
   for badge in pairs(stepping) do
-    any = true
-    badge:Step(now)
+    if badge.frame:IsVisible() then
+      any = true
+      badge:Step(now)
+    else
+      stepping[badge] = nil
+    end
   end
   if not any and ticker then
     ticker:Cancel()
@@ -253,11 +266,14 @@ function Paint.Badge(host, key)
 
   --- Pooled frames outlive their colour: an animation that stopped restores alpha and never
   --- vertex colour, so both are written again on every show.
+  ---
+  --- ⚠ IDEMPOTENT. The live path repaints at 10 Hz, so restarting `started` on every call
+  --- would reset the frame clock faster than one frame lasts and freeze the glyph on frame 1.
   function badge:Show()
     sprite:SetVertexColor(tint[1], tint[2], tint[3])
     sprite:SetAlpha(1)
-    self.started = GetTime()
-    self:Step(self.started)
+    if not slot:IsShown() or not self.started then self.started = GetTime() end
+    self:Step(GetTime())
     slot:Show()
     if halo then halo:Play() end
     stepEvery(self, count > 1)

@@ -43,8 +43,17 @@ ns.Catalog.Register{
       bands = { { tier = "ROTATION", when = { { "ready", "blade_dance" } } } } },
     { id = "chaos_strike", ability = "chaos_strike",
       bands = { { tier = "ROTATION", when = { { "ready", "chaos_strike" } } } } },
+    -- Two readable states off `isActive`, which is NeverSecret and therefore answers in both
+    -- directions: at max it is the gold `capped` badge (a charge is being lost right now); below
+    -- max it is the red `blocked` badge (hold the one you have, let the other come back).
     { id = "immolation_aura", ability = "immolation_aura",
-      bands = { { tier = "ROTATION", when = { { "ready", "immolation_aura" } } } } },
+      bands = { { tier = "ROTATION", when = { { "ready", "immolation_aura" } } } },
+      markers = {
+        { id = "immolation_capped", cue = "capped",
+          when = { { "capped", "immolation_aura" } } },
+        { id = "immolation_recharging", cue = "blocked",
+          when = { { "capped", "immolation_aura", negate = true } } },
+      } },
     { id = "felblade", ability = "felblade",
       bands = { { tier = "ROTATION", when = { { "ready", "felblade" } } } } },
     { id = "demons_bite", ability = "demons_bite",

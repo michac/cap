@@ -95,7 +95,7 @@ function H.blindWorld()
   local U = "unknown"
   local blind = setmetatable({}, { __index = function() return U end })
   return {
-    ready = blind, proc = blind, identity = blind,
+    ready = blind, proc = blind, identity = blind, capped = blind, affordable = blind,
     resource = U, resourceMax = U,
   }
 end
@@ -105,7 +105,7 @@ function H.world(over)
   local yes = setmetatable({}, { __index = function() return true end })
   local no = setmetatable({}, { __index = function() return false end })
   local w = {
-    ready = yes, proc = no,
+    ready = yes, proc = no, capped = no, affordable = yes,
     identity = setmetatable({}, { __index = function() return "base" end }),
     resource = 0, resourceMax = 5,
   }

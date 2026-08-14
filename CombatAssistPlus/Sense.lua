@@ -73,19 +73,39 @@ local function readProc(spellID)
   return v and true or false
 end
 
+--- The live cooldown-info struct for a row, fetched once per cid per tick. Both the identity
+--- gate and the live spell id derive from it, and they must come from the SAME read.
+local function readInfo(cid)
+  if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo) then return nil end
+  local ok, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cid)
+  if not ok then return nil end
+  return { base = field(info, "spellID"), override = field(info, "overrideSpellID") }
+end
+
 -- The honest test is `overrideSpellID ~= spellID`, never `~= nil`: the field is always
 -- populated and mirrors the base when nothing is overriding. Both sides come from the
 -- SAME live struct — comparing against the id bound out of combat would call a permanent
 -- spec override a transform.
-local function readIdentity(cid)
-  if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo) then return nil end
-  local ok, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cid)
-  if not ok then return nil end
-  local base = field(info, "spellID")
-  local override = field(info, "overrideSpellID")
-  if base == nil or override == nil then return nil end
-  if override ~= base then return "transformed" end
+local function readIdentity(info)
+  if info == nil or info.base == nil or info.override == nil then return nil end
+  if info.override ~= info.base then return "transformed" end
   return "base"
+end
+
+--- At max charges — readable in BOTH polarities, unlike the count itself.
+---
+--- `C_Spell.GetSpellCharges` seals per member: `currentCharges` goes secret below full, but
+--- `isActive` is NeverSecret and means "a recharge is running", which is exactly "not at max".
+--- `nil` for a spell with no charges, and `nil` — never `false` — when the struct refuses.
+local function readCapped(spellID)
+  if not (C_Spell and C_Spell.GetSpellCharges) then return nil end
+  local ok, info = pcall(C_Spell.GetSpellCharges, spellID)
+  if not ok then return nil end
+  local maximum = field(info, "maxCharges")
+  if type(maximum) ~= "number" or maximum <= 1 then return nil end
+  local active = field(info, "isActive")
+  if active == nil then return nil end
+  return not active
 end
 
 --- Current and max for the catalog's declared power type. A primary resource is always
@@ -220,7 +240,7 @@ local function pair(t)
   return num(t.known) .. "/" .. num(t.known + t.unknown)
 end
 
-local PREDICATE_ORDER = { "ready", "proc", "identity", "resource" }
+local PREDICATE_ORDER = { "ready", "proc", "identity", "capped", "resource" }
 
 --- The body a line carries. No clock, no game reads, no `pairs()` over anything whose
 --- order would move — a key that reorders breaks dedup nondeterministically.
@@ -267,18 +287,29 @@ end
 local lastBody
 
 local function buildReads()
-  local proc, identity = {}, {}
+  local proc, identity, capped = {}, {}, {}
   local byAbility = (state.reads or {}).byAbility or {}
+  local infoOf = {}
 
   for _, item in ipairs(state.bound.abilities) do
     local id, needs = item.ability.id, byAbility[item.ability.id] or {}
+    local cid = item.row.cooldownID
+    if needs.identity or needs.capped or needs.affordable then
+      if infoOf[cid] == nil then infoOf[cid] = readInfo(cid) or false end
+    end
+    local info = infoOf[cid] or nil
+    -- `row.primary` froze at bind and `Bind.resolve` refuses to run in combat, so a demon-form
+    -- flip moves the live id underneath it. Charges and usability are asked about the LIVE one.
+    local live = (info and info.override) or item.row.primary
+
     if needs.proc then proc[id] = readProc(item.row.primary) end
-    if needs.identity then identity[id] = readIdentity(item.row.cooldownID) end
+    if needs.identity then identity[id] = readIdentity(info) end
+    if needs.capped then capped[id] = readCapped(live) end
   end
 
   local have, max = readResource()
   return {
-    proc = proc, identity = identity,
+    proc = proc, identity = identity, capped = capped,
     resource = have, resourceMax = max,
     needsResource = state.reads and state.reads.resource,
   }

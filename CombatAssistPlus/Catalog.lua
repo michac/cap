@@ -12,11 +12,18 @@ local PREDICATES = {
   ready = { arity = 1, subject = true },
   proc = { arity = 1, subject = true },
   identity = { arity = 2, subject = true },
+  capped = { arity = 1, subject = true },
   resource = { arity = 2 },
 }
 Catalog.PREDICATES = PREDICATES
 local DISPLAYS = { ["player-aura-stacks"] = true }
 Catalog.DISPLAYS = DISPLAYS
+
+-- The cue vocabulary is the GENERATED shelf's, read at call time rather than copied here:
+-- a second list would let the addon invent a fifth cue that renders nowhere.
+local function cues()
+  return (ns.Style or {}).cues or {}
+end
 
 function Catalog.Register(cat)
   assert(type(cat) == "table", "Catalog.Register needs a table")
@@ -100,7 +107,7 @@ function Catalog.Check(cat)
         fail("shape", entry.id, "tier " .. tostring(band.tier) .. " has no readable condition")
       end
     end
-    local markerIDs = {}
+    local markerIDs, bySlot = {}, {}
     for _, marker in ipairs(entry.markers or {}) do
       if type(marker.id) ~= "string" or marker.id == "" then
         fail("shape", entry.id, "marker has no id")
@@ -108,6 +115,21 @@ function Catalog.Check(cat)
         fail("shape", entry.id, "duplicate marker id " .. marker.id)
       else
         markerIDs[marker.id] = true
+      end
+      -- `cue` stays OPTIONAL: a marker with none is evaluated and reported but draws nothing,
+      -- which is what the two Warlock context markers still are.
+      if marker.cue ~= nil then
+        local cue = cues()[marker.cue]
+        if not cue then
+          fail("cue", entry.id, "marker " .. tostring(marker.id) .. " names undeclared cue "
+            .. tostring(marker.cue))
+        elseif bySlot[cue.slot] and bySlot[cue.slot] ~= marker.cue then
+          -- One badge per slot. Two cues sharing one would draw a stack the player never sees.
+          fail("cue", entry.id, ("cues %s and %s both want badge slot %s")
+            :format(bySlot[cue.slot], marker.cue, tostring(cue.slot)))
+        else
+          bySlot[cue.slot] = marker.cue
+        end
       end
       local readable = marker.when ~= nil
       local sealed = marker.display ~= nil

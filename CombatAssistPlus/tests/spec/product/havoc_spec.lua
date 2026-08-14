@@ -42,6 +42,36 @@ describe("product characterization / Havoc pilot", function()
     assert.same({ "fel_rush", "immolation_aura", "throw_glaive" }, charged)
   end)
 
+  --- Immolation Aura alone, evaluated directly. `resolved` is cap's own structure, so building
+  --- one by hand fakes no client API — there is no recorded Havoc row set to bind against yet.
+  local function immolation(capped)
+    local entry
+    for _, e in ipairs(H.catalogBySpec(ns, 577).entries) do
+      if e.id == "immolation_aura" then entry = e end
+    end
+    local resolved = { entries = { { entry = entry, row = {}, charged = true } } }
+    return ns.Signal.Evaluate(resolved, H.world{
+      capped = H.map(false, { immolation_aura = capped }),
+    }).byEntry.immolation_aura
+  end
+
+  it("draws capped at max charges and blocked below it — never both, never neither", function()
+    local full = immolation(true)
+    assert.same({ "capped" }, full.cues)
+    assert.is_false(ns.Treatment.For(full).veil)
+    assert.equal("CHARGES", ns.Treatment.For(full).lane)
+
+    local recharging = immolation(false)
+    assert.same({ "blocked" }, recharging.cues)
+    assert.is_true(ns.Treatment.For(recharging).veil)
+  end)
+
+  it("draws neither state when the charge read refuses", function()
+    local v = immolation("unknown")
+    assert.same({}, v.cues)
+    assert.is_false(ns.Treatment.For(v).veil)
+  end)
+
   it("leaves no FALLBACK row without charges — the lane has no subject on this spec", function()
     local byAbility = {}
     for _, a in ipairs(cat.abilities) do byAbility[a.id] = a end

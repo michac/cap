@@ -11,15 +11,29 @@ local stream = ns.Capture.Open("draw", { sessions = 8, cap = 2000, dedup = false
 local pool = {}
 local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false }
 
+--- One pooled frame per row, carrying every primitive the shelf declares — a badge per cue
+--- key, built once. Acquisition happens out of combat (Bind.resolve refuses to run in it), so
+--- the in-combat path is only Show/Hide/SetVertexColor/SetAlpha.
 local function acquire(cid)
   local f = pool[cid]
   if f then return f end
   f = CreateFrame("Frame", nil, UIParent)
   f:Hide()
   f.border = ns.Paint.Border(f)
+  -- The frame sits PAD outside the CDM item, so the veil is inset back onto the icon face.
+  f.veil = ns.Paint.Veil(f, PAD)
+  f.badges = {}
+  for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
   pool[cid] = f
   return f
+end
+
+--- Every cue frame down. Called on each path that stops drawing a row, so a hidden row cannot
+--- leave a badge lit or stepping.
+local function quiet(f)
+  if f.veil then f.veil:Hide() end
+  for _, badge in pairs(f.badges or {}) do badge:Hide() end
 end
 
 local function configure(f, item, declared)
@@ -72,9 +86,28 @@ local function itemShown(item)
   return shown and true or false
 end
 
+--- Compose one row: lane border, then the derived veil, then a badge per cue.
 local function paint(f, verdict)
   local d = ns.Treatment.For(verdict)
   if d.lane then f.border:SetLane(d.lane) else f.border:Hide() end
+
+  if d.veil then f.veil:Show() else f.veil:Hide() end
+
+  local wanted = {}
+  for _, key in ipairs(d.cues or {}) do wanted[key] = true end
+  for key, badge in pairs(f.badges) do
+    if wanted[key] then badge:Show() else badge:Hide() end
+  end
+  return d
+end
+
+--- `id:LANE[/veil][+cue,cue]`, or `id:off` where the row draws nothing at all.
+local function cell(id, d)
+  if not (d and d.lane) then return id .. ":off" end
+  local s = id .. ":" .. d.lane
+  if d.veil then s = s .. "/veil" end
+  if #(d.cues or {}) > 0 then s = s .. "+" .. table.concat(d.cues, ",") end
+  return s
 end
 
 local function num(v)
@@ -116,7 +149,7 @@ local function barReport()
 end
 
 local function hideAll(edge)
-  for _, f in pairs(pool) do f:Hide() end
+  for _, f in pairs(pool) do quiet(f); f:Hide() end
   local bars, bar = barReport()
   write(Overlay.Render{ entries = 0, rows = 0, anchored = 0, confirmed = 0,
     hidden = 0, noframe = 0, bars = bars, bar = bar }, edge)
@@ -132,7 +165,7 @@ local function rebuild(bound)
     live[item.row.cooldownID] = true
   end
   table.sort(state.order)
-  for cid, f in pairs(pool) do if not live[cid] then f:Hide() end end
+  for cid, f in pairs(pool) do if not live[cid] then quiet(f); f:Hide() end end
   for _, id in ipairs(state.order) do
     local item = state.itemOf[id]
     configure(acquire(item.row.cooldownID), item, bound.declared)
@@ -164,20 +197,21 @@ local function draw(out, bound, edge)
     rows = rows + 1
     if not item then
       noframe = noframe + 1
+      quiet(f)
       f:Hide()
       cells[#cells + 1] = id .. ":noframe"
     elseif not itemShown(item) then
       anchored = anchored + 1
       if ok then confirmed = confirmed + 1 end
       hidden = hidden + 1
+      quiet(f)
       f:Hide()
       cells[#cells + 1] = id .. ":hidden"
     else
       anchored = anchored + 1
       if ok then confirmed = confirmed + 1 end
-      paint(f, verdict)
+      cells[#cells + 1] = cell(id, paint(f, verdict))
       f:Show()
-      cells[#cells + 1] = id .. ":" .. (verdict.tier or "off")
       for _, marker in ipairs(verdict.markers or {}) do marks[#marks + 1] = id .. ":" .. marker end
     end
   end

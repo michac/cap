@@ -119,12 +119,23 @@ local function tally(health, name, value)
   if value == nil or value == UNKNOWN then slot.unknown = slot.unknown + 1 else slot.known = slot.known + 1 end
 end
 
+-- Per-ability gates Track copies straight through from the live reads. `ready` is absent
+-- because it is the one Track MAINTAINS — the latch and the charge ledger are its whole job.
+--
+-- ⚠ `capped` deliberately bypasses the charge ledger and is read live every tick. A napkin
+-- count cannot survive Immolation Aura's demon-form flip (the override id is not in the frozen
+-- spellIDs union, so a Consuming Fire cast would never debit) and `isActive` needs no ledger.
+local COPIED = { "proc", "identity", "capped" }
+Track.COPIED = COPIED
+
 function Instance:World(_, reads)
   reads = reads or {}
   local world = {
-    ready = {}, proc = reads.proc or {}, identity = reads.identity or {},
-    resource = reads.resource, resourceMax = reads.resourceMax, chargeProvenance = {},
+    ready = {}, resource = reads.resource, resourceMax = reads.resourceMax,
+    chargeProvenance = {},
   }
+  for _, name in ipairs(COPIED) do world[name] = reads[name] or {} end
+
   local health = { predicates = {}, abilities = 0 }
   for id, ability in pairs(self.abilities) do
     health.abilities = health.abilities + 1
@@ -139,8 +150,9 @@ function Instance:World(_, reads)
     if ability.charged and charge then world.chargeProvenance[id] = charge.provenance end
     local needs = ability.needs
     if needs == nil or needs.ready then tally(health.predicates, "ready", ready) end
-    if needs == nil or needs.proc then tally(health.predicates, "proc", world.proc[id]) end
-    if needs == nil or needs.identity then tally(health.predicates, "identity", world.identity[id]) end
+    for _, name in ipairs(COPIED) do
+      if needs == nil or needs[name] then tally(health.predicates, name, world[name][id]) end
+    end
   end
   if (reads.needsResource ~= false) then tally(health.predicates, "resource", world.resource) end
   return world, health
