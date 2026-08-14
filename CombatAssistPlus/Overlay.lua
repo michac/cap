@@ -1,62 +1,50 @@
--- Overlay.lua — static addon-owned emphasis and readable context dots on CDM rows.
--- No animation and no stock-proc suppression: the first flight tests coexistence.
+-- Overlay.lua — addon-owned lane borders on CDM rows, drawn through ns.Paint.
+-- No stock-proc suppression: the first flight tests coexistence.
 local ADDON, ns = ...
 
 local issecretvalue = issecretvalue
-local PAD, DOT = 2, 7
+local PAD = 2
 
 ns.Overlay = ns.Overlay or {}
 local Overlay = ns.Overlay
 local stream = ns.Capture.Open("draw", { sessions = 8, cap = 2000, dedup = false })
 local pool = {}
-local state = { bound = nil, order = {}, rowOf = {}, dark = false }
-
-local function buildRing(host)
-  local parts = {}
-  local thickness = ns.Treatment.EMPHASIS.thickness
-  local function part(a, b, horizontal)
-    local t = host:CreateTexture(nil, "OVERLAY")
-    t:SetColorTexture(1, 1, 1, 1)
-    if horizontal then
-      t:SetPoint(a); t:SetPoint(b); t:SetHeight(thickness)
-    else
-      t:SetPoint(a, host, a, 0, -thickness)
-      t:SetPoint(b, host, b, 0, thickness)
-      t:SetWidth(thickness)
-    end
-    t:Hide()
-    parts[#parts + 1] = t
-  end
-  part("TOPLEFT", "TOPRIGHT", true)
-  part("BOTTOMLEFT", "BOTTOMRIGHT", true)
-  part("TOPLEFT", "BOTTOMLEFT", false)
-  part("TOPRIGHT", "BOTTOMRIGHT", false)
-  return parts
-end
-
-local function buildDot(host, id)
-  local d = ns.Treatment.Marker(id)
-  local t = host:CreateTexture(nil, "OVERLAY", nil, 2)
-  t:SetColorTexture(d.r, d.g, d.b, d.a)
-  t:SetSize(DOT, DOT)
-  t:SetPoint(d.slot == "left" and "BOTTOMLEFT" or "BOTTOMRIGHT", host,
-    d.slot == "left" and "BOTTOMLEFT" or "BOTTOMRIGHT", 0, 0)
-  t:Hide()
-  return t
-end
+local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false }
 
 local function acquire(cid)
   local f = pool[cid]
   if f then return f end
   f = CreateFrame("Frame", nil, UIParent)
   f:Hide()
-  f.ring = buildRing(f)
-  f.markers = {
-    dreadstalkers = buildDot(f, "dreadstalkers"),
-    grimoire = buildDot(f, "grimoire"),
-  }
+  f.border = ns.Paint.Border(f)
+  f.channels, f.channelStatus = {}, {}
   pool[cid] = f
   return f
+end
+
+local function configure(f, item, declared)
+  for _, container in pairs(f.channels) do container:Hide() end
+  f.channelStatus = {}
+  for _, marker in ipairs(item.entry.markers or {}) do
+    -- A readable marker is still evaluated and still reported; the shelf's cue vocabulary has
+    -- no drawn form for the two ad-hoc Warlock ones, so nothing is drawn for it.
+    if not marker.when then
+      local plan = ns.Channel.Plan(marker, declared)
+      local key = plan and (marker.id .. "/" .. plan.spell) or marker.id
+      local container = f.channels[key]
+      local status
+      if container then
+        container:Show()
+        status = "armed"
+      elseif not InCombatLockdown() then
+        container, status = ns.Channel.Arm(f, marker, declared)
+        if container then f.channels[key] = container end
+      else
+        status = "refused"
+      end
+      f.channelStatus[marker.id] = status or "refused"
+    end
+  end
 end
 
 local function layer(f)
@@ -86,19 +74,7 @@ end
 
 local function paint(f, verdict)
   local d = ns.Treatment.For(verdict)
-  local ring = d.ring
-  for _, t in ipairs(f.ring) do
-    if ring then
-      t:SetVertexColor(ring.r, ring.g, ring.b)
-      t:SetAlpha(ring.a)
-      t:Show()
-    else
-      t:Hide()
-    end
-  end
-  local shown = {}
-  for _, id in ipairs(verdict.markers or {}) do shown[id] = true end
-  for id, t in pairs(f.markers) do if shown[id] then t:Show() else t:Hide() end end
+  if d.lane then f.border:SetLane(d.lane) else f.border:Hide() end
 end
 
 local function num(v)
@@ -118,6 +94,7 @@ function Overlay.Render(snap)
     .. " P{" .. (#(snap.cells or {}) > 0 and table.concat(snap.cells, " ") or "-") .. "}"
     .. " M{" .. (#(snap.marks or {}) > 0 and table.concat(snap.marks, " ") or "-") .. "}"
     .. " B{" .. (#(snap.bars or {}) > 0 and table.concat(snap.bars, " ") or "-") .. "}"
+    .. " C{" .. (#(snap.channels or {}) > 0 and table.concat(snap.channels, " ") or "-") .. "}"
 end
 
 local lastBody, lines
@@ -146,15 +123,20 @@ local function hideAll(edge)
 end
 
 local function rebuild(bound)
-  state.bound, state.order, state.rowOf = bound, {}, {}
+  state.bound, state.order, state.rowOf, state.itemOf = bound, {}, {}, {}
   local live = {}
   for _, item in ipairs(bound.entries or {}) do
     state.order[#state.order + 1] = item.entry.id
     state.rowOf[item.entry.id] = item.row.cooldownID
+    state.itemOf[item.entry.id] = item
     live[item.row.cooldownID] = true
   end
   table.sort(state.order)
   for cid, f in pairs(pool) do if not live[cid] then f:Hide() end end
+  for _, id in ipairs(state.order) do
+    local item = state.itemOf[id]
+    configure(acquire(item.row.cooldownID), item, bound.declared)
+  end
 end
 
 local function draw(out, bound, edge)
@@ -162,11 +144,21 @@ local function draw(out, bound, edge)
   if bound ~= state.bound then rebuild(bound) end
 
   local rows, anchored, confirmed, hidden, noframe = 0, 0, 0, 0, 0
-  local cells, marks = {}, {}
+  local cells, marks, channels = {}, {}, {}
   for _, id in ipairs(state.order) do
     local verdict = out.byEntry[id]
     local cid = state.rowOf[id]
     local f = acquire(cid)
+    -- A combat-time acquisition refusal gets one honest retry after restriction lifts.
+    for _, status in pairs(f.channelStatus) do
+      if status == "refused" and not InCombatLockdown() then
+        configure(f, state.itemOf[id], bound.declared)
+        break
+      end
+    end
+    for marker, status in pairs(f.channelStatus) do
+      channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
+    end
     layer(f)
     local item, ok = anchor(f, cid)
     rows = rows + 1
@@ -185,14 +177,15 @@ local function draw(out, bound, edge)
       if ok then confirmed = confirmed + 1 end
       paint(f, verdict)
       f:Show()
-      cells[#cells + 1] = id .. ":" .. (verdict.emphasized and "on" or "off")
+      cells[#cells + 1] = id .. ":" .. (verdict.tier or "off")
       for _, marker in ipairs(verdict.markers or {}) do marks[#marks + 1] = id .. ":" .. marker end
     end
   end
+  table.sort(channels)
   local bars, bar = barReport()
   write(Overlay.Render{ entries = #state.order, rows = rows, anchored = anchored,
     confirmed = confirmed, hidden = hidden, noframe = noframe,
-    cells = cells, marks = marks, bars = bars, bar = bar }, edge)
+    cells = cells, marks = marks, channels = channels, bars = bars, bar = bar }, edge)
 end
 
 ns.Sense.OnVerdicts(draw)

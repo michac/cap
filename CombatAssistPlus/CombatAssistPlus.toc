@@ -1,4 +1,4 @@
-## Interface: 120007
+## Interface: 120100
 ## Title: Combat Assist Plus
 ## Notes: Combat assistance overlay for Blizzard's Cooldown Manager.
 ## Author: Michael Christiansen
@@ -11,12 +11,17 @@ Capture.lua
 Bind.lua
 Catalog.lua
 Catalogs\Demonology.lua
+Catalogs\Destruction.lua
 Log.lua
 Signal.lua
 Track.lua
+Style.lua
 Treatment.lua
+Paint.lua
+Channel.lua
 Sense.lua
 Bars.lua
 Overlay.lua
 Frame.lua
+StylePanel.lua
 Mode.lua

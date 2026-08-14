@@ -20,8 +20,12 @@ function H.fresh()
   H.load(ns, "Catalog.lua")
   H.load(ns, "Signal.lua")
   H.load(ns, "Track.lua")
+  H.load(ns, "Style.lua")
   H.load(ns, "Treatment.lua")
+  H.load(ns, "Paint.lua")
+  H.load(ns, "Channel.lua")
   H.load(ns, "Catalogs/Demonology.lua")
+  H.load(ns, "Catalogs/Destruction.lua")
   return ns
 end
 
@@ -40,6 +44,14 @@ end
 
 function H.catalog(ns)
   return ns.Catalog.All()[1]
+end
+
+function H.catalogBySpec(ns, spec)
+  for _, cat in ipairs(ns.Catalog.All()) do if cat.spec == spec then return cat end end
+end
+
+function H.destructionRows()
+  return assert(loadfile(ROOT .. "tests/fixtures/destruction-rows.lua"))()
 end
 
 --- A Track bound to the client-authored row set — the same call Sense makes.

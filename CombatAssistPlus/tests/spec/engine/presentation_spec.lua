@@ -5,19 +5,19 @@ describe("engine / presentation", function()
   local ns
   before_each(function() ns = H.fresh() end)
 
-  it("has one static emphasis and no pulse vocabulary", function()
-    local d = ns.Treatment.For{ emphasized = true, strength = 0.5 }
-    assert.is_not_nil(d.ring)
+  it("maps each discrete tier to one whole lane treatment", function()
+    assert.same({ "ASAP", "SOON", "FALLBACK" }, ns.Treatment.ORDER)
+    for _, tier in ipairs(ns.Treatment.ORDER) do
+      local d = ns.Treatment.For{ tier = tier }
+      assert.is_true(d.emphasized, tier .. " draws nothing")
+      assert.is_number(d.thickness)
+    end
     assert.is_nil(ns.Treatment.Pulse)
-    assert.is_nil(ns.Treatment.ORDER)
   end)
 
-  it("gives each readable marker a distinct fixed slot", function()
-    local dogs = ns.Treatment.Marker("dreadstalkers")
-    local grim = ns.Treatment.Marker("grimoire")
-    assert.is_not_nil(dogs)
-    assert.is_not_nil(grim)
-    assert.is_not_equal(dogs.slot, grim.slot)
+  it("has no ad-hoc marker vocabulary beside the shelf's cues", function()
+    assert.is_nil(ns.Treatment.MARKERS)
+    assert.is_nil(ns.Treatment.Marker)
   end)
 
   it("plans only the independent declared bar and carries no icon treatment", function()
@@ -31,4 +31,3 @@ describe("engine / presentation", function()
     assert.is_nil(plan[1].treatment)
   end)
 end)
-
