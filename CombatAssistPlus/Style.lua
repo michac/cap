@@ -216,12 +216,6 @@ ns.Style = {
       swipe = false,
       veil = false,
     },
-    withheld = {
-      border = true,
-      cues = {  },
-      swipe = false,
-      veil = true,
-    },
   },
   version = 2,
 }
