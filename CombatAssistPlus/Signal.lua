@@ -35,44 +35,49 @@ local function all(terms, world)
   local blind = false
   for _, term in ipairs(terms or {}) do
     local value = Signal.Term(term, world)
-    if value == false then return false, blind end
+    if value == false then return false, false end
     if value == UNKNOWN then blind = true end
   end
   if blind then return false, true end
   return true, false
 end
 
-local function strength(entry, world)
-  local spec = entry.strength
-  if not spec or spec.source ~= "resource" then return nil end
-  local value, max = world.resource, world.resourceMax
-  if type(value) ~= "number" or type(max) ~= "number" or max <= 0 then return nil end
-  local n = math.max(0, math.min(1, value / max))
-  if spec.direction == "falling" then n = 1 - n end
-  return n
+local function tier(entry, world)
+  local uncertain
+  for _, band in ipairs(entry.bands or {}) do
+    if uncertain and band.tier ~= uncertain then return nil, true end
+    local on, blind = all(band.when, world)
+    if on then return band.tier, false end
+    if blind then uncertain = band.tier end
+  end
+  return nil, uncertain ~= nil
 end
 
 function Signal.Evaluate(resolved, world)
   local out = { byEntry = {}, emphasized = 0, markers = 0, unknowns = 0 }
   for _, bound in ipairs((resolved or {}).entries or {}) do
     local entry = bound.entry
-    local on, blind = all(entry.when, world)
-    local verdict = { entry = entry.id, row = bound.row, emphasized = on, markers = {} }
-    if on then
+    local selected, blind = tier(entry, world)
+    local verdict = {
+      entry = entry.id, row = bound.row, tier = selected,
+      emphasized = selected ~= nil, markers = {},
+    }
+    if selected then
       out.emphasized = out.emphasized + 1
-      verdict.strength = strength(entry, world)
     end
     if blind then out.unknowns = out.unknowns + 1 end
     for _, marker in ipairs(entry.markers or {}) do
-      local shown, markerBlind = all(marker.when, world)
-      if shown then
-        verdict.markers[#verdict.markers + 1] = marker.id
-        out.markers = out.markers + 1
+      -- Sealed displays are acquired by Channel and never become Lua predicates.
+      if marker.when then
+        local shown, markerBlind = all(marker.when, world)
+        if shown then
+          verdict.markers[#verdict.markers + 1] = marker.id
+          out.markers = out.markers + 1
+        end
+        if markerBlind then out.unknowns = out.unknowns + 1 end
       end
-      if markerBlind then out.unknowns = out.unknowns + 1 end
     end
     out.byEntry[entry.id] = verdict
   end
   return out
 end
-

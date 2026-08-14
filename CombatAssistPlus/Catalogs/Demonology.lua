@@ -20,7 +20,11 @@ ns.Catalog.Register{
   entries = {
     {
       id = "tyrant", ability = "tyrant",
-      when = { { "ready", "tyrant" } },
+      -- Canonical readiness-tier example. Its marker forms are the canonical readable
+      -- fact-to-context examples; their gameplay meaning remains provisional here.
+      bands = {
+        { tier = "SOON", when = { { "ready", "tyrant" } } },
+      },
       markers = {
         -- These mean exactly what the readable rows establish: dogs were committed and
         -- their cooldown is running; the Grimoire row is transformed. Neither claims the
@@ -31,8 +35,11 @@ ns.Catalog.Register{
     },
     {
       id = "demonbolt", ability = "demonbolt",
-      when = { { "proc", "demonbolt" } },
-      strength = { source = "resource", direction = "falling" },
+      -- Canonical proc-plus-secondary-resource tier example.
+      bands = {
+        { tier = "SOON", when = { { "proc", "demonbolt" }, { "resource", "<=", 3 } } },
+        { tier = "FALLBACK", when = { { "proc", "demonbolt" } } },
+      },
     },
   },
 

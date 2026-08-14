@@ -6,6 +6,8 @@ local Catalog = {}
 ns.Catalog = Catalog
 
 local registry = {}
+local TIERS = { ASAP = 3, SOON = 2, FALLBACK = 1 }
+Catalog.TIERS = TIERS
 local PREDICATES = {
   ready = { arity = 1, subject = true },
   proc = { arity = 1, subject = true },
@@ -13,6 +15,8 @@ local PREDICATES = {
   resource = { arity = 2 },
 }
 Catalog.PREDICATES = PREDICATES
+local DISPLAYS = { ["player-aura-stacks"] = true }
+Catalog.DISPLAYS = DISPLAYS
 
 function Catalog.Register(cat)
   assert(type(cat) == "table", "Catalog.Register needs a table")
@@ -38,7 +42,9 @@ end
 
 local function eachCondition(cat, fn)
   for _, entry in ipairs(cat.entries or {}) do
-    for _, term in ipairs(entry.when or {}) do fn(entry, term, "emphasis") end
+    for _, band in ipairs(entry.bands or {}) do
+      for _, term in ipairs(band.when or {}) do fn(entry, term, "tier " .. tostring(band.tier)) end
+    end
     for _, marker in ipairs(entry.markers or {}) do
       for _, term in ipairs(marker.when or {}) do fn(entry, term, "marker " .. tostring(marker.id)) end
     end
@@ -61,6 +67,9 @@ function Catalog.Check(cat)
       abilities[ability.id] = ability
     end
     if type(ability.spell) ~= "number" then fail("shape", ability.id, "ability has no numeric spell id") end
+    if ability.charged ~= nil and type(ability.charged) ~= "boolean" then
+      fail("shape", ability.id, "charged must be boolean")
+    end
   end
 
   local entries = {}
@@ -75,8 +84,21 @@ function Catalog.Check(cat)
     if not abilities[entry.ability] then
       fail("subject", entry.id, "entry names an undeclared ability")
     end
-    if type(entry.when) ~= "table" or #entry.when == 0 then
-      fail("shape", entry.id, "entry has no readable emphasis condition")
+    if type(entry.bands) ~= "table" or #entry.bands == 0 then
+      fail("shape", entry.id, "entry has no readable tier bands")
+    end
+    local previous
+    for _, band in ipairs(entry.bands or {}) do
+      local rank = TIERS[band.tier]
+      if not rank then
+        fail("tier", entry.id, "band names unsupported tier " .. tostring(band.tier))
+      elseif previous and rank > previous then
+        fail("tier", entry.id, "bands must not rise in priority")
+      end
+      previous = rank or previous
+      if type(band.when) ~= "table" or #band.when == 0 then
+        fail("shape", entry.id, "tier " .. tostring(band.tier) .. " has no readable condition")
+      end
     end
     local markerIDs = {}
     for _, marker in ipairs(entry.markers or {}) do
@@ -87,8 +109,26 @@ function Catalog.Check(cat)
       else
         markerIDs[marker.id] = true
       end
-      if type(marker.when) ~= "table" or #marker.when == 0 then
+      local readable = marker.when ~= nil
+      local sealed = marker.display ~= nil
+      if readable == sealed then
+        fail("shape", entry.id, "marker " .. tostring(marker.id) .. " needs exactly one of when or display")
+      elseif readable and (type(marker.when) ~= "table" or #marker.when == 0) then
         fail("shape", entry.id, "marker " .. tostring(marker.id) .. " has no readable condition")
+      elseif sealed then
+        local display = marker.display
+        if type(display) ~= "table" or not DISPLAYS[display.kind] then
+          fail("display", entry.id, "marker " .. tostring(marker.id) .. " names unsupported display "
+            .. tostring(type(display) == "table" and display.kind or nil))
+        elseif display.kind == "player-aura-stacks" then
+          if not abilities[display.ability] then
+            fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
+              .. tostring(display.ability))
+          end
+          if display.min ~= 2 then
+            fail("display", entry.id, "player-aura-stacks currently supports min = 2")
+          end
+        end
       end
     end
   end
@@ -139,14 +179,23 @@ local function findRow(ability, rows)
 end
 
 function Catalog.Resolve(cat, rows)
-  local out = { abilities = {}, entries = {}, byAbility = {}, byEntry = {}, dropped = {} }
+  local out = {
+    abilities = {}, entries = {}, byAbility = {}, byEntry = {}, declared = {}, dropped = {},
+  }
+  local needsRow = {}
+  for _, entry in ipairs(cat.entries or {}) do needsRow[entry.ability] = true end
+  eachCondition(cat, function(_, term)
+    local spec = PREDICATES[term[1]]
+    if spec and spec.subject then needsRow[term[2]] = true end
+  end)
   for _, ability in ipairs(cat.abilities or {}) do
+    out.declared[ability.id] = ability
     local row = findRow(ability, rows)
     if row then
       local bound = { ability = ability, row = row }
       out.abilities[#out.abilities + 1] = bound
       out.byAbility[ability.id] = row
-    else
+    elseif needsRow[ability.id] then
       out.dropped[#out.dropped + 1] = { id = ability.id, spell = ability.spell, why = "no CDM row on this build" }
     end
   end

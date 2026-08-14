@@ -45,6 +45,7 @@ local state = {
   hooks = 0,
   edges = 0,
   refused = 0,
+  duplicates = 0,
 }
 
 -- ---------------------------------------------------------------------------
@@ -111,13 +112,18 @@ local function readCooldown(spellID)
   return (start + duration - GetTime()) <= 0
 end
 
-local function readMaxCharges(spellID)
+local function readCharges(spellID)
   if not (C_Spell and C_Spell.GetSpellCharges) then return nil end
   local ok, info = pcall(C_Spell.GetSpellCharges, spellID)
   if not ok then return nil end
-  local m = field(info, "maxCharges")
-  if type(m) ~= "number" then return nil end
-  return m
+  local current = field(info, "currentCharges")
+  local maximum = field(info, "maxCharges")
+  local recharge = field(info, "cooldownDuration")
+  if type(current) ~= "number" or type(maximum) ~= "number" then return nil end
+  -- Duration is best-effort: a full-charge seed is still exact even when this is zero,
+  -- and Track retains the last positive measurement for duplicate filtering.
+  if type(recharge) ~= "number" or recharge <= 0 then recharge = nil end
+  return current, maximum, recharge
 end
 
 -- ---------------------------------------------------------------------------
@@ -135,6 +141,7 @@ do
   if E then
     EDGE_NAMES[E.Available] = "Available"
     EDGE_NAMES[E.OnCooldown] = "OnCooldown"
+    EDGE_NAMES[E.ChargeGained] = "ChargeGained"
     EDGE_NAMES[E.OnAuraApplied] = "OnAuraApplied"
     EDGE_NAMES[E.OnAuraRemoved] = "OnAuraRemoved"
   end
@@ -158,11 +165,14 @@ local function onAlert(frame, event)
   if not ok or type(cid) ~= "number" or issecretvalue(cid) then return end
 
   local now = GetTime()
-  local landed = state.track:Edge(now, cid, name)
+  local landed, refusedWhy = state.track:Edge(now, cid, name)
   if landed then
     state.edges = state.edges + 1
     edgeStream:Line(("t%.1f %s cid:%d"):format(now, name, cid))
     evaluate(now, "edge")
+  elseif refusedWhy == "duplicate" then
+    state.duplicates = state.duplicates + 1
+    edgeStream:Line(("t%.1f duplicate %s cid:%d"):format(now, name, cid))
   else
     state.refused = state.refused + 1
     if not refusedSeen[cid] then
@@ -231,7 +241,7 @@ function Sense.Render(snap)
     local v = (out.byEntry or {})[id]
     if v then
       local marks = (#(v.markers or {}) > 0) and ("+" .. table.concat(v.markers, ",")) or ""
-      entries[#entries + 1] = id .. ":" .. (v.emphasized and "on" or "off") .. marks
+      entries[#entries + 1] = id .. ":" .. (v.tier or "off") .. marks
     end
   end
 
@@ -246,6 +256,7 @@ function Sense.Render(snap)
   return "S{" .. table.concat(t, " ") .. "}"
     .. " E{" .. (#entries > 0 and table.concat(entries, " ") or "-") .. "}"
     .. " R{" .. table.concat(g, " ") .. "}"
+    .. " Q{" .. (#(snap.charges or {}) > 0 and table.concat(snap.charges, " ") or "-") .. "}"
     .. " S{" .. table.concat(s, " ") .. "}"
 end
 
@@ -292,6 +303,7 @@ local function write(snap, body, why, edge)
     blind = (snap.out or {}).unknowns,
     settled = snap.settled, settledBy = snap.settledBy, dark = snap.dark,
     combat = state.combat,
+    chargeProvenance = table.concat(snap.charges or {}, ","),
   }
   for _, name in ipairs(PREDICATE_ORDER) do
     local slot = (health.predicates or {})[name]
@@ -306,6 +318,7 @@ local function write(snap, body, why, edge)
   tierStream:Meta("settled", tostring(snap.settled))
   tierStream:Meta("edges", state.edges)
   tierStream:Meta("edgesRefused", state.refused)
+  tierStream:Meta("chargeDuplicates", state.duplicates)
   tierStream:Meta("hooks", state.hooks)
   tierStream:Meta("samples", rowSeq)
 end
@@ -354,12 +367,17 @@ function evaluate(now, why, edge)
   local world, health = state.track:World(now, buildReads())
   local out = ns.Signal.Evaluate(state.bound, world)
 
+  local charges = {}
+  for _, id in ipairs(state.chargeOrder or {}) do
+    charges[#charges + 1] = id .. ":" .. (world.chargeProvenance[id] or "unknown")
+  end
+
   local snap = {
     entries = #state.bound.entries,
     order = state.order,
     out = out, health = health,
     settled = state.settled, settledBy = state.settledBy,
-    dark = state.dark,
+    dark = state.dark, charges = charges,
   }
   local body = Sense.Render(snap)
   if edge or body ~= lastBody then write(snap, body, why, edge) end
@@ -424,10 +442,14 @@ end
 --- for is left unknown rather than assumed.
 local function seedBaseline()
   for _, item in ipairs(state.bound.abilities) do
-    local id, spellID = item.ability.id, item.row.primary
-    local maxCharges = readMaxCharges(spellID)
-    if maxCharges then state.track:SeedCharges(id, maxCharges) end
-    state.track:SeedReady(item.row.cooldownID, readCooldown(spellID))
+    local id = item.ability.id
+    local spellID = item.ability.charged and item.ability.spell or item.row.primary
+    if item.ability.charged then
+      local current, maximum, recharge = readCharges(spellID)
+      if current then state.track:SeedCharges(id, current, maximum, recharge) end
+    else
+      state.track:SeedReady(item.row.cooldownID, readCooldown(spellID))
+    end
   end
 end
 
@@ -450,7 +472,7 @@ local function rebind(generation)
     -- spec.md §3.5: no catalog, nothing at all — and the reason goes to the log and
     -- nowhere else. A chat line at every login for a permanent property of the build
     -- is noise, and the one state a player could act on raises none of cap's events.
-    state.catalog, state.bound, state.track, state.order = nil, nil, nil, nil
+    state.catalog, state.bound, state.track, state.order, state.chargeOrder = nil, nil, nil, nil, nil
     return
   end
 
@@ -473,8 +495,13 @@ local function rebind(generation)
 
   state.bound = resolved
   state.order = {}
+  state.chargeOrder = {}
   for _, item in ipairs(resolved.entries) do state.order[#state.order + 1] = item.entry.id end
+  for _, item in ipairs(resolved.abilities) do
+    if item.ability.charged then state.chargeOrder[#state.chargeOrder + 1] = item.ability.id end
+  end
   table.sort(state.order)
+  table.sort(state.chargeOrder)
 
   state.track = ns.Track.New()
   state.track:Bind(ns.Track.Binding(resolved, state.reads))
@@ -533,7 +560,8 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
-events:SetScript("OnEvent", function(_, event)
+events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+events:SetScript("OnEvent", function(_, event, unit, _, spellID)
   local now = GetTime()
 
   if event == "PLAYER_REGEN_DISABLED" then
@@ -550,7 +578,17 @@ events:SetScript("OnEvent", function(_, event)
     state.combat = false
     markEdgeCombat("end")
     state.dark = false
+    if state.track and state.bound then seedBaseline() end
     evaluate(now, event, "combat end")
+    return
+  end
+
+  if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" and state.track
+      and plain(spellID) and type(spellID) == "number" then
+    if state.track:CastSpell(now, spellID) then
+      edgeStream:Line(("t%.1f cast spell:%d charge:napkin"):format(now, spellID))
+      evaluate(now, event, "charge spend")
+    end
     return
   end
 
