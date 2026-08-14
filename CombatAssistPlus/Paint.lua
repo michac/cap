@@ -4,6 +4,8 @@
 -- cannot show different pixels — that divergence is what render-shelf.md exists to end.
 local ADDON, ns = ...
 
+local issecretvalue = issecretvalue
+
 local Paint = {}
 ns.Paint = Paint
 
@@ -98,11 +100,28 @@ function Paint.Arrival(edge)
   return snap
 end
 
+--- The border frame is sized and anchored by its CENTRE, never SetAllPoints: four pinned
+--- anchors hold the rect against the Scale animation, which then multiplies the strips' own
+--- coordinates instead and draws a hash rather than a box.
+local function fit(edge, host)
+  local w, h = host:GetWidth(), host:GetHeight()
+  if type(w) ~= "number" or type(h) ~= "number" or issecretvalue(w) or issecretvalue(h)
+    or w <= 0 or h <= 0 then
+    w = ns.Style.surfaces.icon_px
+    h = w
+  end
+  if w ~= edge.fitW or h ~= edge.fitH then
+    edge:SetSize(w, h)
+    edge.fitW, edge.fitH = w, h
+  end
+end
+
 --- One border per host, carrying a pre-built ring for every lane. Switching lane is Show/Hide
 --- plus SetVertexColor, which is all cap is allowed to write in combat.
 function Paint.Border(host, lane)
   local edge = CreateFrame("Frame", nil, host)
-  edge:SetAllPoints(host)
+  edge:SetPoint("CENTER", host, "CENTER", 0, 0)
+  fit(edge, host)
   edge:Hide()
 
   local rings = {}
@@ -116,6 +135,7 @@ function Paint.Border(host, lane)
   function border:SetLane(name)
     local spec = ns.Style.lanes[name]
     if not spec then return self:Hide() end
+    fit(edge, host)
     for ring, parts in pairs(rings) do
       for _, t in ipairs(parts) do
         if ring == name then
@@ -168,6 +188,12 @@ local function texturePath(name)
   return ns.Style.badges.texture_root .. name .. ".tga"
 end
 
+-- Badge art is drawn far smaller than it is authored; TRILINEAR is what keeps the minified
+-- glyph clean instead of crunchy.
+local function setArt(texture, name)
+  texture:SetTexture(texturePath(name), nil, nil, "TRILINEAR")
+end
+
 local function tick()
   local now = GetTime()
   local any = false
@@ -209,7 +235,7 @@ function Paint.Badge(host, key)
   end
 
   local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
-  plate:SetTexture(texturePath(b.plate.texture))
+  setArt(plate, b.plate.texture)
   plate:SetVertexColor(b.plate.rgb[1], b.plate.rgb[2], b.plate.rgb[3])
   plate:SetAlpha(b.plate.alpha)
   plate:SetSize(g.plate, g.plate)
@@ -246,7 +272,7 @@ function Paint.Badge(host, key)
   function badge:Step(now)
     local i = Paint.FrameIndex(count, cue.loop, now - (self.started or now), self.seconds)
     if i ~= self.shown then
-      sprite:SetTexture(texturePath(cue.frames[i]))
+      setArt(sprite, cue.frames[i])
       sprite:SetVertexColor(tint[1], tint[2], tint[3])
       self.shown = i
     end
@@ -265,7 +291,7 @@ function Paint.Glow(slot, key)
   local g = Paint.Geometry()
 
   local t = slot:CreateTexture(nil, "OVERLAY", nil, 5)
-  t:SetTexture(texturePath(ns.Style.badges.halo_texture))
+  setArt(t, ns.Style.badges.halo_texture)
   t:SetVertexColor(tint[1], tint[2], tint[3])
   t:SetSize(g.diameter * glow.scale, g.diameter * glow.scale)
   t:SetPoint("CENTER")
