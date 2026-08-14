@@ -15,6 +15,24 @@ describe("engine / presentation", function()
     assert.is_nil(ns.Treatment.Pulse)
   end)
 
+  it("substitutes CHARGES for every role lane, never stacking with one", function()
+    for _, tier in ipairs(ns.Treatment.ORDER) do
+      local d = ns.Treatment.For{ tier = tier, charged = true }
+      assert.equal("CHARGES", d.lane, tier .. " kept its role lane on a charged row")
+    end
+    -- A row with no readable tier draws no border, charged or not.
+    assert.is_false(ns.Treatment.For{ charged = true }.emphasized)
+  end)
+
+  it("carries the authored charged flag from the catalog through to the lane", function()
+    local cat = H.catalogBySpec(ns, 267)
+    local resolved = ns.Catalog.Resolve(cat, H.destructionRows())
+    assert.is_true(resolved.entries[1].charged)
+    local v = ns.Signal.Evaluate(resolved, H.world()).byEntry.conflagrate
+    assert.is_true(v.charged)
+    assert.equal("CHARGES", ns.Treatment.For(v).lane)
+  end)
+
   it("has no ad-hoc marker vocabulary beside the shelf's cues", function()
     assert.is_nil(ns.Treatment.MARKERS)
     assert.is_nil(ns.Treatment.Marker)

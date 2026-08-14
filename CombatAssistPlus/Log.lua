@@ -69,6 +69,13 @@ function Log.Render(snap)
     .. " C{" .. token(snap.spec) .. " hero:" .. token(snap.hero) .. "}"
 end
 
+--- A note from another module onto the binding log — the one stream whose subject is which
+--- icon is which. Marked, so it sits above the dedup and cannot be swallowed.
+function Log.Note(text)
+  if not ns.db then return end
+  stream:Mark(("t%.1f # %s"):format(GetTime(), token(text)))
+end
+
 -- ---------------------------------------------------------------------------
 -- The stateful wrapper
 -- ---------------------------------------------------------------------------

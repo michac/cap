@@ -13,8 +13,12 @@ Treatment.BAR = {
   fill = { r = 0.72, g = 0.58, b = 0.18, a = 0.82 },
 }
 
+--- CHARGES REPLACES the role lane rather than stacking with it: an ability wears exactly one
+--- border (render-shelf.md V2). The role lane the rotation authored is unchanged and still
+--- lives in the catalog; only the drawn hue moves.
 function Treatment.For(verdict)
   local lane = verdict and verdict.tier
+  if lane and verdict.charged then lane = "CHARGES" end
   local spec = lane and ns.Style and ns.Style.lanes[lane]
   if not spec then return { emphasized = false } end
   return { emphasized = true, lane = lane, thickness = spec.thickness_px }

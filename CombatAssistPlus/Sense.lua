@@ -493,6 +493,20 @@ local function rebind(generation)
       GetTime(), token(d.id), token(d.spell), token(d.why)))
   end
 
+  -- A DIAGNOSTIC, never a hint: it says this player's Cooldown Manager is ordered in a way
+  -- the catalog's reading model does not hold for, and says nothing about what to press.
+  local out = ns.Catalog.OrderCheck(cat, resolved, rows)
+  local told = out and (out.before .. ">" .. out.after) or nil
+  if told ~= state.orderTold then
+    state.orderTold = told
+    if told then
+      ns.Log.Note(("row-order %s is laid out after %s; this catalog reads left-to-right in "
+        .. "priority order"):format(out.before, out.after))
+      ns.Emit("your Cooldown Manager orders " .. out.after .. " before " .. out.before
+        .. ", which is not this catalog's priority order — read the row with that in mind.")
+    end
+  end
+
   state.bound = resolved
   state.order = {}
   state.chargeOrder = {}

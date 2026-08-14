@@ -12,6 +12,7 @@ Bind.lua
 Catalog.lua
 Catalogs\Demonology.lua
 Catalogs\Destruction.lua
+Catalogs\Havoc.lua
 Log.lua
 Signal.lua
 Track.lua

@@ -78,6 +78,19 @@ describe("engine / catalog", function()
     assert.equal(1276467, resolved.byAbility.grimoire.primary)
   end)
 
+  it("reports when the client lays the roster out against the authored priority", function()
+    local rows = H.rows()
+    local resolved = ns.Catalog.Resolve(cat, rows)
+    assert.is_nil(ns.Catalog.OrderCheck(cat, resolved, rows))
+
+    -- Same rows, reversed: the layout now disagrees with the catalog's own order.
+    local flipped = {}
+    for i = #rows, 1, -1 do flipped[#flipped + 1] = rows[i] end
+    local out = ns.Catalog.OrderCheck(cat, ns.Catalog.Resolve(cat, flipped), flipped)
+    assert.equal("tyrant", out.before)
+    assert.equal("demonbolt", out.after)
+  end)
+
   it("admits exactly one readable or sealed marker form", function()
     local destruction = H.catalogBySpec(ns, 267)
     assert.same({}, ns.Catalog.Check(destruction))

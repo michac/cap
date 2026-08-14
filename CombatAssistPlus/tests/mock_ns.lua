@@ -26,6 +26,8 @@ function H.fresh()
   H.load(ns, "Channel.lua")
   H.load(ns, "Catalogs/Demonology.lua")
   H.load(ns, "Catalogs/Destruction.lua")
+  -- Last, so `H.catalog(ns)` — registry entry 1 — stays Demonology for every existing spec.
+  H.load(ns, "Catalogs/Havoc.lua")
   return ns
 end
 

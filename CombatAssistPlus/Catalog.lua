@@ -202,11 +202,36 @@ function Catalog.Resolve(cat, rows)
   for _, entry in ipairs(cat.entries or {}) do
     local row = out.byAbility[entry.ability]
     if row then
-      out.entries[#out.entries + 1] = { entry = entry, row = row }
+      -- The AUTHORED flag, never a client maxCharges read: the artifact's roster column and
+      -- the live border must not be able to disagree about which rows are purple.
+      local charged = (out.declared[entry.ability] or {}).charged and true or false
+      out.entries[#out.entries + 1] = { entry = entry, row = row, charged = charged }
       out.byEntry[entry.id] = row
     end
   end
   return out
+end
+
+--- The authored priority against the client's own row order, or nil when they agree.
+---
+--- A catalog's entry order IS its priority, and the whole reading model assumes the Cooldown
+--- Manager lays those rows out in that order. Nothing guarantees it — the layout is Blizzard's,
+--- filtered by what the player enabled — and if it is wrong the model fails everywhere at once
+--- rather than degrading per ability. This names the first pair that is out of order. It is a
+--- diagnostic: it never says what to press.
+function Catalog.OrderCheck(cat, resolved, rows)
+  local at = {}
+  for i, row in ipairs(rows or {}) do at[row] = i end
+  local previous, previousID
+  for _, entry in ipairs((cat or {}).entries or {}) do
+    local position = at[(resolved or {}).byEntry and resolved.byEntry[entry.id]]
+    if position then
+      if previous and position < previous then
+        return { after = entry.id, before = previousID }
+      end
+      previous, previousID = position, entry.id
+    end
+  end
 end
 
 function Catalog.CheckBound(cat, rows)

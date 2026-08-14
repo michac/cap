@@ -59,7 +59,7 @@ function Signal.Evaluate(resolved, world)
     local entry = bound.entry
     local selected, blind = tier(entry, world)
     local verdict = {
-      entry = entry.id, row = bound.row, tier = selected,
+      entry = entry.id, row = bound.row, tier = selected, charged = bound.charged,
       emphasized = selected ~= nil, markers = {},
     }
     if selected then
