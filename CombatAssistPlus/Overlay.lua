@@ -9,7 +9,7 @@ ns.Overlay = ns.Overlay or {}
 local Overlay = ns.Overlay
 local stream = ns.Capture.Open("draw", { sessions = 8, cap = 2000, dedup = false })
 local pool = {}
-local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false }
+local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false, fresh = true }
 
 --- One pooled frame per row, carrying every primitive the shelf declares — a badge per cue
 --- key, built once. Acquisition happens out of combat (Bind.resolve refuses to run in it), so
@@ -32,6 +32,7 @@ end
 --- Every cue frame down. Called on each path that stops drawing a row, so a hidden row cannot
 --- leave a badge lit or stepping.
 local function quiet(f)
+  if f.border then f.border:Hide() end
   if f.veil then f.veil:Hide() end
   for _, badge in pairs(f.badges or {}) do badge:Hide() end
 end
@@ -87,9 +88,11 @@ local function itemShown(item)
 end
 
 --- Compose one row: lane border, then the derived veil, then a badge per cue.
-local function paint(f, verdict)
+local function paint(f, verdict, silent)
   local d = ns.Treatment.For(verdict)
+  f.border.silent = silent
   if d.lane then f.border:SetLane(d.lane) else f.border:Hide() end
+  f.border.silent = false
 
   if d.veil then f.veil:Show() else f.veil:Hide() end
 
@@ -148,7 +151,11 @@ local function barReport()
   return ns.Bars.Report()
 end
 
+--- Cap has stopped drawing — unsettled, dark, or catalog-less. The next draw is a resume, not
+--- an arrival, so it is marked silent: twelve rows snapping in unison says nothing became
+--- available, only that cap started looking again.
 local function hideAll(edge)
+  state.fresh = true
   for _, f in pairs(pool) do quiet(f); f:Hide() end
   local bars, bar = barReport()
   write(Overlay.Render{ entries = 0, rows = 0, anchored = 0, confirmed = 0,
@@ -157,6 +164,7 @@ end
 
 local function rebuild(bound)
   state.bound, state.order, state.rowOf, state.itemOf = bound, {}, {}, {}
+  state.fresh = true
   local live = {}
   for _, item in ipairs(bound.entries or {}) do
     state.order[#state.order + 1] = item.entry.id
@@ -175,6 +183,8 @@ end
 local function draw(out, bound, edge)
   if not (out and bound) then state.bound = nil; hideAll(edge); return end
   if bound ~= state.bound then rebuild(bound) end
+  local fresh = state.fresh
+  state.fresh = false
 
   local rows, anchored, confirmed, hidden, noframe = 0, 0, 0, 0, 0
   local cells, marks, channels = {}, {}, {}
@@ -210,7 +220,7 @@ local function draw(out, bound, edge)
     else
       anchored = anchored + 1
       if ok then confirmed = confirmed + 1 end
-      cells[#cells + 1] = cell(id, paint(f, verdict))
+      cells[#cells + 1] = cell(id, paint(f, verdict, fresh))
       f:Show()
       for _, marker in ipairs(verdict.markers or {}) do marks[#marks + 1] = id .. ":" .. marker end
     end

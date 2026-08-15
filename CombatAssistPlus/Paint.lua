@@ -100,6 +100,19 @@ function Paint.Arrival(edge)
   return snap
 end
 
+--- Arrival is a CHANGE of drawn lane — absent → present, or one lane → another. The live path
+--- repaints at 10 Hz, so repainting the same lane is emphatically NOT arrival; nor is the first
+--- draw after cap resumed drawing, which `silent` marks (roster churn is not arrival). Rate
+--- limited per row to the snap's own duration, so a lane that flickers cannot stack snaps.
+--- Pure, so the rule is desk-testable while the frame work around it is not.
+function Paint.ShouldSnap(border, name, now)
+  if border.silent or not name then return false end
+  if border.lane == name then return false end
+  local last = border.snappedAt
+  if last and now - last < ns.Style.arrival.duration_s then return false end
+  return true
+end
+
 --- The border frame is sized and anchored by its CENTRE, never SetAllPoints: four pinned
 --- anchors hold the rect against the Scale animation, which then multiplies the strips' own
 --- coordinates instead and draws a hash rather than a box.
@@ -135,6 +148,8 @@ function Paint.Border(host, lane)
   function border:SetLane(name)
     local spec = ns.Style.lanes[name]
     if not spec then return self:Hide() end
+    local now = GetTime()
+    local arrived = Paint.ShouldSnap(self, name, now)
     fit(edge, host)
     for ring, parts in pairs(rings) do
       for _, t in ipairs(parts) do
@@ -149,8 +164,14 @@ function Paint.Border(host, lane)
     end
     self.lane = name
     edge:Show()
+    if arrived then
+      self.snappedAt = now
+      self:Snap()
+    end
   end
 
+  --- A hidden row's border is ABSENT, so its next lane is an arrival. That is what makes a row
+  --- the CDM stopped showing — or one cap stopped drawing — snap when it comes back.
   function border:Hide()
     self.lane = nil
     edge:Hide()
@@ -163,7 +184,11 @@ function Paint.Border(host, lane)
     snap:Play()
   end
 
+  -- The constructor's own first paint is not an arrival: nothing became available, the frame
+  -- was just built.
+  border.silent = true
   if lane then border:SetLane(lane) end
+  border.silent = false
   return border
 end
 

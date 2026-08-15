@@ -88,6 +88,21 @@ describe("engine / style", function()
     assert.equal(1, ns.Paint.FrameIndex(4, "REPEAT", 99, 0))
   end)
 
+  it("snaps on arrival, and on nothing else", function()
+    local d = ns.Style.arrival.duration_s
+    -- Absent → present, and one lane → another, are both arrivals.
+    assert.is_true(ns.Paint.ShouldSnap({}, "ROTATION", 100))
+    assert.is_true(ns.Paint.ShouldSnap({ lane = "ROTATION" }, "COOLDOWN", 100))
+    -- Repainting the same lane at 10 Hz is not.
+    assert.is_false(ns.Paint.ShouldSnap({ lane = "ROTATION" }, "ROTATION", 100))
+    -- Neither is the first draw after a rebuild or a resume, nor a lane-less paint.
+    assert.is_false(ns.Paint.ShouldSnap({ silent = true }, "ROTATION", 100))
+    assert.is_false(ns.Paint.ShouldSnap({}, nil, 100))
+    -- Rate limited per row to the snap's own duration, so a flickering lane cannot stack.
+    assert.is_false(ns.Paint.ShouldSnap({ snappedAt = 100 }, "ROTATION", 100 + d / 2))
+    assert.is_true(ns.Paint.ShouldSnap({ snappedAt = 100 }, "ROTATION", 100 + d * 2))
+  end)
+
   it("ships a texture for every frame the cue vocabulary names", function()
     for key, cue in pairs(ns.Style.cues) do
       for _, frame in ipairs(cue.frames) do
