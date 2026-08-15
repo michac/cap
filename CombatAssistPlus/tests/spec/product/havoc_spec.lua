@@ -72,6 +72,48 @@ describe("product characterization / Havoc pilot", function()
     assert.is_false(ns.Treatment.For(v).veil)
   end)
 
+  --- One Fury spender, evaluated directly, with its affordability forced.
+  local function spender(id, affordable)
+    local entry
+    for _, e in ipairs(H.catalogBySpec(ns, 577).entries) do
+      if e.id == id then entry = e end
+    end
+    local resolved = { entries = { { entry = entry, row = {} } } }
+    return ns.Signal.Evaluate(resolved, H.world{
+      affordable = H.map(true, { [id] = affordable }),
+    }).byEntry[id]
+  end
+
+  it("draws starved on a spender that cannot be paid for, and nothing when it can", function()
+    for _, id in ipairs{ "chaos_strike", "blade_dance" } do
+      local broke = spender(id, false)
+      assert.same({ "starved" }, broke.cues, id .. " must wear the cue when Fury is short")
+      assert.is_true(ns.Treatment.For(broke).veil)
+
+      local rich = spender(id, true)
+      assert.same({}, rich.cues, id .. " must be clean when it is affordable")
+      assert.is_false(ns.Treatment.For(rich).veil)
+    end
+  end)
+
+  it("keeps a negated affordability read unknown-safe rather than assuming starved", function()
+    -- The trap the negation invites: `not unknown` is not `true`. A refused read must draw
+    -- nothing, never a cue that tells the player they are broke on no evidence.
+    for _, id in ipairs{ "chaos_strike", "blade_dance" } do
+      local v = spender(id, "unknown")
+      assert.same({}, v.cues, id .. " invented a cue from a refused read")
+      assert.is_false(ns.Treatment.For(v).veil)
+    end
+  end)
+
+  it("leaves the Fury generators clean, since they can never be unaffordable", function()
+    for _, id in ipairs{ "felblade", "demons_bite" } do
+      local entry
+      for _, e in ipairs(cat.entries) do if e.id == id then entry = e end end
+      assert.is_nil(entry.markers, id .. " is a generator and must carry no affordability cue")
+    end
+  end)
+
   it("leaves no FALLBACK row without charges — the lane has no subject on this spec", function()
     local byAbility = {}
     for _, a in ipairs(cat.abilities) do byAbility[a.id] = a end

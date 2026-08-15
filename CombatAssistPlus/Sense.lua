@@ -108,6 +108,18 @@ local function readCapped(spellID)
   return not active
 end
 
+--- Can the player pay for this right now. The SECOND return of `C_Spell.IsSpellUsable` is
+--- `insufficientPower`, which is the only one that means affordability — `isUsable` is false for
+--- a spell merely on cooldown, which the lane border already says. `AllowedWhenTainted`, so this
+--- answers in combat. `nil` — never `false` — when the call refuses, so a refused read is unknown.
+local function readAffordable(spellID)
+  if not (C_Spell and C_Spell.IsSpellUsable) then return nil end
+  local ok, _, insufficientPower = pcall(C_Spell.IsSpellUsable, spellID)
+  if not ok then return nil end
+  if type(insufficientPower) ~= "boolean" then return nil end
+  return not insufficientPower
+end
+
 --- Current and max for the catalog's declared power type. A primary resource is always
 --- secret, so the class check is the guard rather than a list of type names.
 local function readResource()
@@ -240,7 +252,7 @@ local function pair(t)
   return num(t.known) .. "/" .. num(t.known + t.unknown)
 end
 
-local PREDICATE_ORDER = { "ready", "proc", "identity", "capped", "resource" }
+local PREDICATE_ORDER = { "ready", "proc", "identity", "capped", "affordable", "resource" }
 
 --- The body a line carries. No clock, no game reads, no `pairs()` over anything whose
 --- order would move — a key that reorders breaks dedup nondeterministically.
@@ -287,7 +299,7 @@ end
 local lastBody
 
 local function buildReads()
-  local proc, identity, capped = {}, {}, {}
+  local proc, identity, capped, affordable = {}, {}, {}, {}
   local byAbility = (state.reads or {}).byAbility or {}
   local infoOf = {}
 
@@ -305,11 +317,12 @@ local function buildReads()
     if needs.proc then proc[id] = readProc(item.row.primary) end
     if needs.identity then identity[id] = readIdentity(info) end
     if needs.capped then capped[id] = readCapped(live) end
+    if needs.affordable then affordable[id] = readAffordable(live) end
   end
 
   local have, max = readResource()
   return {
-    proc = proc, identity = identity, capped = capped,
+    proc = proc, identity = identity, capped = capped, affordable = affordable,
     resource = have, resourceMax = max,
     needsResource = state.reads and state.reads.resource,
   }

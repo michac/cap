@@ -10,6 +10,7 @@ local function subject(term, world)
   if name == "ready" then return (world.ready or {})[id] end
   if name == "proc" then return (world.proc or {})[id] end
   if name == "capped" then return (world.capped or {})[id] end
+  if name == "affordable" then return (world.affordable or {})[id] end
   if name == "identity" then
     local value = (world.identity or {})[id]
     if value == nil or value == UNKNOWN then return UNKNOWN end

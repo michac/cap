@@ -125,7 +125,7 @@ end
 -- ⚠ `capped` deliberately bypasses the charge ledger and is read live every tick. A napkin
 -- count cannot survive Immolation Aura's demon-form flip (the override id is not in the frozen
 -- spellIDs union, so a Consuming Fire cast would never debit) and `isActive` needs no ledger.
-local COPIED = { "proc", "identity", "capped" }
+local COPIED = { "proc", "identity", "capped", "affordable" }
 Track.COPIED = COPIED
 
 function Instance:World(_, reads)

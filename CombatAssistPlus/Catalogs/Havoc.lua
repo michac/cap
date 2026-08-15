@@ -39,10 +39,22 @@ ns.Catalog.Register{
       bands = { { tier = "COOLDOWN", when = { { "ready", "eye_beam" } } } } },
     { id = "essence_break", ability = "essence_break",
       bands = { { tier = "COOLDOWN", when = { { "ready", "essence_break" } } } } },
+    -- The two Fury spenders. `ready` cannot carry affordability here: a row with no real cooldown
+    -- never raises an Available/OnCooldown edge, so its border stays lit whatever the Fury. The
+    -- generators cost nothing, so `insufficientPower` is never true for them — they stay clean
+    -- while the spenders wear the badge, which is the whole point of the cue.
     { id = "blade_dance", ability = "blade_dance",
-      bands = { { tier = "ROTATION", when = { { "ready", "blade_dance" } } } } },
+      bands = { { tier = "ROTATION", when = { { "ready", "blade_dance" } } } },
+      markers = {
+        { id = "blade_dance_starved", cue = "starved",
+          when = { { "affordable", "blade_dance", negate = true } } },
+      } },
     { id = "chaos_strike", ability = "chaos_strike",
-      bands = { { tier = "ROTATION", when = { { "ready", "chaos_strike" } } } } },
+      bands = { { tier = "ROTATION", when = { { "ready", "chaos_strike" } } } },
+      markers = {
+        { id = "chaos_strike_starved", cue = "starved",
+          when = { { "affordable", "chaos_strike", negate = true } } },
+      } },
     -- Two readable states off `isActive`, which is NeverSecret and therefore answers in both
     -- directions: at max it is the gold `capped` badge (a charge is being lost right now); below
     -- max it is the red `blocked` badge (hold the one you have, let the other come back).

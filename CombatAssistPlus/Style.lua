@@ -206,7 +206,6 @@ ns.Style = {
       cues = {
         "starved",
       },
-      desaturate = 1.00,
       swipe = false,
       veil = true,
     },

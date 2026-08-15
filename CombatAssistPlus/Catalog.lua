@@ -13,6 +13,7 @@ local PREDICATES = {
   proc = { arity = 1, subject = true },
   identity = { arity = 2, subject = true },
   capped = { arity = 1, subject = true },
+  affordable = { arity = 1, subject = true },
   resource = { arity = 2 },
 }
 Catalog.PREDICATES = PREDICATES
