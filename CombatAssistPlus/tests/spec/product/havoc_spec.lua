@@ -114,6 +114,59 @@ describe("product characterization / Havoc pilot", function()
     end
   end)
 
+  --- One COOLDOWN entry evaluated against a forced readiness map.
+  local function hold(id, ready)
+    local entry
+    for _, e in ipairs(H.catalogBySpec(ns, 577).entries) do
+      if e.id == id then entry = e end
+    end
+    local resolved = { entries = { { entry = entry, row = {} } } }
+    return ns.Signal.Evaluate(resolved, H.world{ ready = H.map(false, ready) }).byEntry[id]
+  end
+
+  it("holds Metamorphosis while EITHER reset target is up, and unions to one badge", function()
+    -- Two markers naming one cue is how the AND-only band grammar expresses an OR. The badge
+    -- must not double up, and either disjunct alone must be enough to raise it.
+    local both = hold("metamorphosis", { metamorphosis = true, eye_beam = true, blade_dance = true })
+    assert.same({ "blocked" }, both.cues, "two satisfied markers must union into one badge")
+    assert.same({ "meta_wastes_eye_beam", "meta_wastes_death_sweep" }, both.markers)
+
+    for _, dep in ipairs{ "eye_beam", "blade_dance" } do
+      local v = hold("metamorphosis", { metamorphosis = true, [dep] = true })
+      assert.same({ "blocked" }, v.cues, dep .. " alone must hold Meta")
+      assert.is_true(ns.Treatment.For(v).veil)
+    end
+  end)
+
+  it("draws nothing on Metamorphosis once both resets are spent", function()
+    -- "A satisfied dependency draws nothing" — the press is the quiet row, not a decorated one.
+    local v = hold("metamorphosis", { metamorphosis = true })
+    assert.same({}, v.cues)
+    assert.is_false(ns.Treatment.For(v).veil)
+    assert.equal("COOLDOWN", ns.Treatment.For(v).lane)
+  end)
+
+  it("holds The Hunt while Metamorphosis is available, and releases it once Meta is spent", function()
+    local waiting = hold("the_hunt", { the_hunt = true, metamorphosis = true })
+    assert.same({ "blocked" }, waiting.cues)
+    assert.is_true(ns.Treatment.For(waiting).veil)
+
+    local free = hold("the_hunt", { the_hunt = true })
+    assert.same({}, free.cues)
+    assert.is_false(ns.Treatment.For(free).veil)
+  end)
+
+  it("keeps every hold unknown-safe when the dependency read refuses", function()
+    for _, id in ipairs{ "metamorphosis", "the_hunt" } do
+      local v = ns.Signal.Evaluate(
+        { entries = { { entry = (function()
+          for _, e in ipairs(cat.entries) do if e.id == id then return e end end
+        end)(), row = {} } } },
+        H.blindWorld()).byEntry[id]
+      assert.same({}, v.cues, id .. " invented a hold from a refused read")
+    end
+  end)
+
   it("leaves no FALLBACK row without charges — the lane has no subject on this spec", function()
     local byAbility = {}
     for _, a in ipairs(cat.abilities) do byAbility[a.id] = a end

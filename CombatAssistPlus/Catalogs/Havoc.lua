@@ -31,10 +31,26 @@ ns.Catalog.Register{
   entries = {
     { id = "vengeful_retreat", ability = "vengeful_retreat",
       bands = { { tier = "COOLDOWN", when = { { "ready", "vengeful_retreat" } } } } },
+    -- Meta's payoff is its RESET of Eye Beam and Death Sweep, so spending it while either is
+    -- already up throws that half away. Two markers rather than one because the band grammar is
+    -- AND-only: naming the same cue twice unions into a single badge, and that union IS the OR.
+    -- A satisfied dependency draws nothing (catalog.md:133).
     { id = "metamorphosis", ability = "metamorphosis",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "metamorphosis" } } } } },
+      bands = { { tier = "COOLDOWN", when = { { "ready", "metamorphosis" } } } },
+      markers = {
+        { id = "meta_wastes_eye_beam", cue = "blocked",
+          when = { { "ready", "eye_beam" } } },
+        -- Base id only: Bind unions base/override, so this reads Death Sweep in demon form.
+        { id = "meta_wastes_death_sweep", cue = "blocked",
+          when = { { "ready", "blade_dance" } } },
+      } },
+    -- Hold The Hunt for the Meta window rather than spending it bare (catalog.md:145).
     { id = "the_hunt", ability = "the_hunt",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "the_hunt" } } } } },
+      bands = { { tier = "COOLDOWN", when = { { "ready", "the_hunt" } } } },
+      markers = {
+        { id = "hunt_awaits_meta", cue = "blocked",
+          when = { { "ready", "metamorphosis" } } },
+      } },
     { id = "eye_beam", ability = "eye_beam",
       bands = { { tier = "COOLDOWN", when = { { "ready", "eye_beam" } } } } },
     { id = "essence_break", ability = "essence_break",
