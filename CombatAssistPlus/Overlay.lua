@@ -25,6 +25,7 @@ local function acquire(cid)
   f.badges = {}
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
+  f.powerPlans, f.power, f.powerStatus = {}, {}, {}
   pool[cid] = f
   return f
 end
@@ -37,13 +38,30 @@ local function quiet(f)
   for _, badge in pairs(f.badges or {}) do badge:Hide() end
 end
 
+--- Arm every graded cue this row declares and has not armed yet. Separate from the aura
+--- channels because a curve needs no frame: it can be built in combat, and a client that
+--- cannot build one at all must not drag the frame-acquiring path into a retry every draw.
+local function armPower(f)
+  for id, plan in pairs(f.powerPlans) do
+    if not f.power[id] then
+      local armed, status = ns.Channel.ArmPower(plan)
+      if armed then f.power[id] = armed end
+      f.powerStatus[id] = status or "refused"
+    end
+  end
+end
+
 local function configure(f, item, declared)
   for _, container in pairs(f.channels) do container:Hide() end
   f.channelStatus = {}
+  f.powerPlans, f.power, f.powerStatus = {}, {}, {}
   for _, marker in ipairs(item.entry.markers or {}) do
     -- A readable marker is still evaluated and still reported; the shelf's cue vocabulary has
     -- no drawn form for the two ad-hoc Warlock ones, so nothing is drawn for it.
-    if not marker.when then
+    local power = ns.Channel.PowerPlan(marker)
+    if power then
+      f.powerPlans[marker.id] = power
+    elseif not marker.when then
       local plan = ns.Channel.Plan(marker, declared)
       local key = plan and (marker.id .. "/" .. plan.spell) or marker.id
       local container = f.channels[key]
@@ -60,6 +78,7 @@ local function configure(f, item, declared)
       f.channelStatus[marker.id] = status or "refused"
     end
   end
+  armPower(f)
 end
 
 local function layer(f)
@@ -87,19 +106,63 @@ local function itemShown(item)
   return shown and true or false
 end
 
---- Compose one row: lane border, then the derived veil, then a badge per cue.
+--- ONE CURVE, TWO SINKS (render-shelf V9). A graded cue's badge is shown whenever the row
+--- draws and its visibility is the client's to decide: cap writes the evaluated result into
+--- the badge frame's alpha, and — for this cue only — into the veil's, so the row dims by the
+--- same secret the badge shows. The value is written and forgotten; it is never compared, not
+--- even against nil, which is why the evaluator answers `ok, value`.
+---
+--- The veil texture carries the shelf's own alpha in its colour, so a written 1 is still a
+--- 0.6 dim: what the curve modulates is the whole veil, not the shelf's number.
+local function graded(f)
+  local has, alpha = false, nil
+  for id, armed in pairs(f.power) do
+    local badge = f.badges[armed.cue]
+    local ok, value = ns.Channel.PowerAlpha(armed)
+    if badge and ok then
+      badge:Show()
+      badge.frame:SetAlpha(value)
+      has, alpha = true, value
+      f.powerStatus[id] = "armed"
+    elseif badge then
+      -- An evaluation that threw is a refusal, not an empty badge left lit at its last alpha.
+      badge:Hide()
+      f.powerStatus[id] = "refused"
+    end
+  end
+  return has, alpha
+end
+
+--- Compose one row: lane border, then the veil, then a badge per cue.
 local function paint(f, verdict, silent)
   local d = ns.Treatment.For(verdict)
   f.border.silent = silent
   if d.lane then f.border:SetLane(d.lane) else f.border:Hide() end
   f.border.silent = false
 
-  if d.veil then f.veil:Show() else f.veil:Hide() end
-
   local wanted = {}
   for _, key in ipairs(d.cues or {}) do wanted[key] = true end
+  for _, armed in pairs(f.power) do wanted[armed.cue] = "graded" end
   for key, badge in pairs(f.badges) do
-    if wanted[key] then badge:Show() else badge:Hide() end
+    if wanted[key] == true then
+      badge.frame:SetAlpha(1)
+      badge:Show()
+    elseif not wanted[key] then
+      badge:Hide()
+    end
+  end
+  local curved, alpha = graded(f)
+
+  -- The derived boolean veil stays the rule; a graded cue only reaches the veil on a row that
+  -- no readable negative cue has already veiled outright.
+  if d.veil then
+    f.veil:SetAlpha(1)
+    f.veil:Show()
+  elseif curved then
+    f.veil:SetAlpha(alpha)
+    f.veil:Show()
+  else
+    f.veil:Hide()
   end
   return d
 end
@@ -200,6 +263,11 @@ local function draw(out, bound, edge)
       end
     end
     for marker, status in pairs(f.channelStatus) do
+      channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
+    end
+    -- A graded cue can be armed under restriction, so it retries on every draw until it is.
+    armPower(f)
+    for marker, status in pairs(f.powerStatus) do
       channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
     end
     layer(f)

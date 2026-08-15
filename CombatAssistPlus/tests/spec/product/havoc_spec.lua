@@ -106,11 +106,21 @@ describe("product characterization / Havoc pilot", function()
     end
   end)
 
-  it("leaves the Fury generators clean, since they can never be unaffordable", function()
+  it("wears overcap on the Fury generators, and affordability on neither", function()
     for _, id in ipairs{ "felblade", "demons_bite" } do
       local entry
       for _, e in ipairs(cat.entries) do if e.id == id then entry = e end end
-      assert.is_nil(entry.markers, id .. " is a generator and must carry no affordability cue")
+      for _, marker in ipairs(entry.markers) do
+        for _, term in ipairs(marker.when or {}) do
+          assert.not_equal("affordable", term[1],
+            id .. " costs nothing and must never read as unaffordable")
+        end
+      end
+      -- The generator's failure mode is the opposite one, and it is sealed: the client
+      -- evaluates the curve, so nothing here is a readable condition at all.
+      local sealed = ns.Channel.PowerPlan(entry.markers[1])
+      assert.equal("overcap", sealed.cue, id .. " carries no overcap readout")
+      assert.equal("Fury", sealed.power)
     end
   end)
 

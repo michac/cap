@@ -17,7 +17,7 @@ local PREDICATES = {
   resource = { arity = 2 },
 }
 Catalog.PREDICATES = PREDICATES
-local DISPLAYS = { ["player-aura-stacks"] = true }
+local DISPLAYS = { ["player-aura-stacks"] = true, ["sealed-power-percent"] = true }
 Catalog.DISPLAYS = DISPLAYS
 
 -- The cue vocabulary is the GENERATED shelf's, read at call time rather than copied here:
@@ -150,6 +150,20 @@ function Catalog.Check(cat)
           end
           if display.min ~= 2 then
             fail("display", entry.id, "player-aura-stacks currently supports min = 2")
+          end
+        elseif display.kind == "sealed-power-percent" then
+          -- The break point is authored as a GENERATION amount, never as a percentage: the
+          -- percentage depends on the player's max power, which only the client can read.
+          if type(display.power) ~= "string" then
+            fail("display", entry.id, "sealed-power-percent needs a power type name")
+          end
+          if type(display.generation) ~= "number" or display.generation <= 0 then
+            fail("display", entry.id, "sealed-power-percent needs a positive generation amount")
+          end
+          -- Unlike a readable marker, a sealed one has no verdict to report: the cue IS the
+          -- whole of it, so a sealed power display without one would arm and draw nothing.
+          if marker.cue == nil then
+            fail("cue", entry.id, "marker " .. tostring(marker.id) .. " is a sealed power display with no cue")
           end
         end
       end

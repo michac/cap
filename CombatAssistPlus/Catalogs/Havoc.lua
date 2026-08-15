@@ -82,10 +82,26 @@ ns.Catalog.Register{
         { id = "immolation_recharging", cue = "blocked",
           when = { { "capped", "immolation_aura", negate = true } } },
       } },
+    -- The two generators, which cost nothing and therefore never wear the affordability cue —
+    -- their failure mode is the opposite one: generating Fury that overflows the cap. That
+    -- decision is `secret Fury-% ≥ (maxFury − generation)/maxFury`, and cap performs no part of
+    -- it: the client evaluates an authored curve against the secret and paints the result.
+    -- `generation` is an authored static approximation because no API reports it (catalog.md
+    -- R4); the max is the client's, and is emphatically not hardcoded.
     { id = "felblade", ability = "felblade",
-      bands = { { tier = "ROTATION", when = { { "ready", "felblade" } } } } },
+      bands = { { tier = "ROTATION", when = { { "ready", "felblade" } } } },
+      markers = {
+        { id = "felblade_overcap", cue = "overcap",
+          display = { kind = "sealed-power-percent", power = "Fury", generation = 15 } },
+      } },
     { id = "demons_bite", ability = "demons_bite",
-      bands = { { tier = "ROTATION", when = { { "ready", "demons_bite" } } } } },
+      bands = { { tier = "ROTATION", when = { { "ready", "demons_bite" } } } },
+      markers = {
+        -- Demon's Bite rolls 20–30; the midpoint is the honest authoring of a range cap
+        -- cannot read, and the cue is a "close to overflowing" readout, not a guarantee.
+        { id = "demons_bite_overcap", cue = "overcap",
+          display = { kind = "sealed-power-percent", power = "Fury", generation = 25 } },
+      } },
     { id = "fel_rush", ability = "fel_rush",
       bands = { { tier = "FALLBACK", when = { { "ready", "fel_rush" } } } } },
     { id = "throw_glaive", ability = "throw_glaive",

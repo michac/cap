@@ -114,6 +114,28 @@ describe("engine / catalog", function()
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).subject)
   end)
 
+  it("rejects a malformed sealed power display", function()
+    local havoc = H.catalogBySpec(ns, 577)
+    local function generator(target)
+      for _, entry in ipairs(target.entries) do
+        if entry.id == "felblade" then return entry.markers[1] end
+      end
+    end
+
+    local broken = H.copy(havoc)
+    generator(broken).display.generation = nil
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(havoc)
+    generator(broken).display.power = nil
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    -- A sealed power display IS its cue; without one it would arm and draw nothing.
+    broken = H.copy(havoc)
+    generator(broken).cue = nil
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).cue)
+  end)
+
   it("binds a sealed dependency to the direct AuraContainer sink only", function()
     local destruction = H.catalogBySpec(ns, 267)
     local resolved = ns.Catalog.Resolve(destruction, H.destructionRows())

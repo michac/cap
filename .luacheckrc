@@ -62,6 +62,10 @@ stds.wow = {
     -- `Enum` global already declared above.  Mechanisms:
     -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8.
     "C_UnitAuras", "C_CurveUtil",
+    -- The graded cue — Channel.lua.  `UnitPowerPercent` is the one call that evaluates an
+    -- authored curve against a secret resource in C and hands back only the mapped result;
+    -- `UnitPowerMax` (declared above) supplies the max the break point is derived from.
+    "UnitPowerPercent",
     -- The §3.4 bars — Bars.lua.  `C_StringUtil.CreateSecondsFormatter` is the formatter a
     -- duration object formats its own remaining time through; the duration itself comes
     -- from `C_Spell` above and the enum members ride the `Enum` global.  Mechanism:
