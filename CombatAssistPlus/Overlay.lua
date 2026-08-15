@@ -25,7 +25,7 @@ local function acquire(cid)
   f.badges = {}
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
-  f.powerPlans, f.power, f.powerStatus = {}, {}, {}
+  f.gradedPlans, f.graded, f.gradedStatus = {}, {}, {}
   pool[cid] = f
   return f
 end
@@ -41,12 +41,12 @@ end
 --- Arm every graded cue this row declares and has not armed yet. Separate from the aura
 --- channels because a curve needs no frame: it can be built in combat, and a client that
 --- cannot build one at all must not drag the frame-acquiring path into a retry every draw.
-local function armPower(f)
-  for id, plan in pairs(f.powerPlans) do
-    if not f.power[id] then
-      local armed, status = ns.Channel.ArmPower(plan)
-      if armed then f.power[id] = armed end
-      f.powerStatus[id] = status or "refused"
+local function armGraded(f, declared)
+  for id, plan in pairs(f.gradedPlans) do
+    if not f.graded[id] then
+      local armed, status = ns.Channel.ArmGraded(plan, declared)
+      if armed then f.graded[id] = armed end
+      f.gradedStatus[id] = status or "refused"
     end
   end
 end
@@ -54,13 +54,13 @@ end
 local function configure(f, item, declared)
   for _, container in pairs(f.channels) do container:Hide() end
   f.channelStatus = {}
-  f.powerPlans, f.power, f.powerStatus = {}, {}, {}
+  f.gradedPlans, f.graded, f.gradedStatus = {}, {}, {}
   for _, marker in ipairs(item.entry.markers or {}) do
     -- A readable marker is still evaluated and still reported; the shelf's cue vocabulary has
     -- no drawn form for the two ad-hoc Warlock ones, so nothing is drawn for it.
-    local power = ns.Channel.PowerPlan(marker)
-    if power then
-      f.powerPlans[marker.id] = power
+    local gradedPlan = ns.Channel.GradedPlan(marker)
+    if gradedPlan then
+      f.gradedPlans[marker.id] = gradedPlan
     elseif not marker.when then
       local plan = ns.Channel.Plan(marker, declared)
       local key = plan and (marker.id .. "/" .. plan.spell) or marker.id
@@ -78,7 +78,7 @@ local function configure(f, item, declared)
       f.channelStatus[marker.id] = status or "refused"
     end
   end
-  armPower(f)
+  armGraded(f, declared)
 end
 
 local function layer(f)
@@ -116,18 +116,18 @@ end
 --- 0.6 dim: what the curve modulates is the whole veil, not the shelf's number.
 local function graded(f)
   local has, alpha = false, nil
-  for id, armed in pairs(f.power) do
+  for id, armed in pairs(f.graded) do
     local badge = f.badges[armed.cue]
-    local ok, value = ns.Channel.PowerAlpha(armed)
+    local ok, value = ns.Channel.GradedAlpha(armed)
     if badge and ok then
       badge:Show()
       badge.frame:SetAlpha(value)
       has, alpha = true, value
-      f.powerStatus[id] = "armed"
+      f.gradedStatus[id] = "armed"
     elseif badge then
       -- An evaluation that threw is a refusal, not an empty badge left lit at its last alpha.
       badge:Hide()
-      f.powerStatus[id] = "refused"
+      f.gradedStatus[id] = "refused"
     end
   end
   return has, alpha
@@ -142,7 +142,7 @@ local function paint(f, verdict, silent)
 
   local wanted = {}
   for _, key in ipairs(d.cues or {}) do wanted[key] = true end
-  for _, armed in pairs(f.power) do wanted[armed.cue] = "graded" end
+  for _, armed in pairs(f.graded) do wanted[armed.cue] = "graded" end
   for key, badge in pairs(f.badges) do
     if wanted[key] == true then
       badge.frame:SetAlpha(1)
@@ -266,8 +266,8 @@ local function draw(out, bound, edge)
       channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
     end
     -- A graded cue can be armed under restriction, so it retries on every draw until it is.
-    armPower(f)
-    for marker, status in pairs(f.powerStatus) do
+    armGraded(f, bound.declared)
+    for marker, status in pairs(f.gradedStatus) do
       channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
     end
     layer(f)

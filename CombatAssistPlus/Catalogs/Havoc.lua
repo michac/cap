@@ -53,8 +53,16 @@ ns.Catalog.Register{
       } },
     { id = "eye_beam", ability = "eye_beam",
       bands = { { tier = "COOLDOWN", when = { { "ready", "eye_beam" } } } } },
+    -- Essence Break's window wants Eye Beam inside it, so spending it with Eye Beam a moment
+    -- away throws the window away. The clock is secret, so cap never reads it: it authors the
+    -- band and the client paints the badge while the remaining time sits inside it
+    -- (catalog.md:158, cue C2).
     { id = "essence_break", ability = "essence_break",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "essence_break" } } } } },
+      bands = { { tier = "COOLDOWN", when = { { "ready", "essence_break" } } } },
+      markers = {
+        { id = "essence_break_awaits_eye_beam", cue = "blocked",
+          display = { kind = "sealed-cooldown-range", ability = "eye_beam", within = 4 } },
+      } },
     -- The two Fury spenders. `ready` cannot carry affordability here: a row with no real cooldown
     -- never raises an Available/OnCooldown edge, so its border stays lit whatever the Fury. The
     -- generators cost nothing, so `insufficientPower` is never true for them — they stay clean

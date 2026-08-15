@@ -88,7 +88,7 @@ function Channel.ArmPower(plan)
     for _, point in ipairs(points) do curve:AddPoint(point[1], point[2]) end
   end)
   if not (ok and curve) then return nil, "refused" end
-  return { curve = curve, powerType = powerType, cue = plan.cue }, "armed"
+  return { kind = plan.kind, curve = curve, powerType = powerType, cue = plan.cue }, "armed"
 end
 
 --- Evaluate the armed curve. The client reads the secret power, applies cap's points, and
@@ -99,6 +99,99 @@ function Channel.PowerAlpha(armed)
   local ok, value = pcall(UnitPowerPercent, "player", armed.powerType, false, armed.curve)
   if not ok then return false end
   return true, value
+end
+
+-- ---------------------------------------------------------------------------
+-- Sealed cooldown range — render-shelf V10, the same curve over a duration object
+-- ---------------------------------------------------------------------------
+
+--- The instant a cooldown must have started for the hold to mean anything. Below it the
+--- dependency is READY, not imminent, and a hold would be telling the player to wait for
+--- something already waiting for them.
+local LIVE = 0.001
+
+--- Pure dependency binding for the range hold: draw the cue while another ability's cooldown
+--- is running AND ends within `within` seconds.
+function Channel.HoldPlan(marker)
+  local display = marker and marker.display
+  if not (display and display.kind == "sealed-cooldown-range" and marker.cue
+      and type(display.ability) == "string" and type(display.within) == "number"
+      and display.within > LIVE) then
+    return nil
+  end
+  return { kind = display.kind, ability = display.ability,
+    within = display.within, cue = marker.cue }
+end
+
+--- Three points, which is the band: nothing at zero remaining (the dependency is up, not
+--- imminent), the cue while the clock runs inside the window, nothing again beyond it. Step
+--- holds the previous point's value, so each x is where the value CHANGES.
+function Channel.HoldPoints(within)
+  if type(within) ~= "number" or within <= LIVE then return nil end
+  return { { 0, 0 }, { LIVE, 1 }, { within, 0 } }
+end
+
+--- Arm the range hold. The duration object is fetched per evaluation rather than kept: it
+--- describes one cooldown instance, and the next press starts another.
+function Channel.ArmHold(plan, abilities)
+  if not plan then return nil, "refused" end
+  local ability = abilities and abilities[plan.ability]
+  if not (ability and type(ability.spell) == "number") then return nil, "refused" end
+  if not (C_CurveUtil and C_CurveUtil.CreateCurve and Enum and Enum.LuaCurveType
+      and Enum.LuaCurveType.Step and Enum.DurationTimeModifier
+      and Enum.DurationTimeModifier.RealTime
+      and C_Spell and C_Spell.GetSpellCooldownDuration) then
+    return nil, "refused"
+  end
+
+  local points = Channel.HoldPoints(plan.within)
+  if not points then return nil, "refused" end
+
+  local curve
+  local ok = pcall(function()
+    curve = C_CurveUtil.CreateCurve()
+    curve:SetType(Enum.LuaCurveType.Step)
+    for _, point in ipairs(points) do curve:AddPoint(point[1], point[2]) end
+  end)
+  if not (ok and curve) then return nil, "refused" end
+  return { kind = plan.kind, curve = curve, spell = ability.spell, cue = plan.cue }, "armed"
+end
+
+--- Evaluate the hold. `ignoreGCD` is true and load-bearing: without it every global cooldown
+--- would read as a dependency about to come up, and the cue would light on every press.
+function Channel.HoldAlpha(armed)
+  if not (armed and armed.curve and C_Spell and C_Spell.GetSpellCooldownDuration) then
+    return false
+  end
+  local okDur, duration = pcall(C_Spell.GetSpellCooldownDuration, armed.spell, true)
+  if not (okDur and duration and duration.EvaluateRemainingDuration) then return false end
+  local ok, value = pcall(duration.EvaluateRemainingDuration, duration, armed.curve,
+    Enum.DurationTimeModifier.RealTime)
+  if not ok then return false end
+  return true, value
+end
+
+-- ---------------------------------------------------------------------------
+-- The graded seam — two sources, one sink
+-- ---------------------------------------------------------------------------
+
+--- A graded cue is one whose visibility the CLIENT decides: cap authors a curve, the client
+--- evaluates it against a secret, and the result is written into an alpha. Two sources so far
+--- — a resource percentage and a cooldown remaining — sharing only the curve and the sink,
+--- which is the whole of what they have in common.
+function Channel.GradedPlan(marker)
+  return Channel.PowerPlan(marker) or Channel.HoldPlan(marker)
+end
+
+function Channel.ArmGraded(plan, abilities)
+  if not plan then return nil, "refused" end
+  if plan.kind == "sealed-cooldown-range" then return Channel.ArmHold(plan, abilities) end
+  return Channel.ArmPower(plan)
+end
+
+function Channel.GradedAlpha(armed)
+  if armed and armed.kind == "sealed-cooldown-range" then return Channel.HoldAlpha(armed) end
+  return Channel.PowerAlpha(armed)
 end
 
 --- Acquire one sealed display while unrestricted. The only public states are the audit

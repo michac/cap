@@ -93,6 +93,59 @@ describe("engine / composition", function()
     end)
   end)
 
+  describe("the graded hold", function()
+    local plan = {
+      id = "awaits", cue = "blocked",
+      display = { kind = "sealed-cooldown-range", ability = "eye_beam", within = 4 },
+    }
+
+    it("binds only a well-formed sealed cooldown range", function()
+      local bound = ns.Channel.HoldPlan(plan)
+      assert.equal("eye_beam", bound.ability)
+      assert.equal(4, bound.within)
+      assert.equal("blocked", bound.cue)
+      local zero = H.copy(plan)
+      zero.display.within = 0
+      assert.is_nil(ns.Channel.HoldPlan(zero))
+      assert.is_nil(ns.Channel.HoldPlan{ id = "x", cue = "blocked", when = { { "ready", "x" } } })
+    end)
+
+    it("bands the window between running and beyond it", function()
+      local points = ns.Channel.HoldPoints(4)
+      -- Nothing at zero remaining — a dependency that is UP is not one that is imminent.
+      assert.equal(0, points[1][1])
+      assert.equal(0, points[1][2])
+      assert.equal(1, points[2][2])
+      assert.is_true(points[2][1] > 0 and points[2][1] < points[3][1])
+      assert.equal(4, points[3][1])
+      assert.equal(0, points[3][2])
+      assert.is_nil(ns.Channel.HoldPoints(0))
+      assert.is_nil(ns.Channel.HoldPoints(nil))
+    end)
+
+    it("is inert, not broken, without curves or a bound dependency", function()
+      local abilities = { eye_beam = { id = "eye_beam", spell = 198013 } }
+      local armed, status = ns.Channel.ArmHold(ns.Channel.HoldPlan(plan), abilities)
+      assert.is_nil(armed)
+      assert.equal("refused", status)
+      -- An undeclared dependency refuses before the client is asked anything at all.
+      assert.is_nil((ns.Channel.ArmHold(ns.Channel.HoldPlan(plan), {})))
+      assert.is_false(ns.Channel.HoldAlpha(nil))
+    end)
+
+    it("routes both graded sources through one plan, arm and evaluate", function()
+      assert.equal("sealed-cooldown-range", ns.Channel.GradedPlan(plan).kind)
+      assert.equal("sealed-power-percent", ns.Channel.GradedPlan{
+        id = "overflow", cue = "overcap",
+        display = { kind = "sealed-power-percent", power = "Fury", generation = 15 },
+      }.kind)
+      -- A readable marker is not a graded one, and neither is the aura channel's display.
+      assert.is_nil(ns.Channel.GradedPlan{ id = "x", cue = "blocked", when = { { "ready", "x" } } })
+      assert.equal("refused", select(2, ns.Channel.ArmGraded(ns.Channel.GradedPlan(plan), {})))
+      assert.is_false(ns.Channel.GradedAlpha(nil))
+    end)
+  end)
+
   it("refuses two cues that would want the same badge slot", function()
     local cat = withMarkers(ns, {
       { id = "a", cue = "starved", when = { { "ready", "conflagrate" } } },

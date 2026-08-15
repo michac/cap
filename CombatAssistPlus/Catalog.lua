@@ -17,7 +17,11 @@ local PREDICATES = {
   resource = { arity = 2 },
 }
 Catalog.PREDICATES = PREDICATES
-local DISPLAYS = { ["player-aura-stacks"] = true, ["sealed-power-percent"] = true }
+local DISPLAYS = {
+  ["player-aura-stacks"] = true,
+  ["sealed-power-percent"] = true,
+  ["sealed-cooldown-range"] = true,
+}
 Catalog.DISPLAYS = DISPLAYS
 
 -- The cue vocabulary is the GENERATED shelf's, read at call time rather than copied here:
@@ -160,10 +164,21 @@ function Catalog.Check(cat)
           if type(display.generation) ~= "number" or display.generation <= 0 then
             fail("display", entry.id, "sealed-power-percent needs a positive generation amount")
           end
-          -- Unlike a readable marker, a sealed one has no verdict to report: the cue IS the
-          -- whole of it, so a sealed power display without one would arm and draw nothing.
+          -- Unlike a readable marker, a graded one has no verdict to report: the cue IS the
+          -- whole of it, so a graded display without one would arm and draw nothing.
           if marker.cue == nil then
-            fail("cue", entry.id, "marker " .. tostring(marker.id) .. " is a sealed power display with no cue")
+            fail("cue", entry.id, "marker " .. tostring(marker.id) .. " is a graded display with no cue")
+          end
+        elseif display.kind == "sealed-cooldown-range" then
+          if not abilities[display.ability] then
+            fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
+              .. tostring(display.ability))
+          end
+          if type(display.within) ~= "number" or display.within <= 0 then
+            fail("display", entry.id, "sealed-cooldown-range needs a positive window in seconds")
+          end
+          if marker.cue == nil then
+            fail("cue", entry.id, "marker " .. tostring(marker.id) .. " is a graded display with no cue")
           end
         end
       end
