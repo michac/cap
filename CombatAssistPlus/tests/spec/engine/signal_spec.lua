@@ -67,6 +67,29 @@ describe("engine / signal", function()
   end)
 
 
+  it("records why each readable marker drew, was ruled out, or went blind", function()
+    local out = ns.Signal.Evaluate(resolved, H.world{
+      ready = H.map(true, { dreadstalkers = false }), -- dreadstalkers marker ON (negated false)
+      identity = H.map("base"),                       -- grimoire marker OFF (not transformed)
+    })
+    local byId = {}
+    for _, r in ipairs(out.byEntry.tyrant.reasons) do byId[r.id] = r end
+    assert.equal("on", byId.dreadstalkers.state)
+    assert.same({ "!ready:dreadstalkers=T" }, byId.dreadstalkers.terms)
+    assert.equal("off", byId.grimoire.state)
+    assert.same({ "identity:grimoire:transformed=F" }, byId.grimoire.terms)
+
+    local blind = ns.Signal.Evaluate(resolved, H.blindWorld())
+    assert.equal("blind", blind.byEntry.tyrant.reasons[1].state)
+  end)
+
+  it("Explain agrees with the gate: off wins over blind, all-true is on", function()
+    local w = H.world{ ready = H.map(ns.Signal.UNKNOWN, { a = false }) }
+    assert.equal("off", (ns.Signal.Explain({ { "ready", "a" }, { "ready", "b" } }, w)))
+    assert.equal("blind", (ns.Signal.Explain({ { "ready", "b" } }, w)))
+    assert.equal("on", (ns.Signal.Explain({ { "ready", "c" } }, H.world())))
+  end)
+
   it("never evaluates or reports sealed display markers", function()
     local cat = H.catalogBySpec(ns, 267)
     local destruction = ns.Catalog.Resolve(cat, H.destructionRows())

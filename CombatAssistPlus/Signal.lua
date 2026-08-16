@@ -33,15 +33,38 @@ function Signal.Term(term, world)
   return value
 end
 
-local function all(terms, world)
-  local blind = false
+-- A capture label for one term: the predicate and its subject, so a log reader sees which
+-- fact gated a marker without re-deriving it from the catalog. `!` marks a negated term.
+local function termLabel(term)
+  local prefix = term.negate and "!" or ""
+  local name = term[1]
+  if name == "resource" then return prefix .. "resource" .. tostring(term[2]) .. tostring(term[3]) end
+  if name == "identity" then return prefix .. "identity:" .. tostring(term[2]) .. ":" .. tostring(term[3]) end
+  return prefix .. tostring(name) .. ":" .. tostring(term[2])
+end
+
+local GLYPH = { [true] = "T", [false] = "F", [UNKNOWN] = "?" }
+
+--- Evaluate EVERY term (no short-circuit) and report both the verdict and the reasoning:
+--- `state` is "on" (all true), "off" (a false present), or "blind" (an unknown but no false),
+--- and `parts` is one `label=T|F|?` per term. `off` wins over `blind` — a false answer rules
+--- the marker out even when another term is unknown, matching the eliminating spirit.
+function Signal.Explain(terms, world)
+  local parts, sawFalse, sawBlind = {}, false, false
   for _, term in ipairs(terms or {}) do
     local value = Signal.Term(term, world)
-    if value == false then return false, false end
-    if value == UNKNOWN then blind = true end
+    parts[#parts + 1] = termLabel(term) .. "=" .. (GLYPH[value] or "?")
+    if value == false then sawFalse = true elseif value == UNKNOWN then sawBlind = true end
   end
-  if blind then return false, true end
-  return true, false
+  local state = sawFalse and "off" or (sawBlind and "blind" or "on")
+  return state, parts
+end
+
+-- The truth-only view the tier/marker gates need. Delegated to Explain so the two can never
+-- disagree: `shown` iff every term is true, `blind` iff an unknown (and no false) withheld it.
+local function all(terms, world)
+  local state = Signal.Explain(terms, world)
+  return state == "on", state == "blind"
 end
 
 --- The selected tier, plus WHICH tier went blind rather than merely that one did — a reader
@@ -81,6 +104,7 @@ function Signal.Evaluate(resolved, world)
     local verdict = {
       entry = entry.id, row = bound.row, tier = selected, charged = bound.charged,
       emphasized = selected ~= nil, blindTier = blindTier, markers = {}, cues = {},
+      reasons = {},
     }
     if selected then
       out.emphasized = out.emphasized + 1
@@ -90,13 +114,18 @@ function Signal.Evaluate(resolved, world)
     for _, marker in ipairs(entry.markers or {}) do
       -- Sealed displays are acquired by Channel and never become Lua predicates.
       if marker.when then
-        local shown, markerBlind = all(marker.when, world)
-        if shown then
+        local state, parts = Signal.Explain(marker.when, world)
+        if state == "on" then
           verdict.markers[#verdict.markers + 1] = marker.id
           if marker.cue then cues[marker.cue] = true end
           out.markers = out.markers + 1
+        elseif state == "blind" then
+          out.unknowns = out.unknowns + 1
         end
-        if markerBlind then out.unknowns = out.unknowns + 1 end
+        -- The reason a marker drew OR was withheld — captured for every readable marker so a
+        -- flight can answer "why", not just "what". `off` is the most telling: a cleanly
+        -- ruled-out gate names the fact that ruled it out.
+        verdict.reasons[#verdict.reasons + 1] = { id = marker.id, state = state, terms = parts }
       end
     end
     verdict.cues = orderCues(cues)

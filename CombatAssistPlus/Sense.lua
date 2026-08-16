@@ -282,12 +282,26 @@ function Sense.Render(snap)
     g[#g + 1] = name .. ":" .. pair((health.predicates or {})[name])
   end
 
+  -- W{} — the reason each readable marker drew or was withheld, per entry, in row order.
+  -- `on(...)`/`off(...)`/`blind(...)` with the term values that decided it. In the body so a
+  -- change of justification emits a line even when the drawn set does not — the case that
+  -- distinguishes a latch reading true from one reading unknown.
+  local why = {}
+  for _, id in ipairs(snap.order or {}) do
+    local v = (out.byEntry or {})[id]
+    for _, r in ipairs((v or {}).reasons or {}) do
+      why[#why + 1] = id .. ":" .. r.id .. ":" .. r.state
+        .. "(" .. table.concat(r.terms or {}, ",") .. ")"
+    end
+  end
+
   local s = { snap.settled and ("settled/" .. token(snap.settledBy)) or "unsettled" }
   if snap.dark then s[#s + 1] = "DARK" end
 
   return "S{" .. table.concat(t, " ") .. "}"
     .. " E{" .. (#entries > 0 and table.concat(entries, " ") or "-") .. "}"
     .. " R{" .. table.concat(g, " ") .. "}"
+    .. " W{" .. (#why > 0 and table.concat(why, " ") or "-") .. "}"
     .. " Q{" .. (#(snap.charges or {}) > 0 and table.concat(snap.charges, " ") or "-") .. "}"
     .. " S{" .. table.concat(s, " ") .. "}"
 end
