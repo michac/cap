@@ -1,8 +1,12 @@
--- StylePanel.lua — `/cap style`: every render-shelf primitive drawn once, side by side.
+-- StylePanel.lua — `/cap style`: every render-shelf primitive drawn once, side by side,
+-- in its own scrolling window with a tab per section.
 --
 -- The Lua twin of the artifact's swatch section. Nothing here touches a Cooldown Manager
 -- frame; every texture is cap's own, so the gallery has no platform exposure at all.
 local ADDON, ns = ...
+
+ns.StylePanel = ns.StylePanel or {}
+local SP = ns.StylePanel
 
 local PAD, LABEL_H, CAPTION_H, SPREAD = 8, 13, 11, 18
 
@@ -15,7 +19,8 @@ local SAMPLE = {
   { lane = "CHARGES", spell = 258920, name = "Immolation Aura" },
 }
 
-local container, built, y
+-- The pane being filled and its top-down cursor: a pane is built by pointing these at it.
+local container, y
 
 local function icon()
   return ns.Style.surfaces.icon_px
@@ -360,87 +365,152 @@ local DRAWS = {
   ["arrival-ghost"] = drawGhost,
 }
 
-local function buildLab()
-  local keys = labKeys()
-  section("LAB · render-shelf.md Part 7 — no authority, decides nothing")
-  if #keys == 0 then
-    note("The lab is empty. That is its correct resting state, not a defect.")
-    return {}
-  end
-  note("Experiments, drawn so they can be judged in the client. None of this is the style and " ..
-       "none of it reaches a Cooldown Manager row. Read arrival-control-sweep first: it is the " ..
-       "falsifier. An arrival row replays on click, rate limited to its own duration.")
-
-  local badges = {}
-  for _, key in ipairs(keys) do
-    local entry = lab()[key]
-    section("lab." .. key .. "  ·  " .. (entry.title or key))
-    note(entry.asks or "no `asks` — Part 7 says an entry that cannot say what it is asking is " ..
-                       "decoration")
-    local draw = DRAWS[entry.draws]
-    if draw then
-      for _, badge in ipairs(draw(key, entry) or {}) do badges[#badges + 1] = badge end
-    else
-      note("nothing here knows how to draw `" .. tostring(entry.draws) .. "`.")
-    end
-  end
-  return badges
+--- `count` swatches on one line, each `size` wide, `gap` between them, `pad` on both ends.
+function SP.RowWidth(count, size, gap, pad)
+  if count < 1 then return pad * 2 end
+  return pad * 2 + count * size + (count - 1) * gap
 end
 
-local function build()
-  if built then return built end
-  container = CreateFrame("Frame", nil, ns.Frame.Get())
-  container.badges = {}
-  y = PAD
+--- An arrival row: the isolated subject, the clear space, then the symmetric neighbour stage.
+function SP.StageWidth(size, isolation, neighbours, pitch_px, pad)
+  return pad * 2 + size * 2 + isolation + 2 * neighbours * pitch_px
+end
 
+--- Which lab tab an entry draws on: arrival experiments need the stage, everything else does not.
+function SP.LabTab(draws)
+  return tostring(draws):find("^arrival") and "arrival" or "stripes"
+end
+
+local function collect(into, from)
+  for _, badge in ipairs(from or {}) do into[#into + 1] = badge end
+end
+
+local function open(pane)
+  container, y = pane, PAD
+end
+
+local function close(pane, badges)
+  pane.badges = badges
+  return y + PAD
+end
+
+local function buildStyle(pane)
+  open(pane)
+  local badges = {}
   text(container, "GameFontNormal", PAD, y, "render shelf v" .. tostring(ns.Style.version), 320)
   y = y + LABEL_H + 4
 
   buildLanes()
   buildMotion()
-  for _, badge in ipairs(buildCues()) do container.badges[#container.badges + 1] = badge end
-  for _, badge in ipairs(buildSlots()) do container.badges[#container.badges + 1] = badge end
+  collect(badges, buildCues())
+  collect(badges, buildSlots())
   note("Every texture here is cap's own. Numbers come from Style.lua, generated from " ..
        "render-shelf.md Part 6.")
-
-  for _, badge in ipairs(buildLab()) do container.badges[#container.badges + 1] = badge end
-
-  container.height = y + PAD
-  built = container
-  return container
+  return close(pane, badges)
 end
+
+local LAB_BLURB = {
+  stripes = "Experiments, drawn so they can be judged in the client. Nothing on this tab is " ..
+            "the style, nothing on it decides anything, and none of it reaches a Cooldown " ..
+            "Manager row.",
+  arrival = "Experiments, drawn so they can be judged in the client. Nothing on this tab is " ..
+            "the style, nothing on it decides anything, and none of it reaches a Cooldown " ..
+            "Manager row. Read arrival-control-sweep first: it is the falsifier. An arrival " ..
+            "row replays on click, rate limited to its own duration.",
+}
+
+local function buildLabPane(which)
+  return function(pane)
+    open(pane)
+    local badges, any = {}, false
+    section("LAB · render-shelf.md Part 7 — no authority, decides nothing")
+    note(LAB_BLURB[which])
+    for _, key in ipairs(labKeys()) do
+      local entry = lab()[key]
+      if SP.LabTab(entry.draws) == which then
+        any = true
+        section("lab." .. key .. "  ·  " .. (entry.title or key))
+        note(entry.asks or "no `asks` — Part 7 says an entry that cannot say what it is asking " ..
+                           "is decoration")
+        local draw = DRAWS[entry.draws]
+        if draw then
+          collect(badges, draw(key, entry))
+        else
+          note("nothing here knows how to draw `" .. tostring(entry.draws) .. "`.")
+        end
+      end
+    end
+    if not any then
+      note("The lab holds nothing here. That is its correct resting state, not a defect.")
+    end
+    return close(pane, badges)
+  end
+end
+
+local TABS = {
+  { id = "style", label = "Style", build = buildStyle },
+  { id = "stripes", label = "Lab · stripes", build = buildLabPane("stripes") },
+  { id = "arrival", label = "Lab · arrival", build = buildLabPane("arrival") },
+}
 
 -- ---------------------------------------------------------------------------
 -- Command
 -- ---------------------------------------------------------------------------
 
-local shown = false
+local DEFAULT_H, DEFAULT_X, DEFAULT_Y = 560, 200, 40
 
-local function hide()
-  shown = false
-  for _, badge in ipairs(container.badges) do badge:Hide() end
-  ns.Frame.Detach(container)
-  ns.Emit("style gallery closed.")
+--- The widest line any tab draws, measured rather than guessed: swatches sit at the real icon size.
+local function contentWidth()
+  local cells = math.max(4, #cueKeys())
+  for _, key in ipairs(labKeys()) do
+    cells = math.max(cells, #(lab()[key].cells or {}))
+  end
+  local n = (lab()._arrival_stage or {}).neighbours or 0
+  return math.max(SP.RowWidth(cells, icon(), SPREAD, PAD),
+                  SP.StageWidth(icon(), ISOLATION, n, pitch(), PAD))
 end
 
-local function show()
-  local c = build()
-  -- The lab's arrival rows are the widest thing drawn: a subject, ISOLATION of clear space, then
-  -- the neighbour stage.
-  local n = (lab()._arrival_stage or {}).neighbours or 0
-  ns.Frame.RequestWidth(math.max(icon() * 4 + SPREAD * 3,
-                                 icon() * 2 + ISOLATION + 2 * n * pitch()) + PAD * 2)
-  ns.Frame.Attach(c, c.height)
-  c:Show()
-  for _, badge in ipairs(c.badges) do badge:Show() end
-  shown = true
-  ns.Emit("style gallery open — /cap style again to close, /cap move to place it.")
+local window
+
+local function create()
+  return ns.Window.New{
+    name = "CombatAssistPlusStyleWindow", key = "style", title = "cap · render shelf",
+    width = contentWidth(), height = DEFAULT_H, x = DEFAULT_X, y = DEFAULT_Y,
+    tabs = TABS,
+    onSelect = function(_, pane)
+      for _, badge in ipairs(pane.badges or {}) do badge:Show() end
+    end,
+    onHide = function() ns.Emit("style gallery closed.") end,
+  }
+end
+
+local function show(arg)
+  if not window then
+    if InCombatLockdown() then
+      ns.Emit("the style window is not built yet, and building it is out of combat only.")
+      return
+    end
+    window = create()
+  end
+  local tab = ns.Window.TabIndex(TABS, arg)
+  if arg ~= "" and not tab then
+    ns.Emit("usage: /cap style  or  /cap style style|stripes|arrival")
+    return
+  end
+  if tab then window:Select(tab) end
+  window:Show()
+  ns.Emit("style gallery open — drag the title bar to place it, /cap style again to close.")
 end
 
 ns.RegisterCommand{
-  name = "style", order = 45, args = "",
-  desc = "Show every render-shelf primitive on cap's own frame",
-  handler = function()
-    if shown then hide() else show() end
+  name = "style", order = 45, args = "[style|stripes|arrival]",
+  desc = "Open the render-shelf gallery in its own window",
+  handler = function(rest)
+    local arg = (rest or ""):lower()
+    if arg == "" and window and window:IsShown() then
+      window:Hide()
+      return
+    end
+    show(arg)
   end,
 }

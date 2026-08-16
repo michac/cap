@@ -71,6 +71,12 @@ stds.wow = {
     -- from `C_Spell` above and the enum members ride the `Enum` global.  Mechanism:
     -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8.1 finding 2.
     "C_StringUtil",
+    -- Blizzard's tab helpers — Window.lua.  `PanelTabButtonTemplate` carries
+    -- `parentArray="Tabs"`, so these read the window's own `Tabs` array; the legacy
+    -- `$parentTabN` path they fall back to resolves in Blizzard's environment table and
+    -- never in ours.  Confirmed present in the 12.1 client source at
+    -- Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.lua:359, :460.
+    "PanelTemplates_SetTab", "PanelTemplates_SetNumTabs",
     -- probes/AnchorOrder.lua.  Everything it calls is already named above except the
     -- callback registry the Cooldown Manager's settings pane raises its data change on;
     -- the viewer itself is reached through `_G`, so no viewer name is declared here.

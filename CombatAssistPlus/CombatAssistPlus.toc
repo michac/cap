@@ -25,6 +25,7 @@ Sense.lua
 Bars.lua
 Overlay.lua
 Frame.lua
+Window.lua
 StylePanel.lua
 Mode.lua
 
