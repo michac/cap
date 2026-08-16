@@ -51,4 +51,33 @@ describe("engine / presentation", function()
     assert.equal("tyrant", plan[1].id)
     assert.is_nil(plan[1].treatment)
   end)
+  -- V11 · the cooldown hatch. Its whole safety property is the direction of the default: cap
+  -- draws it when it has been TOLD the button is down, and never infers the opposite.
+  describe("the cooldown hatch", function()
+    it("draws only on a readiness the CDM actually reported as false", function()
+      assert.is_true(ns.Treatment.For{ tier = "ROTATION", oncd = true }.hatch)
+      assert.is_false(ns.Treatment.For{ tier = "ROTATION", oncd = false }.hatch)
+    end)
+
+    it("draws nothing for an unknown or absent readiness", function()
+      assert.is_false(ns.Treatment.For{ tier = "ROTATION" }.hatch)
+      assert.is_false(ns.Treatment.For{ tier = "ROTATION", oncd = ns.Signal.UNKNOWN }.hatch)
+      assert.is_false(ns.Treatment.For{ tier = "ROTATION", oncd = nil }.hatch)
+    end)
+
+    -- It is a fact about the button, not about cap's opinion of it, so a row cap has no tier
+    -- for still wears it. `Overlay.cell` renders that as `id:off~`, which is why a bare `off`
+    -- can no longer be read as "nothing drawn".
+    it("is independent of whether a lane was selected", function()
+      local d = ns.Treatment.For{ oncd = true }
+      assert.is_false(d.emphasized)
+      assert.is_true(d.hatch)
+    end)
+
+    it("survives the CHARGES substitution, which only moves the hue", function()
+      local d = ns.Treatment.For{ tier = "ROTATION", charged = true, oncd = true }
+      assert.equal("CHARGES", d.lane)
+      assert.is_true(d.hatch)
+    end)
+  end)
 end)

@@ -101,8 +101,13 @@ function Signal.Evaluate(resolved, world)
   for _, bound in ipairs((resolved or {}).entries or {}) do
     local entry = bound.entry
     local selected, blindTier = tier(entry, world)
+    -- V11's hatch: the CDM's own readiness latch, and ONLY the false case. `nil` and UNKNOWN both
+    -- draw bare, because absence of a hatch must never assert that a button is up — cap says a
+    -- thing is on cooldown when it has been told so and at no other time.
+    local ready = (world.ready or {})[entry.id]
     local verdict = {
       entry = entry.id, row = bound.row, tier = selected, charged = bound.charged,
+      oncd = ready == false,
       emphasized = selected ~= nil, blindTier = blindTier, markers = {}, cues = {},
       reasons = {},
     }

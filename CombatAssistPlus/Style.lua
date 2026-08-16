@@ -110,6 +110,18 @@ ns.Style = {
       slot = 2,
     },
   },
+  hatch = {
+    alpha = 0.5,
+    direction = "down",
+    duty = 0.5,
+    phase_pct = 50,
+    pitch_px = 16,
+    rgb = { 0.00, 0.00, 0.00 },
+    texture = "stripes",
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
+    tile_px = 128,
+    tint = "lane",
+  },
   lanes = {
     CHARGES = {
       rgb = { 0.62, 0.42, 0.95 },
@@ -168,6 +180,7 @@ ns.Style = {
     cd = {
       border = false,
       cues = {  },
+      hatch = true,
       swipe = true,
     },
     ["hold-readable"] = {

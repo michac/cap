@@ -10,13 +10,13 @@ ns.LabStyle = {
   _arrival_stage = {
     neighbours = 2,
   },
-  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from here.",
+  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from here. The stripe entries below draw on `tokens.hatch`'s sheet, which is the STYLE's — a lab entry citing the style is the legal direction.",
   _sheet = {
     direction = "down",
     duty = 0.5,
     pitch_px = 16,
     texture = "stripes",
-    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\lab\\",
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
   },
   ["arrival-b-relative"] = {
@@ -87,42 +87,6 @@ ns.LabStyle = {
     phase_pct = 0,
     rgb = { 0.95, 0.3, 0.3 },
     title = "Red stripes on a sequencing hold",
-  },
-  ["stripes-l4-cooldown"] = {
-    alpha = 0.5,
-    asks = "Is cap restating Blizzard's swipe, or adding to it? And when a button is *both* held and on cooldown, do two conditions drawn at complementary phase read as two facts — or as one mess?",
-    cells = {
-      {
-        ability = "Eye Beam",
-        caption = "<b>a plain <code>cd</code> row</b> — the first thing cap has ever drawn on one. The swipe is Blizzard's; the stripes are ours. Redundant, or reinforcing?",
-        kind = "icon",
-        stripes = {
-          "self",
-        },
-        verdict = "cd",
-      },
-      {
-        ability = "Essence Break",
-        caption = "<b>the whole argument.</b> Held <em>and</em> on cooldown: two renders each drew their own stripes, half a period apart, and both conditions are visibly present at once. A single shared surface could only ever have shown one.",
-        cues = {
-          "blocked",
-        },
-        kind = "icon",
-        stripes = {
-          "stripes-l3-hold",
-          "self",
-        },
-        verdict = "cd",
-      },
-      {
-        caption = "the same sheet at this entry's colour and phase — offset half a pitch, which is what lets it interleave with L3 rather than cover it.",
-        kind = "sheet",
-      },
-    },
-    draws = "stripes",
-    phase_pct = 50,
-    rgb = { 0.00, 0.00, 0.00 },
-    title = "Black stripes on a detected cooldown, at the complementary phase",
   },
   ["stripes-l5-starved"] = {
     alpha = 0.45,

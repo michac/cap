@@ -20,6 +20,9 @@ local function acquire(cid)
   f = CreateFrame("Frame", nil, UIParent)
   f:Hide()
   f.border = ns.Paint.Border(f)
+  -- Inset by PAD: the overlay frame sits PAD outside the item so the border has room, and the
+  -- hatch is a statement about the icon face, which is inside that.
+  f.hatch = ns.Paint.Hatch(f, PAD)
   f.badges = {}
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
@@ -32,6 +35,7 @@ end
 --- leave a badge lit or stepping.
 local function quiet(f)
   if f.border then f.border:Hide() end
+  if f.hatch then f.hatch:Hide() end
   for _, badge in pairs(f.badges or {}) do badge:Hide() end
 end
 
@@ -123,12 +127,14 @@ local function graded(f)
   end
 end
 
---- Compose one row: lane border, then a badge per cue.
+--- Compose one row: the cooldown hatch, the lane border, then a badge per cue — the order
+--- render-shelf.md Part 2.5 fixes, bottom to top.
 local function paint(f, verdict, silent)
   local d = ns.Treatment.For(verdict)
   f.border.silent = silent
   if d.lane then f.border:SetLane(d.lane) else f.border:Hide() end
   f.border.silent = false
+  if f.hatch then f.hatch:SetShown(d.hatch) end
 
   local wanted = {}
   for _, key in ipairs(d.cues or {}) do wanted[key] = true end
@@ -145,12 +151,15 @@ local function paint(f, verdict, silent)
   return d
 end
 
---- `id:LANE[+cue,cue]`, or `id:off` where the row draws nothing at all.
+--- `id:LANE[+cue,cue]`, or `id:off` where the row draws nothing at all. A trailing `~` is V11's
+--- cooldown hatch, which is independent of the lane — so `id:off~` is a real state, and reading a
+--- bare `off` as "nothing drawn" would be wrong.
 local function cell(id, d)
-  if not (d and d.lane) then return id .. ":off" end
+  local hatch = (d and d.hatch) and "~" or ""
+  if not (d and d.lane) then return id .. ":off" .. hatch end
   local s = id .. ":" .. d.lane
   if #(d.cues or {}) > 0 then s = s .. "+" .. table.concat(d.cues, ",") end
-  return s
+  return s .. hatch
 end
 
 local function num(v)

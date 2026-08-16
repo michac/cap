@@ -16,11 +16,15 @@ Treatment.BAR = {
 --- CHARGES REPLACES the role lane rather than stacking with it: an ability wears exactly one
 --- border (render-shelf.md V2). The role lane the rotation authored is unchanged and still
 --- lives in the catalog; only the drawn hue moves.
+--- The cooldown hatch (V11) is independent of the lane: a row draws it whenever the CDM says the
+--- ability is down, including a row with no tier selected, because "this button is unavailable" is
+--- true regardless of whether cap had an opinion about it this instant.
 function Treatment.For(verdict)
   local cues = (verdict or {}).cues or {}
+  local hatch = (verdict or {}).oncd == true
   local lane = verdict and verdict.tier
   if lane and verdict.charged then lane = "CHARGES" end
   local spec = lane and ns.Style and ns.Style.lanes[lane]
-  if not spec then return { emphasized = false, cues = cues } end
-  return { emphasized = true, lane = lane, cues = cues }
+  if not spec then return { emphasized = false, cues = cues, hatch = hatch } end
+  return { emphasized = true, lane = lane, cues = cues, hatch = hatch }
 end

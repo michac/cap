@@ -24,10 +24,9 @@ Channel.lua
 Sense.lua
 Bars.lua
 Overlay.lua
+Anchor.lua
 Frame.lua
 Window.lua
 StylePanel.lua
 Mode.lua
 
-# --- probes (delete on close) ---
-probes\AnchorOrder.lua

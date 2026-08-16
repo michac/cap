@@ -4,6 +4,9 @@
 local H = require("CombatAssistPlus.tests.mock_ns")
 
 local LAB_MEDIA = "CombatAssistPlus/Media/lab/"
+-- The stripe sheet is the STYLE's since V11 was promoted (2026-08-16); the gallery borrows it
+-- from Media/ rather than keeping a second copy that could drift.
+local MEDIA = "CombatAssistPlus/Media/"
 
 local function exists(path)
   local f = io.open(path, "rb")
@@ -38,11 +41,13 @@ describe("engine / lab", function()
     assert.is_true(any, "an empty lab is legal, but then this file has nothing to protect")
   end)
 
-  it("ships the sheet every striped entry draws with", function()
+  it("borrows the style's stripe sheet rather than shipping a second copy", function()
     local sheet = ns.LabStyle._sheet
     if not sheet then return end
-    assert.is_true(exists(LAB_MEDIA .. sheet.texture .. ".tga"),
-      "lab._sheet names " .. sheet.texture .. " with no texture in Media/lab")
+    assert.is_true(exists(MEDIA .. sheet.texture .. ".tga"),
+      "_sheet names " .. sheet.texture .. " with no texture in Media/")
+    assert.is_false(exists(LAB_MEDIA .. sheet.texture .. ".tga"),
+      "a second copy under Media/lab/ can drift from the one V11 ships")
     -- A pitch that does not divide the tile seams where the sheet wraps.
     assert.equal(0, sheet.tile_px % sheet.pitch_px)
   end)

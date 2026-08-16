@@ -290,6 +290,59 @@ function Paint.Border(host, lane)
 end
 
 -- ---------------------------------------------------------------------------
+-- V11 · the cooldown hatch
+-- ---------------------------------------------------------------------------
+
+--- Diagonal stripes across the icon face, drawn while the Cooldown Manager says the ability is
+--- down. One tiling white-alpha sheet tinted by SetVertexColor, exactly as the lane border is.
+---
+--- ⚠ The wrap mode is set ONCE, here, and can never be changed afterwards:
+--- `[T2 bug: WoWUIBugs #250, created 2022-08-13, closed]` reports that re-calling SetTexture with
+--- the same path and different wrap modes is ignored, because the setter short-circuits on the
+--- asset rather than the whole argument list. The texcoords are set once for the same reason
+--- there is no Step method — nothing about the hatch animates, so the in-combat path is Show/Hide
+--- and nothing else.
+---
+--- `inset` is the overlay frame's own padding: the host is anchored PAD outside the item frame so
+--- the border has room, and the hatch is a statement about the icon, which is inside that.
+--@unverified whether the pitch authored for a 128px sheet reads as stripes rather than as a
+--@unverified flat wash once tiled across a 56px icon, and whether black at this alpha reads as
+--@unverified "ruled out" rather than as "dimmed" — render-shelf.md Part 5.
+function Paint.Hatch(host, inset)
+  local h = ns.Style.hatch
+  if not h then return nil end
+  inset = inset or 0
+
+  local t = host:CreateTexture(nil, "ARTWORK")
+  t:SetTexture(ns.Style.hatch.texture_root .. h.texture .. ".tga", "REPEAT", "REPEAT",
+    "TRILINEAR")
+  t:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -inset)
+  t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -inset, inset)
+  t:SetVertexColor(h.rgb[1], h.rgb[2], h.rgb[3])
+  t:SetAlpha(h.alpha)
+  t:Hide()
+
+  local hatch = { texture = t }
+
+  --- Sized from the drawn extent so the stripe pitch is the same on any icon size the client
+  --- hands us, rather than stretching with the button.
+  function hatch:SetShown(on)
+    if not on then return t:Hide() end
+    local w, hgt = extent(host)
+    w, hgt = w - 2 * inset, hgt - 2 * inset
+    if w ~= self.w or hgt ~= self.h then
+      t:SetTexCoord(Paint.StripeTexCoord(w, hgt, h.tile_px, h.pitch_px, h.phase_pct))
+      self.w, self.h = w, hgt
+    end
+    t:Show()
+  end
+
+  function hatch:Hide() t:Hide() end
+
+  return hatch
+end
+
+-- ---------------------------------------------------------------------------
 -- V5 · corner badge, and V5.1's cue frames
 -- ---------------------------------------------------------------------------
 

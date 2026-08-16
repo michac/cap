@@ -131,6 +131,33 @@ local function buildMotion()
 end
 
 --- Cue keys in slot order, so the gallery is laid out the same way on every login.
+-- V11 · the cooldown hatch, drawn beside a bare swipe and a swiped-and-hatched row, because the
+-- question it exists to answer is comparative: is cap restating Blizzard's swipe or adding to it?
+local function buildHatch()
+  section("V11 · cooldown hatch")
+  local h = ns.Style.hatch
+  local x = PAD
+  for _, cell in ipairs({
+    { caption = "swipe only", swipe = true, hatch = false },
+    { caption = "hatch only", swipe = false, hatch = true },
+    { caption = "as it ships", swipe = true, hatch = true },
+    { caption = "untreated", swipe = false, hatch = false },
+  }) do
+    local host = swatch(x, y, SAMPLE[1].spell, cell.caption)
+    if cell.swipe then swipe(host) end
+    if cell.hatch then
+      local hatch = ns.Paint.Hatch(host, 0)
+      if hatch then hatch:SetShown(true) end
+    end
+    x = x + icon() + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+  note(("A %dpx sheet at %dpx pitch, tiled across a %dpx icon — roughly %.1f stripes per edge. "
+        .. "Black at %.2f alpha, offset half a pitch so a second stripe condition could "
+        .. "interleave with it."):format(
+       h.tile_px, h.pitch_px, icon(), icon() / h.pitch_px, h.alpha))
+end
+
 local function cueKeys()
   local keys = {}
   for key in pairs(ns.Style.cues) do keys[#keys + 1] = key end
@@ -412,6 +439,7 @@ local function buildStyle(pane)
 
   buildLanes()
   buildMotion()
+  buildHatch()
   collect(badges, buildCues())
   collect(badges, buildSlots())
   note("Every texture here is cap's own. Numbers come from Style.lua, generated from " ..

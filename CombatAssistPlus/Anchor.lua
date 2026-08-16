@@ -1,10 +1,15 @@
---@probe
--- question:  can cap re-anchor the Essential viewer's item frames into the authored
---            order out of combat, and do those positions persist through combat?
--- opened:    2026-08-16
--- expires:   2026-08-30
--- lands-in:  knowledge/addon-dev/cooldown-manager.md
---@endprobe
+-- Anchor.lua — draws the Essential viewer's rows in the catalog's authored order.
+--
+-- The reading model asks you to scan left to right and press the first item that is not
+-- ruled out, which only means anything if left-to-right IS the priority order. Blizzard
+-- orders the row by the player's saved Cooldown Manager layout, so without this the scan
+-- direction carries no information.
+--
+-- It re-anchors, and only re-anchors. `layoutIndex` is both the grid sort key and the
+-- cooldownID data index, so rewriting it swaps the icons AND their contents and the row
+-- looks unchanged; the positional move is ClearAllPoints() + SetPoint() with the index
+-- left alone. Nothing here writes the player's saved layout, and a row the player has not
+-- configured stays absent — this reorders what is already shown and adds nothing to it.
 --
 -- Reads drawn position with GetLeft/GetTop rather than through Bind or Catalog.OrderCheck,
 -- which both sort by layoutIndex and therefore cannot see a SetPoint re-anchor at all.
@@ -12,8 +17,8 @@ local ADDON, ns = ...
 
 local issecretvalue = issecretvalue
 
-ns.AnchorOrder = ns.AnchorOrder or {}
-local AnchorOrder = ns.AnchorOrder
+ns.Anchor = ns.Anchor or {}
+local Anchor = ns.Anchor
 
 local VIEWER = "EssentialCooldownViewer"
 local SAMPLE = 0.5
@@ -22,10 +27,9 @@ local TOLERANCE = 0.5
 -- anything later had no observed cause and is reported as contention instead.
 local ATTRIBUTION_WINDOW = 1.0
 local DEFAULT_GAP = 4
--- Demo's exaggeration, in multiples of the measured frame size: pitch, then shift left and up.
-local DEMO_PITCH = 2
-local DEMO_SHIFT_X = 2
-local DEMO_SHIFT_Y = 4
+-- The viewer builds its frames on its own schedule, so the first arm waits rather than
+-- racing it. A failed arm retries on the next event anyway; this only avoids the noise.
+local SETTLE = 1.0
 
 local stream = ns.Capture.Open("anchor", { sessions = 8, cap = 2000, dedup = false })
 
@@ -37,7 +41,7 @@ local stream = ns.Capture.Open("anchor", { sessions = 8, cap = 2000, dedup = fal
 --- `{ id, cooldownID }`; a nil or unmatched cooldownID is skipped and reported rather
 --- than shifting the rest. Rows the catalog does not name keep their relative order and
 --- follow the named ones.
-function AnchorOrder.Plan(rows, entries)
+function Anchor.Plan(rows, entries)
   local byID, seen = {}, {}
   for _, row in ipairs(rows or {}) do
     if row.cooldownID ~= nil and byID[row.cooldownID] == nil then byID[row.cooldownID] = row end
@@ -65,15 +69,6 @@ function AnchorOrder.Plan(rows, entries)
   return { order = order, named = named, extra = #order - named, missing = missing }
 end
 
---- The order a mode asks for — `demo` reverses the plan — and what X{} judges drawn against.
-function AnchorOrder.Intended(plan, mode)
-  local order = (plan and plan.order) or {}
-  if mode ~= "demo" then return order end
-  local out = {}
-  for i = #order, 1, -1 do out[#out + 1] = order[i] end
-  return out
-end
-
 -- ---------------------------------------------------------------------------
 -- Pure: the line body, and the dedup key
 -- ---------------------------------------------------------------------------
@@ -91,7 +86,7 @@ local function list(ids)
 end
 
 --- No frames, no clock, no game reads: every field rides the snapshot the caller built.
-function AnchorOrder.Render(snap)
+function Anchor.Render(snap)
   snap = snap or {}
   local a = {
     "n:" .. num(snap.n), "named:" .. num(snap.named),
@@ -109,17 +104,36 @@ function AnchorOrder.Render(snap)
 end
 
 -- ---------------------------------------------------------------------------
+-- Pure: what a viewer census means
+-- ---------------------------------------------------------------------------
+
+--- Classifies an arm attempt. The two failures are different problems and only one is
+--- cap's business: a viewer that is absent or empty is something to tell the player
+--- about, while a catalog entry with no row is NORMAL — the Cooldown Manager only makes
+--- rows for abilities it tracks, so an entry for an ability with no cooldown never binds
+--- and would otherwise complain on every login.
+function Anchor.Diagnose(census)
+  census = census or {}
+  if not census.exists then
+    return "no-viewer", VIEWER .. " does not exist — cap cannot order a row it cannot find."
+  end
+  if (census.rows or 0) == 0 then
+    return "no-rows", "the " .. VIEWER .. " is empty — nothing to order. Add abilities to it "
+      .. "in the Cooldown Manager, or check that it is enabled."
+  end
+  return "ok", nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Session state
 -- ---------------------------------------------------------------------------
 
 local P = {
   armed = false,
-  mode = "authored",
   combat = false,
   plan = nil,
   tracked = {},
   expected = {},
-  authored = {},
   planned = {},
   stomps = 0,
   stompsCombat = 0,
@@ -132,12 +146,26 @@ local P = {
   anchor = nil,
   ticker = nil,
   hooked = false,
+  told = nil,
 }
 
 local function bit(v) return v and "1" or "0" end
 
 local function plain(v)
   return v ~= nil and not issecretvalue(v)
+end
+
+-- File scope runs before ADDON_LOADED, so the scratch carries the shape until ns.db
+-- exists — the same reason, and the same shape, as Mode.lua's.
+local scratch = {}
+local function store()
+  local root = ns.db or scratch
+  if root.anchor == nil then root.anchor = true end
+  return root
+end
+
+function Anchor.Enabled()
+  return store().anchor and true or false
 end
 
 local function viewer()
@@ -185,8 +213,8 @@ local function write(body, edge)
 end
 
 local function mark(edge)
-  local drawn, match = AnchorOrder.Drawn()
-  write(AnchorOrder.Render(snapshot(drawn, match)), edge)
+  local drawn, match = Anchor.Drawn()
+  write(Anchor.Render(snapshot(drawn, match)), edge)
 end
 
 local function stampMeta()
@@ -194,10 +222,16 @@ local function stampMeta()
   stream:Meta("viewer", VIEWER)
   stream:Meta("catalog", (ns.Sense and ns.Sense.CatalogName()) or "-")
   stream:Meta("rows", P.plan and #P.plan.order or 0)
-  stream:Meta("mode", P.mode)
-  stream:Meta("authored", list(P.authored))
   stream:Meta("intended", list(P.planned))
   stream:Meta("contended", P.contended)
+end
+
+-- Said once per reason per session: a condition that holds forever would otherwise
+-- reprint on every event that retries the arm.
+local function tell(reason, message)
+  if P.told == reason then return end
+  P.told = reason
+  ns.Emit(message)
 end
 
 -- ---------------------------------------------------------------------------
@@ -205,7 +239,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Tracked cooldownIDs sorted by drawn left edge, plus whether that agrees with the plan.
-function AnchorOrder.Drawn()
+function Anchor.Drawn()
   local seen = {}
   for _, t in ipairs(P.tracked) do
     local left = geometry(t.frame)
@@ -239,8 +273,8 @@ end
 -- spacing. Scale is matched to the item frames so a SetPoint offset means the same distance
 -- in both coordinate spaces.
 local function metrics(frames)
-  local w, h = frames[1]:GetWidth(), frames[1]:GetHeight()
-  if not (plain(w) and plain(h)) then return nil end
+  local w = frames[1]:GetWidth()
+  if not plain(w) then return nil end
   local lefts, left, top = {}, nil, nil
   for _, frame in ipairs(frames) do
     local l, t = geometry(frame)
@@ -257,7 +291,7 @@ local function metrics(frames)
     local delta = lefts[i] - lefts[i - 1] - w
     if delta > 0 and delta < gap then gap = delta end
   end
-  return w, h, gap, left, top
+  return w, gap, left, top
 end
 
 local function apply(why)
@@ -266,27 +300,22 @@ local function apply(why)
   for _, t in ipairs(P.tracked) do frames[#frames + 1] = t.frame end
   if #frames == 0 then return false end
 
-  local w, h, gap, left, top = metrics(frames)
+  local w, gap, left, top = metrics(frames)
   if not w then return false end
 
-  -- Both modes run the one ClearAllPoints + SetPoint path below; the mode picks pitch and origin.
-  local pitch, dx, dy = w + gap, 0, 0
-  if P.mode == "demo" then
-    pitch, dx, dy = pitch * DEMO_PITCH, -DEMO_SHIFT_X * w, DEMO_SHIFT_Y * h
-  end
-
+  local pitch = w + gap
   local anchor = ensureAnchor()
   local mine, theirs = frames[1]:GetEffectiveScale(), UIParent:GetEffectiveScale()
   if plain(mine) and plain(theirs) and theirs ~= 0 then anchor:SetScale(mine / theirs) end
   anchor:ClearAllPoints()
-  anchor:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left + dx, top + dy)
+  anchor:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
 
   P.expected = {}
   for i, t in ipairs(P.tracked) do
     local x = (i - 1) * pitch
     t.frame:ClearAllPoints()
     t.frame:SetPoint("TOPLEFT", anchor, "TOPLEFT", x, 0)
-    P.expected[t.cooldownID] = { left = left + dx + x, top = top + dy }
+    P.expected[t.cooldownID] = { left = left + x, top = top }
   end
   P.dirty = false
   mark("# reapply why=" .. why)
@@ -334,15 +363,19 @@ local function sample()
   else
     P.contended = P.contended + 1
     mark(("# contended n=%d combat=%s"):format(moved, bit(P.combat)))
+    -- Backing off rather than re-asserting: another addon that re-anchors these frames
+    -- wins every round anyway, and a fight between two riders at 2 Hz is worse for the
+    -- player than one of them losing quietly. Say it once, then leave the row alone.
     if not P.warned then
       P.warned = true
-      ns.Emit("these frames moved with no hooked layout call behind it — either another addon "
-        .. "is contending for position, or a layout path this probe does not hook. Either way "
-        .. "the flight is not measuring persistence alone.")
+      ns.Emit("another addon is moving the Cooldown Manager's icons, so cap cannot order "
+        .. "them — the row's left-to-right order is not cap's and should not be read as a "
+        .. "priority. Disable that addon's Cooldown Manager module, or /cap anchor off.")
     end
+    return
   end
-  -- Re-assert only out of combat: the whole question is whether the positions hold in a
-  -- pull, and repositioning mid-pull would answer it for us.
+  -- Re-assert only out of combat: the layout teardown reaches combat, where a re-anchor
+  -- is not available to us, and the row recovers on the next out-of-combat pass.
   if not InCombatLockdown() then schedule("displaced") end
 end
 
@@ -370,40 +403,9 @@ local function installHooks()
   if EventRegistry then
     EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", function()
       if P.armed then schedule("settings") end
-    end, AnchorOrder)
+    end, Anchor)
   end
 end
-
-local events = CreateFrame("Frame")
-for _, event in ipairs({
-  "PLAYER_REGEN_DISABLED",
-  "PLAYER_REGEN_ENABLED",
-  "PLAYER_ENTERING_WORLD",
-  "SPELLS_CHANGED",
-  "TRAIT_CONFIG_UPDATED",
-  "ACTIVE_PLAYER_SPECIALIZATION_CHANGED",
-  "ACTIVE_COMBAT_CONFIG_CHANGED",
-  "ACTIVE_TALENT_GROUP_CHANGED",
-  "PLAYER_EQUIPMENT_CHANGED",
-  "COOLDOWN_VIEWER_TABLE_HOTFIXED",
-}) do
-  events:RegisterEvent(event)
-end
-
--- ⚠ Combat comes from the event edge, never InCombatLockdown() inside a handler, so a
--- recorded combat flag never depends on when the lockdown flag clears.
-events:SetScript("OnEvent", function(_, event)
-  if event == "PLAYER_REGEN_DISABLED" then
-    P.combat = true
-    if P.armed then mark("# combat start") end
-    return
-  end
-  if event == "PLAYER_REGEN_ENABLED" then
-    P.combat = false
-    if P.armed then mark("# combat end") end
-  end
-  if P.armed then schedule(event) end
-end)
 
 -- ---------------------------------------------------------------------------
 -- Arming
@@ -453,6 +455,13 @@ local function authored(rows)
   return entries, cat
 end
 
+--- What the four viewers currently hold, as plain numbers `Diagnose` can judge.
+function Anchor.Census()
+  local v = viewer()
+  if not v then return { exists = false, rows = 0 } end
+  return { exists = true, rows = #viewerRows() }
+end
+
 local function disarm()
   P.armed = false
   if P.ticker then P.ticker:Cancel(); P.ticker = nil end
@@ -465,121 +474,169 @@ local function disarm()
     if not ok or not plain(points) or points == 0 then orphans = orphans + 1 end
   end
   mark("# restored orphans=" .. orphans)
-  P.tracked, P.expected, P.authored, P.planned, P.plan = {}, {}, {}, {}, nil
-  P.mode = "authored"
+  P.tracked, P.expected, P.planned, P.plan = {}, {}, {}, nil
   return orphans
 end
 
-local function arm(mode)
-  local rows = viewerRows()
-  if #rows == 0 then
-    ns.Emit("no Essential viewer rows are bound — nothing to re-anchor.")
-    return false
+--- Returns ok, reason. `reason` is nil on success and on a silent retry-later.
+local function arm()
+  local status, message = Anchor.Diagnose(Anchor.Census())
+  if status ~= "ok" then
+    tell(status, message)
+    return false, status
   end
-  local entries = authored(rows)
-  P.plan = AnchorOrder.Plan(rows, entries)
-  P.mode = mode
-  P.tracked, P.authored, P.planned = {}, {}, {}
-  for i, item in ipairs(P.plan.order) do P.authored[i] = item.cooldownID end
-  for i, item in ipairs(AnchorOrder.Intended(P.plan, mode)) do
+
+  local rows = viewerRows()
+  local entries, cat = authored(rows)
+  if not cat then
+    tell("no-catalog", "no catalog for this spec and hero tree, so cap has no order to "
+      .. "impose — the row keeps Blizzard's.")
+    return false, "no-catalog"
+  end
+
+  P.plan = Anchor.Plan(rows, entries)
+  P.tracked, P.planned = {}, {}
+  for i, item in ipairs(P.plan.order) do
     P.tracked[i] = { cooldownID = item.cooldownID, frame = item.row.frame }
     P.planned[i] = item.cooldownID
   end
   P.armed = true
   P.warned = false
   installHooks()
-  mark("# armed mode=" .. mode)
+  mark("# armed")
   stampMeta()
   if not apply("armed") then
     P.armed = false
-    ns.Emit("could not read the viewer's geometry — not armed.")
-    return false
+    tell("no-geometry", "could not read the Cooldown Manager's geometry — the row keeps "
+      .. "Blizzard's order.")
+    return false, "no-geometry"
   end
-  P.ticker = C_Timer.NewTicker(SAMPLE, sample)
-  return true
+  P.told = nil
+  if not P.ticker then P.ticker = C_Timer.NewTicker(SAMPLE, sample) end
+  return true, nil
+end
+
+--- Arms if enabled and not already armed; re-applies if it is. Every caller is an event.
+local function refresh()
+  if not Anchor.Enabled() then return end
+  if InCombatLockdown() then return end
+  if P.armed then schedule("event") else arm() end
 end
 
 -- ---------------------------------------------------------------------------
--- The probe's own command — never a `/cap` verb (house rule 2)
+-- Events
 -- ---------------------------------------------------------------------------
 
-local verbs = {}
-
--- Keyed on the literal argument: `on` and `on demo` are exact matches, never a substring find.
-local modes = { [""] = "authored", demo = "demo" }
-
-verbs.on = function(rest)
-  local mode = modes[(rest or ""):lower()]
-  if not mode then
-    ns.Emit("usage: /capanchor on  or  /capanchor on demo")
-    return
-  end
-  if P.armed then ns.Emit("already armed."); return end
-  if InCombatLockdown() then
-    ns.Emit("arming is out of combat only.")
-    return
-  end
-  if arm(mode) then
-    ns.Emit(("armed in %s mode on %d rows (%d authored, %d unnamed, %d missing)."):format(
-      mode, #P.plan.order, P.plan.named, P.plan.extra, #P.plan.missing))
-  end
+local events = CreateFrame("Frame")
+for _, event in ipairs({
+  "PLAYER_REGEN_DISABLED",
+  "PLAYER_REGEN_ENABLED",
+  "PLAYER_ENTERING_WORLD",
+  "SPELLS_CHANGED",
+  "TRAIT_CONFIG_UPDATED",
+  "ACTIVE_PLAYER_SPECIALIZATION_CHANGED",
+  "ACTIVE_COMBAT_CONFIG_CHANGED",
+  "ACTIVE_TALENT_GROUP_CHANGED",
+  "PLAYER_EQUIPMENT_CHANGED",
+  "COOLDOWN_VIEWER_TABLE_HOTFIXED",
+}) do
+  events:RegisterEvent(event)
 end
 
-verbs.off = function()
-  if not P.armed then ns.Emit("not armed."); return end
-  if InCombatLockdown() then
-    ns.Emit("restoring is out of combat only.")
+-- ⚠ Combat comes from the event edge, never InCombatLockdown() inside a handler, so a
+-- recorded combat flag never depends on when the lockdown flag clears.
+events:SetScript("OnEvent", function(_, event)
+  if event == "PLAYER_REGEN_DISABLED" then
+    P.combat = true
+    if P.armed then mark("# combat start") end
     return
   end
-  local orphans = disarm()
-  ns.Emit("restored" .. (orphans > 0 and (" — " .. orphans .. " frames left unanchored") or "") .. ".")
-end
+  if event == "PLAYER_REGEN_ENABLED" then
+    P.combat = false
+    if P.armed then mark("# combat end") end
+  end
+  if event == "PLAYER_ENTERING_WORLD" then
+    C_Timer.After(SETTLE, refresh)
+    return
+  end
+  refresh()
+end)
 
-verbs.status = function()
+-- ---------------------------------------------------------------------------
+-- The command
+-- ---------------------------------------------------------------------------
+
+local function statusLine()
   if not P.armed then
-    ns.Emit("disarmed. stomps " .. P.stomps .. " (" .. P.stompsCombat .. " in combat), "
-      .. "displaced " .. P.displaced .. ", contended " .. P.contended .. ".")
+    ns.Emit("ordering is " .. (Anchor.Enabled() and "on but not applied" or "off") .. ".")
+    local _, message = Anchor.Diagnose(Anchor.Census())
+    if message then ns.Emit("  " .. message) end
     return
   end
-  local drawn, match = AnchorOrder.Drawn()
-  ns.Emit(("armed on %s in %s mode — %d rows, drawn order %s the requested one."):format(
-    VIEWER, P.mode, #drawn, match and "matches" or "DIFFERS from"))
-  ns.Emit(("stomps %d (%d in combat), displaced %d, contended %d%s."):format(
+  local drawn, match = Anchor.Drawn()
+  ns.Emit(("ordering %d rows on %s — drawn order %s the authored one."):format(
+    #drawn, VIEWER, match and "matches" or "DIFFERS from"))
+  ns.Emit(("layout rebuilds %d (%d in combat), displaced %d, contended %d%s."):format(
     P.stomps, P.stompsCombat, P.displaced, P.contended,
     P.contended > 0 and " — another addon is moving these frames" or ""))
 end
 
-verbs.rows = function()
+local function rowsLine()
   local rows = viewerRows()
   local entries, cat = authored(rows)
-  if not cat then ns.Emit("no catalog for this build."); return end
-  local plan = AnchorOrder.Plan(rows, entries)
-  ns.Emit(("catalog %s: %d of %d entries resolved to a live row."):format(
-    cat.name or "?", plan.named, #entries))
-  for _, id in ipairs(plan.missing) do ns.Emit("  no row: " .. id) end
-  for _, def in ipairs({
-    { global = VIEWER, want = #entries },
-    { global = "UtilityCooldownViewer" },
-    { global = "BuffIconCooldownViewer" },
-    { global = "BuffBarCooldownViewer" },
+  if not cat then ns.Emit("no catalog for this spec and hero tree."); return end
+  ns.Emit(("catalog %s: %d of %d entries have a Cooldown Manager row."):format(
+    cat.name or "?", Anchor.Plan(rows, entries).named, #entries))
+  -- Listed, not warned about: the Cooldown Manager only makes rows for what it tracks, so
+  -- an ability with no cooldown never gets one and that is not a fault to report.
+  for _, id in ipairs(Anchor.Plan(rows, entries).missing) do ns.Emit("  no row: " .. id) end
+  for _, name in ipairs({
+    VIEWER, "UtilityCooldownViewer", "BuffIconCooldownViewer", "BuffBarCooldownViewer",
   }) do
-    local v = _G[def.global]
-    local active = "?"
+    local v = _G[name]
+    local active = "absent"
     if v then
       local ok, frames = pcall(v.GetItemFrames, v)
-      if ok and type(frames) == "table" then active = tostring(#frames) end
+      if ok and type(frames) == "table" then active = #frames .. " frames" end
     end
-    ns.Emit(("  %s: %s pooled frames%s"):format(def.global, active,
-      def.want and (", catalog wanted " .. def.want) or ""))
+    ns.Emit(("  %s: %s"):format(name, active))
   end
 end
 
--- Exact match only, max depth `verb [arg]` — the shape of ns.Dispatch, kept probe-local
--- because a probe may not add a verb to a shipped command.
-SLASH_CAPANCHOR1 = "/capanchor"
-SlashCmdList.CAPANCHOR = function(msg)
-  local verb, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
-  local fn = verbs[(verb or ""):lower()]
-  if fn then fn(rest or ""); return end
-  ns.Emit("usage: /capanchor on [demo] | off | status | rows")
+local function set(on)
+  store().anchor = on and true or false
+  if on then
+    P.told = nil
+    if not P.armed then arm() end
+    ns.Emit("ordering on.")
+  else
+    if P.armed then disarm() end
+    ns.Emit("ordering off — the row keeps Blizzard's order.")
+  end
 end
+
+local actions = {
+  [""] = statusLine,
+  status = statusLine,
+  rows = rowsLine,
+  on = function() set(true) end,
+  off = function() set(false) end,
+}
+
+ns.RegisterCommand{
+  name = "anchor", order = 35, args = "[on|off|rows]",
+  desc = "Draw the Cooldown Manager row in the catalog's priority order",
+  handler = function(rest)
+    local verb = (rest or ""):lower()
+    local action = actions[verb]
+    if not action then
+      ns.Emit("usage: /cap anchor  or  /cap anchor on|off|rows")
+      return
+    end
+    if (verb == "on" or verb == "off") and InCombatLockdown() then
+      ns.Emit("out of combat only.")
+      return
+    end
+    action()
+  end,
+}
