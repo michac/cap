@@ -8,6 +8,15 @@ describe("product characterization / Havoc pilot", function()
     cat = H.catalogBySpec(ns, 577)
   end)
 
+  --- Does the composed row read as SKIP? The elimination walk passes over a row wearing a
+  --- negative badge, so this is the drawn meaning of every hold, starve and block below.
+  local function skips(verdict)
+    for _, key in ipairs(ns.Treatment.For(verdict).cues or {}) do
+      if (ns.Style.cues[key] or {}).polarity ~= "positive" then return true end
+    end
+    return false
+  end
+
   it("is Fel-Scarred specifically, and validates", function()
     assert.same({}, ns.Catalog.Check(cat))
     assert.equal(34, cat.hero)
@@ -58,18 +67,18 @@ describe("product characterization / Havoc pilot", function()
   it("draws capped at max charges and blocked below it — never both, never neither", function()
     local full = immolation(true)
     assert.same({ "capped" }, full.cues)
-    assert.is_false(ns.Treatment.For(full).veil)
+    assert.is_false(skips(full), "capped is the one positive cue and must not read as skip")
     assert.equal("CHARGES", ns.Treatment.For(full).lane)
 
     local recharging = immolation(false)
     assert.same({ "blocked" }, recharging.cues)
-    assert.is_true(ns.Treatment.For(recharging).veil)
+    assert.is_true(skips(recharging))
   end)
 
   it("draws neither state when the charge read refuses", function()
     local v = immolation("unknown")
     assert.same({}, v.cues)
-    assert.is_false(ns.Treatment.For(v).veil)
+    assert.is_false(skips(v))
   end)
 
   --- One Fury spender, evaluated directly, with its affordability forced.
@@ -88,11 +97,11 @@ describe("product characterization / Havoc pilot", function()
     for _, id in ipairs{ "chaos_strike", "blade_dance" } do
       local broke = spender(id, false)
       assert.same({ "starved" }, broke.cues, id .. " must wear the cue when Fury is short")
-      assert.is_true(ns.Treatment.For(broke).veil)
+      assert.is_true(skips(broke))
 
       local rich = spender(id, true)
       assert.same({}, rich.cues, id .. " must be clean when it is affordable")
-      assert.is_false(ns.Treatment.For(rich).veil)
+      assert.is_false(skips(rich))
     end
   end)
 
@@ -102,7 +111,7 @@ describe("product characterization / Havoc pilot", function()
     for _, id in ipairs{ "chaos_strike", "blade_dance" } do
       local v = spender(id, "unknown")
       assert.same({}, v.cues, id .. " invented a cue from a refused read")
-      assert.is_false(ns.Treatment.For(v).veil)
+      assert.is_false(skips(v))
     end
   end)
 
@@ -144,7 +153,7 @@ describe("product characterization / Havoc pilot", function()
     for _, dep in ipairs{ "eye_beam", "blade_dance" } do
       local v = hold("metamorphosis", { metamorphosis = true, [dep] = true })
       assert.same({ "blocked" }, v.cues, dep .. " alone must hold Meta")
-      assert.is_true(ns.Treatment.For(v).veil)
+      assert.is_true(skips(v))
     end
   end)
 
@@ -152,18 +161,18 @@ describe("product characterization / Havoc pilot", function()
     -- "A satisfied dependency draws nothing" — the press is the quiet row, not a decorated one.
     local v = hold("metamorphosis", { metamorphosis = true })
     assert.same({}, v.cues)
-    assert.is_false(ns.Treatment.For(v).veil)
+    assert.is_false(skips(v))
     assert.equal("COOLDOWN", ns.Treatment.For(v).lane)
   end)
 
   it("holds The Hunt while Metamorphosis is available, and releases it once Meta is spent", function()
     local waiting = hold("the_hunt", { the_hunt = true, metamorphosis = true })
     assert.same({ "blocked" }, waiting.cues)
-    assert.is_true(ns.Treatment.For(waiting).veil)
+    assert.is_true(skips(waiting))
 
     local free = hold("the_hunt", { the_hunt = true })
     assert.same({}, free.cues)
-    assert.is_false(ns.Treatment.For(free).veil)
+    assert.is_false(skips(free))
   end)
 
   it("keeps every hold unknown-safe when the dependency read refuses", function()

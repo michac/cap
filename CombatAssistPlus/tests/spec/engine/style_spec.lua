@@ -19,8 +19,6 @@ describe("engine / style", function()
     local S = ns.Style
     assert.is_number(S.surfaces.icon_px)
     assert.is_number(S.surfaces.row_gap_px)
-    assert.is_number(S.veil.alpha)
-    assert.is_table(S.veil.rgb)
     assert.is_number(S.arrival.from_scale)
     assert.is_number(S.arrival.duration_s)
     assert.is_string(S.arrival.smoothing)

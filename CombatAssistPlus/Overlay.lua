@@ -20,8 +20,6 @@ local function acquire(cid)
   f = CreateFrame("Frame", nil, UIParent)
   f:Hide()
   f.border = ns.Paint.Border(f)
-  -- The frame sits PAD outside the CDM item, so the veil is inset back onto the icon face.
-  f.veil = ns.Paint.Veil(f, PAD)
   f.badges = {}
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
@@ -34,7 +32,6 @@ end
 --- leave a badge lit or stepping.
 local function quiet(f)
   if f.border then f.border:Hide() end
-  if f.veil then f.veil:Hide() end
   for _, badge in pairs(f.badges or {}) do badge:Hide() end
 end
 
@@ -106,23 +103,17 @@ local function itemShown(item)
   return shown and true or false
 end
 
---- ONE CURVE, TWO SINKS (render-shelf V9). A graded cue's badge is shown whenever the row
---- draws and its visibility is the client's to decide: cap writes the evaluated result into
---- the badge frame's alpha, and — for this cue only — into the veil's, so the row dims by the
---- same secret the badge shows. The value is written and forgotten; it is never compared, not
+--- ONE CURVE, ONE SINK (render-shelf V9). A graded cue's badge is shown whenever the row draws
+--- and its visibility is the client's to decide: cap writes the evaluated result into the badge
+--- frame's alpha and nowhere else. The value is written and forgotten; it is never compared, not
 --- even against nil, which is why the evaluator answers `ok, value`.
----
---- The veil texture carries the shelf's own alpha in its colour, so a written 1 is still a
---- 0.6 dim: what the curve modulates is the whole veil, not the shelf's number.
 local function graded(f)
-  local has, alpha = false, nil
   for id, armed in pairs(f.graded) do
     local badge = f.badges[armed.cue]
     local ok, value = ns.Channel.GradedAlpha(armed)
     if badge and ok then
       badge:Show()
       badge.frame:SetAlpha(value)
-      has, alpha = true, value
       f.gradedStatus[id] = "armed"
     elseif badge then
       -- An evaluation that threw is a refusal, not an empty badge left lit at its last alpha.
@@ -130,10 +121,9 @@ local function graded(f)
       f.gradedStatus[id] = "refused"
     end
   end
-  return has, alpha
 end
 
---- Compose one row: lane border, then the veil, then a badge per cue.
+--- Compose one row: lane border, then a badge per cue.
 local function paint(f, verdict, silent)
   local d = ns.Treatment.For(verdict)
   f.border.silent = silent
@@ -151,27 +141,14 @@ local function paint(f, verdict, silent)
       badge:Hide()
     end
   end
-  local curved, alpha = graded(f)
-
-  -- The derived boolean veil stays the rule; a graded cue only reaches the veil on a row that
-  -- no readable negative cue has already veiled outright.
-  if d.veil then
-    f.veil:SetAlpha(1)
-    f.veil:Show()
-  elseif curved then
-    f.veil:SetAlpha(alpha)
-    f.veil:Show()
-  else
-    f.veil:Hide()
-  end
+  graded(f)
   return d
 end
 
---- `id:LANE[/veil][+cue,cue]`, or `id:off` where the row draws nothing at all.
+--- `id:LANE[+cue,cue]`, or `id:off` where the row draws nothing at all.
 local function cell(id, d)
   if not (d and d.lane) then return id .. ":off" end
   local s = id .. ":" .. d.lane
-  if d.veil then s = s .. "/veil" end
   if #(d.cues or {}) > 0 then s = s .. "+" .. table.concat(d.cues, ",") end
   return s
 end

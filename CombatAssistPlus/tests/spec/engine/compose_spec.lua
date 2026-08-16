@@ -1,4 +1,4 @@
--- The composition seam: catalog cue -> verdict cue set -> lane + veil + badges.
+-- The composition seam: catalog cue -> verdict cue set -> lane + badges.
 -- No assertion here fixes a colour, a slot or a rate — those are the shelf's.
 local H = require("CombatAssistPlus.tests.mock_ns")
 
@@ -170,29 +170,27 @@ describe("engine / composition", function()
     local v = ns.Signal.Evaluate(resolved, H.world()).byEntry.conflagrate
     assert.same({ "quiet" }, v.markers)
     assert.same({}, v.cues)
-    assert.is_false(ns.Treatment.For(v).veil)
+    assert.same({}, ns.Treatment.For(v).cues)
   end)
 
-  it("derives the veil from polarity: any negative veils, positive-only does not", function()
+  -- The elimination walk reads off the badge alone: the press is the leftmost row that is
+  -- neither swiped nor wearing a NEGATIVE badge. That only decides anything while every cue
+  -- declares a polarity and the positive one is unique.
+  it("keeps the cue vocabulary polarised, with exactly one positive cue", function()
+    local positive = {}
     for key, cue in pairs(ns.Style.cues) do
-      local d = ns.Treatment.For{ tier = "ROTATION", cues = { key } }
-      if cue.polarity == "positive" then
-        assert.is_false(d.veil, key .. " is positive and must not veil its own press")
-      else
-        assert.is_true(d.veil, key .. " is negative and must veil")
-      end
+      assert.is_string(cue.polarity, key .. " declares no polarity")
+      if cue.polarity == "positive" then positive[#positive + 1] = key end
     end
-    assert.is_false(ns.Treatment.For{ tier = "ROTATION" }.veil)
+    assert.equal(1, #positive, "the reading model allows exactly one positive cue")
   end)
 
-  it("veils on a mixed set — one negative cue is enough", function()
-    local positive
-    for key, cue in pairs(ns.Style.cues) do
-      if cue.polarity == "positive" then positive = key end
-    end
-    assert.is_string(positive)
-    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { positive, "blocked" } }.veil)
-  end)
+  it("carries a mixed cue set through whole, so the negative badge is still there to read",
+    function()
+      local d = ns.Treatment.For{ tier = "ROTATION", cues = { "capped", "blocked" } }
+      assert.same({ "capped", "blocked" }, d.cues)
+      assert.equal("ROTATION", d.lane)
+    end)
 
   it("offers no cue at all when the reads refuse", function()
     local _, resolved = withMarkers(ns, {
@@ -200,7 +198,7 @@ describe("engine / composition", function()
     })
     local v = ns.Signal.Evaluate(resolved, H.blindWorld()).byEntry.conflagrate
     assert.same({}, v.cues)
-    assert.is_false(ns.Treatment.For(v).veil)
+    assert.same({}, ns.Treatment.For(v).cues)
   end)
 
   it("names which tier went blind rather than only that one did", function()

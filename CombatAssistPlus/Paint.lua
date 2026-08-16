@@ -227,25 +227,6 @@ function Paint.Border(host, lane)
 end
 
 -- ---------------------------------------------------------------------------
--- V4 · veil
--- ---------------------------------------------------------------------------
-
---- `inset` is how far the host extends PAST the icon it decorates. The veil covers the icon
---- face, so a host anchored outside it must be inset by the same amount or the dim overhangs
---- on all four sides. Sublevel 0 puts it UNDER the lane border, which draws at sublevel 0 too
---- but is created later — a veil above the border would dim cap's own emphasis.
-function Paint.Veil(host, inset)
-  local v = ns.Style.veil
-  inset = inset or 0
-  local t = host:CreateTexture(nil, "OVERLAY", nil, 0)
-  t:SetColorTexture(v.rgb[1], v.rgb[2], v.rgb[3], v.alpha)
-  t:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -inset)
-  t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -inset, inset)
-  t:Hide()
-  return t
-end
-
--- ---------------------------------------------------------------------------
 -- V5 · corner badge, and V5.1's cue frames
 -- ---------------------------------------------------------------------------
 

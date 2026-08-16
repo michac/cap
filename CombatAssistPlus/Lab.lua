@@ -55,26 +55,20 @@ ns.LabStyle = {
       {
         ability = "The Hunt",
         caption = "<b>readable hold</b> — the corner badge says <em>why</em>, the stripes say <em>not this</em>. Both, on one icon.",
-        cues = {
-          "blocked",
-        },
         kind = "icon",
         stripes = {
           "self",
         },
-        verdict = "below",
+        verdict = "hold-readable",
       },
       {
         ability = "Essence Break",
         caption = "<b>sealed hold</b> — the same statement drawn from a sealed fact. If the two holds do not look alike here, the player is being asked to decode where the fact came from.",
-        cues = {
-          "blocked",
-        },
         kind = "icon",
         stripes = {
           "self",
         },
-        verdict = "below",
+        verdict = "hold-sealed",
       },
       {
         ability = "The Hunt",
@@ -137,14 +131,11 @@ ns.LabStyle = {
       {
         ability = "Chaos Strike",
         caption = "<b>cannot afford it</b> — a Fury spender short of its cost, drawn by its own render with its own parameters.",
-        cues = {
-          "starved",
-        },
         kind = "icon",
         stripes = {
           "self",
         },
-        verdict = "below",
+        verdict = "starved",
       },
       {
         ability = "Chaos Strike",

@@ -148,22 +148,16 @@ ns.Style = {
     duty = 0.7,
     max_hz = 2.00,
   },
-  veil = {
-    alpha = 0.6,
-    rgb = { 0.00, 0.00, 0.00 },
-  },
   verdicts = {
     below = {
       border = true,
       cues = {  },
       swipe = false,
-      veil = false,
     },
     cd = {
       border = false,
       cues = {  },
       swipe = true,
-      veil = false,
     },
     ["hold-readable"] = {
       border = true,
@@ -171,7 +165,6 @@ ns.Style = {
         "blocked",
       },
       swipe = false,
-      veil = true,
     },
     ["hold-sealed"] = {
       border = true,
@@ -179,7 +172,6 @@ ns.Style = {
         "blocked",
       },
       swipe = false,
-      veil = true,
     },
     overcap = {
       border = true,
@@ -187,19 +179,16 @@ ns.Style = {
         "overcap",
       },
       swipe = false,
-      veil = true,
     },
     press = {
       border = true,
       cues = {  },
       swipe = false,
-      veil = false,
     },
     ["press-promoted"] = {
       border = true,
       cues = {  },
       swipe = false,
-      veil = false,
     },
     starved = {
       border = true,
@@ -207,13 +196,11 @@ ns.Style = {
         "starved",
       },
       swipe = false,
-      veil = true,
     },
     weave = {
       border = true,
       cues = {  },
       swipe = false,
-      veil = false,
     },
   },
   version = 2,

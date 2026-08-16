@@ -105,18 +105,13 @@ local function buildLanes()
 end
 
 local function buildMotion()
-  section("V2 · arrival snap  ·  V4 · veil  ·  V7 · swipe")
+  section("V2 · arrival snap  ·  V7 · swipe")
   local x = PAD
 
   local host = swatch(x, y, SAMPLE[1].spell, "click to fire")
   local border = ns.Paint.Border(host, "COOLDOWN")
   replayOnClick({ host }, { function() border:Snap() end }, ns.Style.arrival.duration_s)
   border:Snap()
-  x = x + icon() + SPREAD
-
-  local veiled = swatch(x, y, SAMPLE[2].spell, "veil")
-  ns.Paint.Border(veiled, "ROTATION")
-  ns.Paint.Veil(veiled):Show()
   x = x + icon() + SPREAD
 
   local swiped = swatch(x, y, SAMPLE[3].spell, "swipe")
