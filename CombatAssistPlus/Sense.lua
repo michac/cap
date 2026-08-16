@@ -144,6 +144,35 @@ local function readCooldown(spellID)
   return (start + duration - GetTime()) <= 0
 end
 
+--- "Is this row's own cooldown running?", as a plain boolean, in combat or out.
+---
+--- Two plain reads ANDed, and both halves are load-bearing:
+---   · the item's Cooldown widget is shown iff `CooldownFrame_Set` ran with a live duration
+---     (`[T1 src @12.1.0: CooldownViewer.lua:1141-1151]`), which is Blizzard's own verdict
+---     mirrored into widget state — the same shape as `Bar.Pip:IsShown()`, measured plain in
+---     combat on tab 2 (`knowledge/addon-dev/cooldown-manager.md` §7);
+---   · `wasSetFromCooldown` says the dial is showing a COOLDOWN rather than an aura's
+---     remaining time, which the same table records as a plain boolean in and out of combat.
+---     Without it an aura's swipe reads as a cooldown.
+---
+--- The times behind both are secret; neither of these is. Returns nil for "cannot tell",
+--- never a guess.
+---
+--- `@pending-test: cdm-cooldown-widget-shown-in-combat` — the widget's shown state is the one
+--- link inferred rather than measured. Until it drains, the edge latch below still runs and
+--- this read only ever corroborates it.
+local function readRowCooldown(frame)
+  if type(frame) ~= "table" or type(frame.GetCooldownFrame) ~= "function" then return nil end
+  local okFrame, cooldownFrame = pcall(frame.GetCooldownFrame, frame)
+  if not okFrame or type(cooldownFrame) ~= "table" then return nil end
+  local okShown, shown = pcall(cooldownFrame.IsShown, cooldownFrame)
+  if not okShown or type(shown) ~= "boolean" then return nil end
+  if not shown then return false end
+  local source = frame.wasSetFromCooldown
+  if type(source) ~= "boolean" then return nil end
+  return source
+end
+
 local function readCharges(spellID)
   if not (C_Spell and C_Spell.GetSpellCharges) then return nil end
   local ok, info = pcall(C_Spell.GetSpellCharges, spellID)
@@ -214,6 +243,32 @@ local function onAlert(frame, event)
   end
 end
 
+-- The ready edge the ALERT CHANNEL CANNOT GIVE US.
+--
+-- `Available` is raised from the viewer's OnUpdate, and the viewer only ticks item frames
+-- registered by `NeedsOnUpdateRegistration()` — which is true only when the PLAYER has
+-- configured an alert on that row. So on a stock configuration `OnCooldown` arrives for
+-- every row and `Available` for none, and a latch fed by edges alone is a one-way door.
+-- Measured on 2026-08-16: 320 `OnCooldown` across 8 rows, 35 `Available` on the single row
+-- that had an alert (`knowledge/addon-dev/cooldown-manager.md` §5.1).
+--
+-- `OnCooldownDone` is outside that system entirely: every tab-1 item wires it onto its own
+-- Cooldown widget at OnLoad, and the ENGINE fires it when the swipe completes. No
+-- configuration, no registration, no alert. `HookScript` is additive, so Blizzard's own
+-- handler still runs.
+local function onCooldownDone(cooldownFrame)
+  if not state.track then return end
+  local item = cooldownFrame:GetParent()
+  local ok, cid = pcall(item.GetCooldownID, item)
+  if not ok or type(cid) ~= "number" or issecretvalue(cid) then return end
+  local now = GetTime()
+  if state.track:Edge(now, cid, "Available") then
+    state.edges = state.edges + 1
+    edgeStream:Line(("t%.1f Available cid:%d src:swipe"):format(now, cid))
+    evaluate(now, "edge")
+  end
+end
+
 local function installHooks()
   if not ns.Bind then return 0 end
   local added = 0
@@ -222,6 +277,13 @@ local function installHooks()
     if frame and not hooked[frame] and type(frame.TriggerAlertEvent) == "function" then
       hooked[frame] = true
       hooksecurefunc(frame, "TriggerAlertEvent", onAlert)
+      -- Keyed on the ITEM frame, not the cooldown widget, so one flag covers both hooks
+      -- and neither can be installed twice on a pooled frame.
+      local cooldownFrame = type(frame.GetCooldownFrame) == "function"
+        and select(2, pcall(frame.GetCooldownFrame, frame)) or nil
+      if type(cooldownFrame) == "table" and type(cooldownFrame.HookScript) == "function" then
+        pcall(cooldownFrame.HookScript, cooldownFrame, "OnCooldownDone", onCooldownDone)
+      end
       added = added + 1
     end
   end
@@ -313,7 +375,7 @@ end
 local lastBody
 
 local function buildReads()
-  local proc, identity, capped, affordable = {}, {}, {}, {}
+  local proc, identity, capped, affordable, onCooldown = {}, {}, {}, {}, {}
   local byAbility = (state.reads or {}).byAbility or {}
   local infoOf = {}
 
@@ -329,6 +391,9 @@ local function buildReads()
     local live = (info and info.override) or item.row.primary
 
     if needs.proc then proc[id] = readProc(item.row.primary) end
+    -- Read every tick for every row, needs or no needs: this is the one gate that must not
+    -- be able to stick, and a state read cannot — unlike a latch, it has nothing to hold.
+    onCooldown[id] = readRowCooldown(item.row.frame)
     if needs.identity then identity[id] = readIdentity(info) end
     if needs.capped then capped[id] = readCapped(live) end
     if needs.affordable then affordable[id] = readAffordable(live) end
@@ -337,6 +402,7 @@ local function buildReads()
   local have, max = readResource()
   return {
     proc = proc, identity = identity, capped = capped, affordable = affordable,
+    onCooldown = onCooldown,
     resource = have, resourceMax = max,
     needsResource = state.reads and state.reads.resource,
   }

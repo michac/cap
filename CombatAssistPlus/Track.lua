@@ -144,7 +144,14 @@ function Instance:World(_, reads)
     if ability.charged then
       if charge then ready = charge.current > 0 end
     else
-      ready = self.ready[id]
+      -- ⚠ THE DIRECT READ OUTRANKS THE LATCH, and that ordering is the fix for a real bug.
+      -- The latch is fed by CDM alert edges, and `Available` only fires for rows the player
+      -- configured an alert on — so on a stock setup a row goes not-ready on its first cast
+      -- and never comes back (`knowledge/addon-dev/cooldown-manager.md` §5.1). The direct
+      -- read has no memory and therefore nothing to get stuck; the latch stays underneath it
+      -- as the answer for a client that will not give us the boolean.
+      local live = (reads.onCooldown or {})[id]
+      if live ~= nil then ready = not live else ready = self.ready[id] end
     end
     world.ready[id] = ready == nil and UNKNOWN or ready
     if ability.charged and charge then world.chargeProvenance[id] = charge.provenance end

@@ -89,4 +89,42 @@ describe("engine / charged readiness", function()
     assert.is_false(landed)
     assert.equal("duplicate", why)
   end)
+  -- ⚠ THE REGRESSION THIS FILE EXISTS FOR, from the 2026-08-16 flight: the alert channel
+  -- only reports one direction on a stock configuration, so a latch fed by edges alone goes
+  -- down and never comes back. The direct read is what breaks the latch open.
+  describe("readiness, when the client can answer directly", function()
+    local function newTrack()
+      local t = ns.Track.New()
+      t:Bind(ns.Track.Binding(
+        { abilities = { { ability = { id = "eye_beam", spell = 198013 }, row = { cooldownID = 7 } } } },
+        nil))
+      return t
+    end
+
+    it("lets a live read overturn a latch the alert channel left stuck on", function()
+      local t = newTrack()
+      t:Edge(0, 7, "OnCooldown")
+      assert.is_false(t:World(10, {}).ready.eye_beam)
+      -- No `Available` ever arrives — that is the measured behaviour, not a hypothetical.
+      assert.is_true(t:World(10, { onCooldown = { eye_beam = false } }).ready.eye_beam)
+    end)
+
+    it("agrees with the latch when both can answer", function()
+      local t = newTrack()
+      t:Edge(0, 7, "OnCooldown")
+      assert.is_false(t:World(10, { onCooldown = { eye_beam = true } }).ready.eye_beam)
+    end)
+
+    it("falls back to the latch when the client will not give a boolean", function()
+      local t = newTrack()
+      t:Edge(0, 7, "OnCooldown")
+      assert.is_false(t:World(10, { onCooldown = { eye_beam = nil } }).ready.eye_beam)
+      t:Edge(1, 7, "Available")
+      assert.is_true(t:World(10, { onCooldown = {} }).ready.eye_beam)
+    end)
+
+    it("still reports unknown when neither source has anything to say", function()
+      assert.equal(ns.Signal.UNKNOWN, newTrack():World(10, {}).ready.eye_beam)
+    end)
+  end)
 end)
