@@ -71,6 +71,10 @@ stds.wow = {
     -- from `C_Spell` above and the enum members ride the `Enum` global.  Mechanism:
     -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8.1 finding 2.
     "C_StringUtil",
+    -- probes/AnchorOrder.lua.  Everything it calls is already named above except the
+    -- callback registry the Cooldown Manager's settings pane raises its data change on;
+    -- the viewer itself is reached through `_G`, so no viewer name is declared here.
+    "EventRegistry",
   },
   -- The addon's true global writes.  Every module binds its namespace as a local
   -- (`local ADDON, ns = ...`), so there is no shared-namespace global to declare —
@@ -79,6 +83,7 @@ stds.wow = {
     "SLASH_COMBATASSISTPLUS1",
     "SlashCmdList",
     "CombatAssistPlusDB",       -- SavedVariable
+    "SLASH_CAPANCHOR1",         -- probes/AnchorOrder.lua's own slash command
   },
 }
 

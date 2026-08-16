@@ -17,6 +17,7 @@ Log.lua
 Signal.lua
 Track.lua
 Style.lua
+Lab.lua
 Treatment.lua
 Paint.lua
 Channel.lua
@@ -26,3 +27,6 @@ Overlay.lua
 Frame.lua
 StylePanel.lua
 Mode.lua
+
+# --- probes (delete on close) ---
+probes\AnchorOrder.lua

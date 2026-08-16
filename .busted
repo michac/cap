@@ -1,6 +1,6 @@
 return {
   default = {
-    ROOT = { "CombatAssistPlus/tests/spec" },
+    ROOT = { "CombatAssistPlus/tests/spec", "CombatAssistPlus/tests/probes" },
     lpath = "./?.lua;./?/init.lua",
     pattern = "_spec",
   },

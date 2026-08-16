@@ -54,6 +54,35 @@ function Paint.FrameIndex(count, loop, elapsed, stepSeconds)
   return k % count + 1
 end
 
+--- How far a frame drawn at `scale` reaches past its own edge, per side.
+function Paint.Overhang(size_px, scale)
+  return size_px * (scale - 1) / 2
+end
+
+--- Whether that overhang crosses the gap to the next row — the pitch, less one frame.
+function Paint.CrossesNeighbour(size_px, scale, pitch_px)
+  return Paint.Overhang(size_px, scale) > pitch_px - size_px
+end
+
+--- Whole pixels, and at least one fatter than the resting ring it is flashed over.
+function Paint.FatRing(thickness_px, mult)
+  return math.max(math.floor(thickness_px * (mult or 1) + 0.5), thickness_px + 1)
+end
+
+--- Tiles a `tile_px` sheet across `w`x`h` at its authored size rather than stretching one copy,
+--- offset along u by `phase_pct` of a stripe period. Returns SetTexCoord's left, right, bottom, top.
+function Paint.StripeTexCoord(w, h, tile_px, pitch_px, phase_pct)
+  if not tile_px or tile_px <= 0 then return 0, 1, 0, 1 end
+  local u = (phase_pct or 0) / 100 * (pitch_px or tile_px) / tile_px
+  return u, u + w / tile_px, 0, h / tile_px
+end
+
+--- A hand-replayed one-shot is rate limited to its own duration, as ShouldSnap limits the live
+--- path: Stop() does not restore scale, so a second click mid-play can park a frame part-scaled.
+function Paint.ShouldReplay(lastAt, now, duration)
+  return not lastAt or (now - lastAt) >= duration
+end
+
 -- ---------------------------------------------------------------------------
 -- V2 · lane border, with the one-shot arrival snap
 -- ---------------------------------------------------------------------------
@@ -81,9 +110,10 @@ local function buildRing(host, thickness)
 end
 
 --- Fire-and-forget, so it must land on its final values: animations restore alpha only under
---- SetToFinalAlpha, and never restore vertex color at all.
-function Paint.Arrival(edge)
-  local a = ns.Style.arrival
+--- SetToFinalAlpha, and never restore vertex color at all. `a` defaults to the declared arrival,
+--- so a caller with its own numbers drives the same builder.
+function Paint.Arrival(edge, a)
+  a = a or ns.Style.arrival
   local snap = edge:CreateAnimationGroup()
   local grow = snap:CreateAnimation("Scale")
   grow:SetScaleFrom(a.from_scale, a.from_scale)
@@ -113,16 +143,20 @@ function Paint.ShouldSnap(border, name, now)
   return true
 end
 
---- The border frame is sized and anchored by its CENTRE, never SetAllPoints: four pinned
---- anchors hold the rect against the Scale animation, which then multiplies the strips' own
---- coordinates instead and draws a hash rather than a box.
-local function fit(edge, host)
+--- A host's drawn size, falling back to the nominal icon: a CDM item's width can read secret.
+local function extent(host)
   local w, h = host:GetWidth(), host:GetHeight()
   if type(w) ~= "number" or type(h) ~= "number" or issecretvalue(w) or issecretvalue(h)
     or w <= 0 or h <= 0 then
-    w = ns.Style.surfaces.icon_px
-    h = w
+    return ns.Style.surfaces.icon_px, ns.Style.surfaces.icon_px
   end
+  return w, h
+end
+
+--- ⚠ INVARIANT no test can hold: the border frame carries its own size and is anchored by its
+--- CENTRE, never SetAllPoints(host) — a pinned frame is not free to scale.
+local function fit(edge, host)
+  local w, h = extent(host)
   if w ~= edge.fitW or h ~= edge.fitH then
     edge:SetSize(w, h)
     edge.fitW, edge.fitH = w, h
@@ -354,4 +388,128 @@ function Paint.Glow(slot, key)
       t:SetAlpha(glow.alpha_min)
     end,
   }
+end
+
+-- ---------------------------------------------------------------------------
+-- Part 7 · the lab's primitives. Drawn by the /cap style gallery and by nothing else; every
+-- number arrives as an argument, so a winner is promoted by aiming the builder at ns.Style.
+-- ---------------------------------------------------------------------------
+
+--- The same four strips with thickness as an ANCHOR OFFSET: three anchors each and no
+--- SetWidth/SetHeight. Pixel-identical to buildRing at rest, corner insets included.
+local function buildRingRelative(host, t)
+  local parts = {}
+  local function strip(points)
+    local x = host:CreateTexture(nil, "OVERLAY")
+    x:SetColorTexture(1, 1, 1, 1)
+    for _, p in ipairs(points) do x:SetPoint(p[1], host, p[2], p[3], p[4]) end
+    x:Hide()
+    parts[#parts + 1] = x
+  end
+  strip{ { "TOPLEFT", "TOPLEFT", 0, 0 }, { "TOPRIGHT", "TOPRIGHT", 0, 0 },
+         { "BOTTOMLEFT", "TOPLEFT", 0, -t } }
+  strip{ { "BOTTOMLEFT", "BOTTOMLEFT", 0, 0 }, { "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0 },
+         { "TOPLEFT", "BOTTOMLEFT", 0, t } }
+  strip{ { "TOPLEFT", "TOPLEFT", 0, -t }, { "BOTTOMLEFT", "BOTTOMLEFT", 0, t },
+         { "TOPRIGHT", "TOPLEFT", t, -t } }
+  strip{ { "TOPRIGHT", "TOPRIGHT", 0, -t }, { "BOTTOMRIGHT", "BOTTOMRIGHT", 0, t },
+         { "TOPLEFT", "TOPRIGHT", -t, -t } }
+  return parts
+end
+
+--- One ring in one colour on its own frame, left alone: no lane switching, no arrival.
+--- `o` is { rgb, thickness_px, relative, alpha }.
+function Paint.Ring(host, o)
+  local edge = CreateFrame("Frame", nil, host)
+  edge:SetPoint("CENTER", host, "CENTER", 0, 0)
+  fit(edge, host)
+  local build = o.relative and buildRingRelative or buildRing
+  local parts = build(edge, o.thickness_px)
+  for _, t in ipairs(parts) do
+    t:SetVertexColor(o.rgb[1], o.rgb[2], o.rgb[3])
+    t:Show()
+  end
+  edge:SetAlpha(o.alpha or 1)
+  return { frame = edge, parts = parts }
+end
+
+--- Alpha up and straight back down, with no geometry moving at all.
+--- ⚠ The frame RESTS at 0 and both exit paths land there — rest it visible and every row wears a
+--- permanent second border.
+function Paint.Flash(frame, duration)
+  frame:SetAlpha(0)
+  local group = frame:CreateAnimationGroup()
+  local up = group:CreateAnimation("Alpha")
+  up:SetFromAlpha(0)
+  up:SetToAlpha(1)
+  up:SetDuration(duration / 2)
+  up:SetSmoothing("OUT")
+  local down = group:CreateAnimation("Alpha")
+  down:SetFromAlpha(1)
+  down:SetToAlpha(0)
+  down:SetStartDelay(duration / 2)
+  down:SetDuration(duration / 2)
+  down:SetSmoothing("IN")
+  group:SetToFinalAlpha(true)
+  return group
+end
+
+--- The outward ping: its own frame, its own ring, and the only thing that scales.
+--- ⚠ It must land INVISIBLE — scale restoration on Stop() is unmeasured, so it hides itself.
+function Paint.Ghost(host, o)
+  local ghost = Paint.Ring(host, o)
+  local f = ghost.frame
+  f:SetAlpha(0)
+  f:Hide()
+
+  local group = f:CreateAnimationGroup()
+  local grow = group:CreateAnimation("Scale")
+  grow:SetScaleFrom(o.from_scale, o.from_scale)
+  grow:SetScaleTo(o.to_scale, o.to_scale)
+  grow:SetOrigin("CENTER", 0, 0)
+  grow:SetDuration(o.duration_s)
+  grow:SetSmoothing(o.smoothing)
+  local fade = group:CreateAnimation("Alpha")
+  fade:SetFromAlpha(o.from_alpha)
+  fade:SetToAlpha(o.to_alpha)
+  fade:SetDuration(o.duration_s)
+  fade:SetSmoothing(o.smoothing)
+  group:SetToFinalAlpha(true)
+  group:SetScript("OnFinished", function() f:Hide() end)
+
+  function ghost:Play()
+    group:Stop()
+    f:Hide()
+    f:SetAlpha(o.from_alpha)
+    f:Show()
+    group:Play()
+  end
+
+  function ghost:Stop()
+    group:Stop()
+    f:Hide()
+  end
+
+  return ghost
+end
+
+--- The sheet tiled across an icon-sized host: white art, so colour is the vertex colour. Its own
+--- frame two levels up, so it lies over the icon and the border and under the corner badges.
+--- `spec` is { texture, rgb, alpha, phase_pct, tile_px, pitch_px }.
+--@unverified tiling here is REPEAT wrap plus tex-coords past 1. The KB has the wrap-mode
+--@unverified vocabulary and no measurement of the pair (frames-textures-animation.md §5.2).
+function Paint.Stripes(host, spec)
+  local layer = CreateFrame("Frame", nil, host)
+  layer:SetAllPoints(host)
+  layer:SetFrameLevel(host:GetFrameLevel() + 2)
+
+  local t = layer:CreateTexture(nil, "OVERLAY")
+  t:SetTexture(spec.texture, "REPEAT", "REPEAT", "LINEAR")
+  t:SetAllPoints(layer)
+  t:SetVertexColor(spec.rgb[1], spec.rgb[2], spec.rgb[3])
+  t:SetAlpha(spec.alpha or 1)
+
+  local w, h = extent(host)
+  t:SetTexCoord(Paint.StripeTexCoord(w, h, spec.tile_px, spec.pitch_px, spec.phase_pct))
+  return { frame = layer, texture = t }
 end
