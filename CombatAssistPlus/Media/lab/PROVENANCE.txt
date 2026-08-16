@@ -2,11 +2,9 @@ GENERATED — do not edit, and do not add art here by hand.
 
 stripes.tga is written by `wowkb.capart export lab` from `capart.stripe_sheet`, whose only
 parameters are `lab._sheet` in projects/combat-assist/specs/render-shelf.md Part 7 (tile_px,
-pitch_px, duty, direction). ring.tga comes the same way from `capart.ring_sheet` and `lab._ring`
-(tile_px, thickness_px, corner_px, slice_margin_px). Both are authored from a script rather than
-vendored because Blizzard ships no stripe/hazard/hatch art and no plain border ring (searched
-2026-08-16) — so there is no upstream licence to carry: nothing here is third-party. Vendored CC0
-art lives beside its LICENSE.txt in ../badges/.
+pitch_px, duty, direction). It is authored from a script rather than vendored because Blizzard
+ships no stripe/hazard/hatch art — so there is no upstream licence to carry: nothing here is
+third-party. Vendored CC0 art lives beside its LICENSE.txt in ../badges/.
 
 White RGB on every pixel, the pattern in alpha only, measured at 0.000 mean saturation under the
 same tint guard the shipped badge art passes — so `SetVertexColor` takes it to whatever colour the

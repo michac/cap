@@ -107,6 +107,11 @@ local function buildLanes()
   end
   y = y + icon() + CAPTION_H + 6
   note("CHARGES has no live subject yet — no catalog reports charges, so it draws here only.")
+  local ring = ns.Style.ring
+  note(("One ring flipbook for every lane, tinted per lane: a %dpx band in a %dpx cell draws at " ..
+        "%.1fpx here. Click the arrival swatch below to watch its %d frames."):format(
+       ring.thickness_px, ring.tile_px,
+       ns.Paint.RingBand(ring.thickness_px, ring.tile_px, icon()), ring.frames))
 end
 
 local function buildMotion()
@@ -293,6 +298,11 @@ local function subjectLane()
   return ns.Style.lanes.COOLDOWN
 end
 
+--- The lab's four-strip rings take a band width as an argument; the style declares one.
+local function subjectBand()
+  return ns.Style.ring.thickness_px
+end
+
 --- Today's builder at each declared from_scale — the control that can falsify the diagnosis.
 local function drawSweep(key, entry)
   local a, lane = ns.Style.arrival, subjectLane()
@@ -300,7 +310,7 @@ local function drawSweep(key, entry)
     local crosses = ns.Paint.CrossesNeighbour(icon(), scale, pitch())
     local caption = ("%.2fx · %s"):format(scale, crosses and "reaches the neighbour" or "clear")
     local hosts, plays = arrivalRow(caption, function(host)
-      local ring = ns.Paint.Ring(host, { rgb = lane.rgb, thickness_px = lane.thickness_px })
+      local ring = ns.Paint.Ring(host, { rgb = lane.rgb, thickness_px = subjectBand() })
       local snap = ns.Paint.Arrival(ring.frame, {
         from_scale = scale, from_alpha = a.from_alpha,
         duration_s = a.duration_s, smoothing = a.smoothing,
@@ -319,7 +329,7 @@ local function drawRelative(key, entry)
   local a, lane = ns.Style.arrival, subjectLane()
   local hosts, plays = arrivalRow("relative ring", function(host)
     local ring = ns.Paint.Ring(host, {
-      rgb = lane.rgb, thickness_px = lane.thickness_px, relative = true,
+      rgb = lane.rgb, thickness_px = subjectBand(), relative = true,
     })
     local snap = ns.Paint.Arrival(ring.frame)
     return function() snap:Stop(); snap:Play() end
@@ -331,9 +341,9 @@ end
 local function drawThickness(key, entry)
   local lane = subjectLane()
   local hosts, plays = arrivalRow("fat ring, alpha only", function(host)
-    ns.Paint.Ring(host, { rgb = lane.rgb, thickness_px = lane.thickness_px })
+    ns.Paint.Ring(host, { rgb = lane.rgb, thickness_px = subjectBand() })
     local fat = ns.Paint.Ring(host, {
-      rgb = lane.rgb, thickness_px = ns.Paint.FatRing(lane.thickness_px, entry.fat_mult),
+      rgb = lane.rgb, thickness_px = ns.Paint.FatRing(subjectBand(), entry.fat_mult),
     })
     local flash = ns.Paint.Flash(fat.frame, entry.duration_s)
     return function() flash:Stop(); flash:Play() end
@@ -347,7 +357,7 @@ local function drawGhost(key, entry)
   local hosts, plays = arrivalRow("ghost ping", function(host)
     ns.Paint.Border(host, "COOLDOWN")
     local ghost = ns.Paint.Ghost(host, {
-      rgb = lane.rgb, thickness_px = lane.thickness_px,
+      rgb = lane.rgb, thickness_px = subjectBand(),
       from_scale = entry.from_scale, to_scale = entry.to_scale,
       from_alpha = entry.from_alpha, to_alpha = entry.to_alpha,
       duration_s = entry.duration_s, smoothing = entry.smoothing,
@@ -357,40 +367,8 @@ local function drawGhost(key, entry)
   replayOnClick(hosts, plays, entry.duration_s)
 end
 
---- Variant E: the same sweep, on a border that is one generated ring texture instead of four
---- strips. Same scales and same stage as the control, because the two rows exist to be compared.
-local function drawTextureRing(key, entry)
-  local a, ring = ns.Style.arrival, lab()._ring
-  if not ring then
-    note("lab._ring is missing, so there is no ring texture to draw.")
-    return
-  end
-  for _, scale in ipairs(entry.from_scale_sweep or {}) do
-    local crosses = ns.Paint.CrossesNeighbour(icon(), scale, pitch())
-    local caption = ("%.2fx · %s"):format(scale, crosses and "reaches the neighbour" or "clear")
-    local hosts, plays = arrivalRow(caption, function(host)
-      local border = ns.Paint.BorderTexture(host, {
-        lane = "COOLDOWN",
-        texture = ring.texture_root .. ring.texture .. ".tga",
-        slice_margin_px = ring.slice_margin_px,
-        arrival = { from_scale = scale, from_alpha = a.from_alpha,
-                    duration_s = a.duration_s, smoothing = a.smoothing },
-      })
-      return function() border:Snap() end
-    end)
-    replayOnClick(hosts, plays, a.duration_s)
-  end
-  note(("One texture, one SetVertexColor, band %.1fpx of the %dpx tile%s. Compare it against " ..
-        "arrival-control-sweep at the same scale: the overhang is the SAME, because the hash is " ..
-        "row pitch and not construction. What is being judged here is the corners, the band and " ..
-        "the hue."):format(
-        ns.Paint.RingBand(ring.thickness_px, ring.tile_px, icon(), (ring.slice_margin_px or 0) > 0),
-        ring.tile_px, (ring.slice_margin_px or 0) > 0 and ", nine-sliced" or ", scaled with the host"))
-end
-
 local DRAWS = {
   ["stripes"] = drawStripes,
-  ["arrival-texture"] = drawTextureRing,
   ["arrival-sweep"] = drawSweep,
   ["arrival-relative"] = drawRelative,
   ["arrival-thickness"] = drawThickness,

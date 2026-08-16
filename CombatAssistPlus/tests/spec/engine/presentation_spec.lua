@@ -10,7 +10,10 @@ describe("engine / presentation", function()
     for _, tier in ipairs(ns.Treatment.ORDER) do
       local d = ns.Treatment.For{ tier = tier }
       assert.is_true(d.emphasized, tier .. " draws nothing")
-      assert.is_number(d.thickness)
+      assert.equal(tier, d.lane)
+      -- The lanes differ by HUE alone: one ring, one band, no per-lane thickness to carry
+      -- through the verdict (render-shelf V2).
+      assert.is_nil(d.thickness, tier .. " still carries a band width the border cannot use")
     end
     assert.is_nil(ns.Treatment.Pulse)
   end)

@@ -22,5 +22,5 @@ function Treatment.For(verdict)
   if lane and verdict.charged then lane = "CHARGES" end
   local spec = lane and ns.Style and ns.Style.lanes[lane]
   if not spec then return { emphasized = false, cues = cues } end
-  return { emphasized = true, lane = lane, thickness = spec.thickness_px, cues = cues }
+  return { emphasized = true, lane = lane, cues = cues }
 end

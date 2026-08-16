@@ -3,6 +3,7 @@
 local H = require("CombatAssistPlus.tests.mock_ns")
 
 local MEDIA = "CombatAssistPlus/Media/badges/"
+local RING_MEDIA = "CombatAssistPlus/Media/"
 
 local function exists(path)
   local f = io.open(path, "rb")
@@ -19,15 +20,21 @@ describe("engine / style", function()
     local S = ns.Style
     assert.is_number(S.surfaces.icon_px)
     assert.is_number(S.surfaces.row_gap_px)
-    assert.is_number(S.arrival.from_scale)
     assert.is_number(S.arrival.duration_s)
     assert.is_string(S.arrival.smoothing)
+    assert.is_number(S.motion.tick_s)
     assert.is_string(S.badges.texture_root)
     assert.is_string(S.badges.plate.texture)
     assert.is_string(S.badges.halo_texture)
+    assert.is_string(S.ring.texture_root)
+    assert.is_string(S.ring.texture)
+    assert.is_number(S.ring.thickness_px)
+    assert.is_number(S.ring.frames)
+    assert.is_number(S.ring.grid)
     for lane, spec in pairs(S.lanes) do
-      assert.is_number(spec.thickness_px, lane .. " has no thickness")
       assert.equal(3, #spec.rgb, lane .. " needs an rgb triple")
+      -- The band is the ring's, once: lanes are told apart by hue alone (render-shelf V2).
+      assert.is_nil(spec.thickness_px, lane .. " still declares its own thickness")
     end
     for key, cue in pairs(S.cues) do
       assert.is_number(cue.slot, key .. " has no slot")
@@ -99,6 +106,63 @@ describe("engine / style", function()
     -- Rate limited per row to the snap's own duration, so a flickering lane cannot stack.
     assert.is_false(ns.Paint.ShouldSnap({ snappedAt = 100 }, "ROTATION", 100 + d / 2))
     assert.is_true(ns.Paint.ShouldSnap({ snappedAt = 100 }, "ROTATION", 100 + d * 2))
+  end)
+
+  it("ships the ring sheet the lane border draws, and lays its frames out in the grid", function()
+    local ring = ns.Style.ring
+    assert.is_true(exists(RING_MEDIA .. ring.texture .. ".tga"),
+      "the border names " .. ring.texture .. " with no texture in Media/")
+    -- Declared art lives beside Media/badges/, never in Media/lab/ — lab art and style art
+    -- sharing a folder is what makes the folder stop meaning anything.
+    assert.is_false(exists("CombatAssistPlus/Media/lab/" .. ring.texture .. ".tga"))
+    -- Every frame has a cell, and a one-frame arrival is a still image rather than an arrival.
+    assert.is_true(ring.frames > 1)
+    assert.is_true(ring.frames <= ring.grid * ring.grid)
+    -- Power of two, sheet included, or the client will not read it.
+    local side = ring.tile_px * ring.grid
+    while side > 1 do
+      assert.equal(0, side % 2, ring.tile_px .. "x" .. ring.grid .. " is not a power of two")
+      side = side / 2
+    end
+    -- The widest frame plus its band has to leave a transparent centre in its own cell.
+    local outer = (ring.gutter_px or 0) + (ring.travel_px or 0)
+    assert.is_true(2 * (outer + ring.thickness_px) < ring.tile_px)
+  end)
+
+  it("walks the arrival once and rests on the last frame", function()
+    local step, n = ns.Style.motion.tick_s, 6
+    assert.equal(1, ns.Paint.ArrivalFrame(n, 0, step))
+    assert.equal(2, ns.Paint.ArrivalFrame(n, step, step))
+    assert.equal(4, ns.Paint.ArrivalFrame(n, step * 3.5, step))
+    -- One shot: it clamps rather than wrapping, which is what makes it rest.
+    assert.equal(n, ns.Paint.ArrivalFrame(n, step * n, step))
+    assert.equal(n, ns.Paint.ArrivalFrame(n, step * 999, step))
+    -- A single-frame sheet is a still image, and a zero-length step never divides.
+    assert.equal(1, ns.Paint.ArrivalFrame(1, 99, step))
+    assert.equal(4, ns.Paint.ArrivalFrame(4, 99, 0))
+  end)
+
+  it("cuts each frame out of the grid row-major, the way the sheet is laid out", function()
+    -- Frame 1 is the top-left cell; the walk fills a row before dropping to the next.
+    assert.same({ 0, 0.25, 0, 0.25 }, { ns.Paint.FrameCoords(1, 4) })
+    assert.same({ 0.75, 1, 0, 0.25 }, { ns.Paint.FrameCoords(4, 4) })
+    assert.same({ 0, 0.25, 0.25, 0.5 }, { ns.Paint.FrameCoords(5, 4) })
+    -- The resting frame is the last cell, bottom-right.
+    assert.same({ 0.75, 1, 0.75, 1 }, { ns.Paint.FrameCoords(16, 4) })
+  end)
+
+  it("minifies the band with the sheet — there is no nine-slice to pin it", function()
+    -- A 2px band in a 64px cell drawn onto a 56px row is 1.75px.
+    assert.equal(2 * 56 / 64, ns.Paint.RingBand(2, 64, 56))
+    assert.equal(4, ns.Paint.RingBand(2, 64, 128))
+    -- A sheet with no size is a missing asset, not a divide by zero.
+    assert.equal(2, ns.Paint.RingBand(2, 0, 56))
+  end)
+
+  it("ties the frame walk to the arrival it is supposed to last", function()
+    -- The frames ARE the arrival, so the three numbers cannot disagree (capart check gates it too).
+    assert.equal(ns.Style.arrival.duration_s,
+      ns.Style.ring.frames * ns.Style.motion.tick_s)
   end)
 
   it("ships a texture for every frame the cue vocabulary names", function()

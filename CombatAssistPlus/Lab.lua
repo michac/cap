@@ -11,14 +11,6 @@ ns.LabStyle = {
     neighbours = 2,
   },
   _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from here.",
-  _ring = {
-    corner_px = 4,
-    slice_margin_px = 6,
-    texture = "ring",
-    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\lab\\",
-    thickness_px = 3,
-    tile_px = 64,
-  },
   _sheet = {
     direction = "down",
     duty = 0.5,
@@ -55,12 +47,6 @@ ns.LabStyle = {
     title = "A ghost ring pings outward and fades; the declared border never animates",
     to_alpha = 0.00,
     to_scale = 1.25,
-  },
-  ["arrival-e-texture"] = {
-    asks = "Does a border drawn as ONE texture read as well as the four colour strips, and does animating it through the path every sprite already takes cost anything visible — corner joins, band crispness under nine-slice, the lane hue under a SetVertexColor multiply? It is NOT a fix for the `#` and must not be read as one: the strips were exonerated on paper, the hash is overhang against row pitch, and a texture ring at the same from_scale overhangs identically — the hash would simply be made of one texture instead of four. The sweep is here so that can be SEEN rather than argued.",
-    draws = "arrival-texture",
-    from_scale_sweep = { 2.00, 1.5, 1.25, 1.1 },
-    title = "The border as one generated ring texture, tinted and animated like every other sprite",
   },
   ["stripes-l3-hold"] = {
     alpha = 0.45,

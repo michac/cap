@@ -5,7 +5,7 @@ local ADDON, ns = ...
 
 ns.Style = {
   arrival = {
-    duration_s = 0.35,
+    duration_s = 0.4,
     from_alpha = 0.00,
     from_scale = 2.00,
     smoothing = "OUT",
@@ -113,20 +113,31 @@ ns.Style = {
   lanes = {
     CHARGES = {
       rgb = { 0.62, 0.42, 0.95 },
-      thickness_px = 2,
     },
     COOLDOWN = {
       rgb = { 1.00, 0.82, 0.22 },
-      thickness_px = 3,
     },
     FALLBACK = {
       rgb = { 0.78, 0.8, 0.86 },
-      thickness_px = 1,
     },
     ROTATION = {
       rgb = { 0.35, 0.68, 1.00 },
-      thickness_px = 2,
     },
+  },
+  motion = {
+    tick_s = 0.025,
+  },
+  ring = {
+    corner_px = 4,
+    frames = 16,
+    grid = 4,
+    gutter_px = 1,
+    texture = "ring",
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
+    thickness_px = 2,
+    tile_px = 64,
+    tint = "lane",
+    travel_px = 5,
   },
   surfaces = {
     border_px = 1,
