@@ -47,6 +47,40 @@ describe("engine / lab", function()
     assert.equal(0, sheet.tile_px % sheet.pitch_px)
   end)
 
+  it("ships the ring texture the border-as-a-texture entry draws with", function()
+    local ring = ns.LabStyle._ring
+    if not ring then return end
+    assert.is_true(exists(LAB_MEDIA .. ring.texture .. ".tga"),
+      "lab._ring names " .. ring.texture .. " with no texture in Media/lab")
+    -- Power of two, or the client will not read it.
+    local t = ring.tile_px
+    while t > 1 do
+      assert.equal(0, t % 2, "tile_px " .. ring.tile_px .. " is not a power of two")
+      t = t / 2
+    end
+    -- Only the nine-slice corner square is drawn 1:1, so the margin has to contain the whole
+    -- curved corner AND the band, and two margins have to fit across the tile.
+    if (ring.slice_margin_px or 0) > 0 then
+      assert.is_true(ring.slice_margin_px >= ring.thickness_px)
+      assert.is_true(ring.slice_margin_px >= (ring.corner_px or 0))
+      assert.is_true(2 * ring.slice_margin_px <= ring.tile_px)
+    end
+    -- A band that does not leave a transparent centre is a filled rect, not a ring.
+    assert.is_true(2 * ring.thickness_px < ring.tile_px)
+  end)
+
+  it("draws a nine-sliced band at its authored width and an unsliced one at the drawn scale",
+    function()
+      -- Sliced: the corner squares and the band are pinned to their authored pixels.
+      assert.equal(3, ns.Paint.RingBand(3, 64, 56, true))
+      assert.equal(3, ns.Paint.RingBand(3, 64, 120, true))
+      -- Unsliced: the band is minified with the rest of the sheet.
+      assert.equal(3 * 56 / 64, ns.Paint.RingBand(3, 64, 56, false))
+      assert.equal(6, ns.Paint.RingBand(3, 64, 128, false))
+      -- A sheet with no size is a missing asset, not a divide by zero.
+      assert.equal(3, ns.Paint.RingBand(3, 0, 56, false))
+    end)
+
   it("stages the arrival variants against real neighbours", function()
     local stage = ns.LabStyle._arrival_stage
     if not stage then return end

@@ -1,4 +1,4 @@
--- The probe's two pure functions. Everything else in AnchorOrder.lua is frames, hooks and
+-- The probe's three pure functions. Everything else in AnchorOrder.lua is frames, hooks and
 -- a clock, which is tested in the client and nowhere else (house rule 6).
 local H = dofile("CombatAssistPlus/tests/mock_ns.lua")
 
@@ -68,6 +68,29 @@ describe("AnchorOrder.Plan", function()
     local plan = AnchorOrder.Plan(rows(10, 20), entries({ "a", 10 }, { "b", 10 }))
     assert.same({ 10, 20 }, ids(plan))
     assert.same({ "b" }, plan.missing)
+  end)
+end)
+
+describe("AnchorOrder.Intended", function()
+  local plan = AnchorOrder.Plan(rows(10, 20, 30), entries({ "a", 30 }, { "b", 10 }, { "c", 20 }))
+
+  local function order(mode)
+    local out = {}
+    for i, item in ipairs(AnchorOrder.Intended(plan, mode)) do out[i] = item.cooldownID end
+    return out
+  end
+
+  it("draws the plan as authored for any mode but demo", function()
+    assert.same({ 30, 10, 20 }, order("authored"))
+    assert.same({ 30, 10, 20 }, order(nil))
+  end)
+
+  it("reverses the authored order for demo, over the same rows", function()
+    assert.same({ 20, 10, 30 }, order("demo"))
+    local count = {}
+    for _, id in ipairs(order("demo")) do count[id] = (count[id] or 0) + 1 end
+    for _, id in ipairs(order("authored")) do assert.equal(1, count[id]) end
+    assert.equal(#order("authored"), #order("demo"))
   end)
 end)
 

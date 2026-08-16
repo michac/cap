@@ -357,8 +357,40 @@ local function drawGhost(key, entry)
   replayOnClick(hosts, plays, entry.duration_s)
 end
 
+--- Variant E: the same sweep, on a border that is one generated ring texture instead of four
+--- strips. Same scales and same stage as the control, because the two rows exist to be compared.
+local function drawTextureRing(key, entry)
+  local a, ring = ns.Style.arrival, lab()._ring
+  if not ring then
+    note("lab._ring is missing, so there is no ring texture to draw.")
+    return
+  end
+  for _, scale in ipairs(entry.from_scale_sweep or {}) do
+    local crosses = ns.Paint.CrossesNeighbour(icon(), scale, pitch())
+    local caption = ("%.2fx · %s"):format(scale, crosses and "reaches the neighbour" or "clear")
+    local hosts, plays = arrivalRow(caption, function(host)
+      local border = ns.Paint.BorderTexture(host, {
+        lane = "COOLDOWN",
+        texture = ring.texture_root .. ring.texture .. ".tga",
+        slice_margin_px = ring.slice_margin_px,
+        arrival = { from_scale = scale, from_alpha = a.from_alpha,
+                    duration_s = a.duration_s, smoothing = a.smoothing },
+      })
+      return function() border:Snap() end
+    end)
+    replayOnClick(hosts, plays, a.duration_s)
+  end
+  note(("One texture, one SetVertexColor, band %.1fpx of the %dpx tile%s. Compare it against " ..
+        "arrival-control-sweep at the same scale: the overhang is the SAME, because the hash is " ..
+        "row pitch and not construction. What is being judged here is the corners, the band and " ..
+        "the hue."):format(
+        ns.Paint.RingBand(ring.thickness_px, ring.tile_px, icon(), (ring.slice_margin_px or 0) > 0),
+        ring.tile_px, (ring.slice_margin_px or 0) > 0 and ", nine-sliced" or ", scaled with the host"))
+end
+
 local DRAWS = {
   ["stripes"] = drawStripes,
+  ["arrival-texture"] = drawTextureRing,
   ["arrival-sweep"] = drawSweep,
   ["arrival-relative"] = drawRelative,
   ["arrival-thickness"] = drawThickness,

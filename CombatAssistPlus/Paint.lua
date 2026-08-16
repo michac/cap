@@ -69,6 +69,14 @@ function Paint.FatRing(thickness_px, mult)
   return math.max(math.floor(thickness_px * (mult or 1) + 0.5), thickness_px + 1)
 end
 
+--- The band a ring texture actually draws at. Nine-slice pins the corner squares and the band to
+--- their authored pixels; an unsliced texture is minified with the rest of the sheet.
+function Paint.RingBand(thickness_px, tile_px, drawn_px, sliced)
+  if sliced then return thickness_px end
+  if not tile_px or tile_px <= 0 then return thickness_px end
+  return thickness_px * drawn_px / tile_px
+end
+
 --- Tiles a `tile_px` sheet across `w`x`h` at its authored size rather than stretching one copy,
 --- offset along u by `phase_pct` of a stripe period. Returns SetTexCoord's left, right, bottom, top.
 function Paint.StripeTexCoord(w, h, tile_px, pitch_px, phase_pct)
@@ -472,6 +480,67 @@ function Paint.Ghost(host, o)
   end
 
   return ghost
+end
+
+--- The lane border drawn as ONE texture instead of four strips: one SetVertexColor for the lane,
+--- and the arrival animation on the same frame Paint.Border animates. Same interface — SetLane,
+--- Hide, Snap — so promoting it is a swap rather than a rewrite.
+--- `spec` is { texture, slice_margin_px, alpha, lane, arrival }; every number is an argument,
+--- because the ones that are not lane hues live in Part 7 and Paint may not read that.
+--@unverified how a nine-sliced texture behaves under a Scale animation — whether the margins are
+--@unverified re-evaluated at the animated size or the whole quad is transformed. Drawn by
+--@unverified lab.arrival-e-texture in `/cap style` precisely to find out.
+function Paint.BorderTexture(host, spec)
+  local edge = CreateFrame("Frame", nil, host)
+  edge:SetPoint("CENTER", host, "CENTER", 0, 0)
+  fit(edge, host)
+  edge:Hide()
+
+  local ring = edge:CreateTexture(nil, "OVERLAY")
+  ring:SetTexture(spec.texture, nil, nil, "TRILINEAR")
+  ring:SetAllPoints(edge)
+  local m = spec.slice_margin_px
+  if m and m > 0 and ring.SetTextureSliceMargins then
+    ring:SetTextureSliceMargins(m, m, m, m)
+    if ring.SetTextureSliceMode and Enum.UITextureSliceMode then
+      ring:SetTextureSliceMode(Enum.UITextureSliceMode.Stretched)
+    end
+  end
+
+  local snap = Paint.Arrival(edge, spec.arrival)
+  local border = { frame = edge, ring = ring, sliced = (m or 0) > 0 }
+
+  function border:SetLane(name)
+    local lane = ns.Style.lanes[name]
+    if not lane then return self:Hide() end
+    local now = GetTime()
+    local arrived = Paint.ShouldSnap(self, name, now)
+    fit(edge, host)
+    ring:SetVertexColor(lane.rgb[1], lane.rgb[2], lane.rgb[3])
+    ring:SetAlpha(spec.alpha or 1)
+    self.lane = name
+    edge:Show()
+    if arrived then
+      self.snappedAt = now
+      self:Snap()
+    end
+  end
+
+  function border:Hide()
+    self.lane = nil
+    edge:Hide()
+  end
+
+  function border:Snap()
+    if not edge:IsShown() then return end
+    snap:Stop()
+    snap:Play()
+  end
+
+  border.silent = true
+  if spec.lane then border:SetLane(spec.lane) end
+  border.silent = false
+  return border
 end
 
 --- The sheet tiled across an icon-sized host: white art, so colour is the vertex colour. Its own

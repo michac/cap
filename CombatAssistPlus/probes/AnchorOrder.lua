@@ -22,6 +22,10 @@ local TOLERANCE = 0.5
 -- anything later had no observed cause and is reported as contention instead.
 local ATTRIBUTION_WINDOW = 1.0
 local DEFAULT_GAP = 4
+-- Demo's exaggeration, in multiples of the measured frame size: pitch, then shift left and up.
+local DEMO_PITCH = 2
+local DEMO_SHIFT_X = 2
+local DEMO_SHIFT_Y = 4
 
 local stream = ns.Capture.Open("anchor", { sessions = 8, cap = 2000, dedup = false })
 
@@ -59,6 +63,15 @@ function AnchorOrder.Plan(rows, entries)
   end
 
   return { order = order, named = named, extra = #order - named, missing = missing }
+end
+
+--- The order a mode asks for — `demo` reverses the plan — and what X{} judges drawn against.
+function AnchorOrder.Intended(plan, mode)
+  local order = (plan and plan.order) or {}
+  if mode ~= "demo" then return order end
+  local out = {}
+  for i = #order, 1, -1 do out[#out + 1] = order[i] end
+  return out
 end
 
 -- ---------------------------------------------------------------------------
@@ -101,10 +114,12 @@ end
 
 local P = {
   armed = false,
+  mode = "authored",
   combat = false,
   plan = nil,
   tracked = {},
   expected = {},
+  authored = {},
   planned = {},
   stomps = 0,
   stompsCombat = 0,
@@ -179,7 +194,9 @@ local function stampMeta()
   stream:Meta("viewer", VIEWER)
   stream:Meta("catalog", (ns.Sense and ns.Sense.CatalogName()) or "-")
   stream:Meta("rows", P.plan and #P.plan.order or 0)
-  stream:Meta("authored", list(P.planned))
+  stream:Meta("mode", P.mode)
+  stream:Meta("authored", list(P.authored))
+  stream:Meta("intended", list(P.planned))
   stream:Meta("contended", P.contended)
 end
 
@@ -222,8 +239,8 @@ end
 -- spacing. Scale is matched to the item frames so a SetPoint offset means the same distance
 -- in both coordinate spaces.
 local function metrics(frames)
-  local w = frames[1]:GetWidth()
-  if not plain(w) then return nil end
+  local w, h = frames[1]:GetWidth(), frames[1]:GetHeight()
+  if not (plain(w) and plain(h)) then return nil end
   local lefts, left, top = {}, nil, nil
   for _, frame in ipairs(frames) do
     local l, t = geometry(frame)
@@ -240,7 +257,7 @@ local function metrics(frames)
     local delta = lefts[i] - lefts[i - 1] - w
     if delta > 0 and delta < gap then gap = delta end
   end
-  return w, gap, left, top
+  return w, h, gap, left, top
 end
 
 local function apply(why)
@@ -249,21 +266,27 @@ local function apply(why)
   for _, t in ipairs(P.tracked) do frames[#frames + 1] = t.frame end
   if #frames == 0 then return false end
 
-  local w, gap, left, top = metrics(frames)
+  local w, h, gap, left, top = metrics(frames)
   if not w then return false end
+
+  -- Both modes run the one ClearAllPoints + SetPoint path below; the mode picks pitch and origin.
+  local pitch, dx, dy = w + gap, 0, 0
+  if P.mode == "demo" then
+    pitch, dx, dy = pitch * DEMO_PITCH, -DEMO_SHIFT_X * w, DEMO_SHIFT_Y * h
+  end
 
   local anchor = ensureAnchor()
   local mine, theirs = frames[1]:GetEffectiveScale(), UIParent:GetEffectiveScale()
   if plain(mine) and plain(theirs) and theirs ~= 0 then anchor:SetScale(mine / theirs) end
   anchor:ClearAllPoints()
-  anchor:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+  anchor:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left + dx, top + dy)
 
   P.expected = {}
   for i, t in ipairs(P.tracked) do
-    local x = (i - 1) * (w + gap)
+    local x = (i - 1) * pitch
     t.frame:ClearAllPoints()
     t.frame:SetPoint("TOPLEFT", anchor, "TOPLEFT", x, 0)
-    P.expected[t.cooldownID] = { left = left + x, top = top }
+    P.expected[t.cooldownID] = { left = left + dx + x, top = top + dy }
   end
   P.dirty = false
   mark("# reapply why=" .. why)
@@ -442,11 +465,12 @@ local function disarm()
     if not ok or not plain(points) or points == 0 then orphans = orphans + 1 end
   end
   mark("# restored orphans=" .. orphans)
-  P.tracked, P.expected, P.planned, P.plan = {}, {}, {}, nil
+  P.tracked, P.expected, P.authored, P.planned, P.plan = {}, {}, {}, {}, nil
+  P.mode = "authored"
   return orphans
 end
 
-local function arm()
+local function arm(mode)
   local rows = viewerRows()
   if #rows == 0 then
     ns.Emit("no Essential viewer rows are bound — nothing to re-anchor.")
@@ -454,15 +478,17 @@ local function arm()
   end
   local entries = authored(rows)
   P.plan = AnchorOrder.Plan(rows, entries)
-  P.tracked, P.planned = {}, {}
-  for i, item in ipairs(P.plan.order) do
+  P.mode = mode
+  P.tracked, P.authored, P.planned = {}, {}, {}
+  for i, item in ipairs(P.plan.order) do P.authored[i] = item.cooldownID end
+  for i, item in ipairs(AnchorOrder.Intended(P.plan, mode)) do
     P.tracked[i] = { cooldownID = item.cooldownID, frame = item.row.frame }
     P.planned[i] = item.cooldownID
   end
   P.armed = true
   P.warned = false
   installHooks()
-  mark("# armed")
+  mark("# armed mode=" .. mode)
   stampMeta()
   if not apply("armed") then
     P.armed = false
@@ -479,15 +505,23 @@ end
 
 local verbs = {}
 
-verbs.on = function()
+-- Keyed on the literal argument: `on` and `on demo` are exact matches, never a substring find.
+local modes = { [""] = "authored", demo = "demo" }
+
+verbs.on = function(rest)
+  local mode = modes[(rest or ""):lower()]
+  if not mode then
+    ns.Emit("usage: /capanchor on  or  /capanchor on demo")
+    return
+  end
   if P.armed then ns.Emit("already armed."); return end
   if InCombatLockdown() then
     ns.Emit("arming is out of combat only.")
     return
   end
-  if arm() then
-    ns.Emit(("armed on %d rows (%d authored, %d unnamed, %d missing)."):format(
-      #P.plan.order, P.plan.named, P.plan.extra, #P.plan.missing))
+  if arm(mode) then
+    ns.Emit(("armed in %s mode on %d rows (%d authored, %d unnamed, %d missing)."):format(
+      mode, #P.plan.order, P.plan.named, P.plan.extra, #P.plan.missing))
   end
 end
 
@@ -508,7 +542,8 @@ verbs.status = function()
     return
   end
   local drawn, match = AnchorOrder.Drawn()
-  ns.Emit(("armed on %s — %d rows, drawn order %s."):format(VIEWER, #drawn, match and "matches" or "DIFFERS"))
+  ns.Emit(("armed on %s in %s mode — %d rows, drawn order %s the requested one."):format(
+    VIEWER, P.mode, #drawn, match and "matches" or "DIFFERS from"))
   ns.Emit(("stomps %d (%d in combat), displaced %d, contended %d%s."):format(
     P.stomps, P.stompsCombat, P.displaced, P.contended,
     P.contended > 0 and " — another addon is moving these frames" or ""))
@@ -543,8 +578,8 @@ end
 -- because a probe may not add a verb to a shipped command.
 SLASH_CAPANCHOR1 = "/capanchor"
 SlashCmdList.CAPANCHOR = function(msg)
-  local verb = ((msg or ""):match("^%s*(%S*)") or ""):lower()
-  local fn = verbs[verb]
-  if fn then fn(); return end
-  ns.Emit("usage: /capanchor on | off | status | rows")
+  local verb, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
+  local fn = verbs[(verb or ""):lower()]
+  if fn then fn(rest or ""); return end
+  ns.Emit("usage: /capanchor on [demo] | off | status | rows")
 end
