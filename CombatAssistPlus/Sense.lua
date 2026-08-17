@@ -277,6 +277,9 @@ local function installHooks()
     if frame and not hooked[frame] and type(frame.TriggerAlertEvent) == "function" then
       hooked[frame] = true
       hooksecurefunc(frame, "TriggerAlertEvent", onAlert)
+      -- Same walk, same once-per-frame-ever discipline: Glow hooks RefreshOverlayGlow on
+      -- this frame so Blizzard's proc overlay dims while cap is drawing (render-shelf Part 3).
+      if ns.Glow then ns.Glow.Arm(frame) end
       -- Keyed on the ITEM frame, not the cooldown widget, so one flag covers both hooks
       -- and neither can be installed twice on a pooled frame.
       local cooldownFrame = type(frame.GetCooldownFrame) == "function"

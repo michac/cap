@@ -173,7 +173,8 @@ function Overlay.Render(snap)
     "n:" .. num(snap.entries), "rows:" .. num(snap.rows),
     "anch:" .. num(snap.anchored), "conf:" .. num(snap.confirmed),
     "off:" .. num(snap.hidden), "nf:" .. num(snap.noframe),
-    "bar:" .. (snap.bar or "-"), "stock:coexist",
+    "bar:" .. (snap.bar or "-"),
+    "stock:" .. ((ns.Glow and ns.Glow.Status()) or "absent"),
   }
   return "D{" .. table.concat(d, " ") .. "}"
     .. " P{" .. (#(snap.cells or {}) > 0 and table.concat(snap.cells, " ") or "-") .. "}"

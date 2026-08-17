@@ -22,6 +22,7 @@ Treatment.lua
 Paint.lua
 Channel.lua
 Sense.lua
+Glow.lua
 Bars.lua
 Overlay.lua
 Anchor.lua

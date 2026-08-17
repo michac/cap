@@ -5,7 +5,14 @@
 -- read off CDMProbe's `HudProcGlow.lua` and unmeasured — `backlog.md` owns the drain.
 local ADDON, ns = ...
 
-local DIM = 0.5   -- a dial for an eyeball to settle, not a measured value
+-- render-shelf.md Part 3 owns this number, not this file. It is a dial for an eyeball to
+-- settle rather than a measured value, and `SetAlpha` reports nothing back — but it is still
+-- the style's dial, so it is read from the generated tokens like every other.
+local function dim()
+  local s = ns.Style and ns.Style.surfaces
+  local v = s and s.proc_glow_alpha
+  return type(v) == "number" and v or 1
+end
 
 ns.Glow = ns.Glow or {}
 local Glow = ns.Glow
@@ -26,9 +33,9 @@ function Glow.Arm(frame)
   hooked[frame] = true
   count = count + 1
   hooksecurefunc(frame, "RefreshOverlayGlow", function(self)
-    if live then apply(self, DIM) end
+    if live then apply(self, dim()) end
   end)
-  if live then apply(frame, DIM) end
+  if live then apply(frame, dim()) end
 end
 
 --- Full alpha back on every frame ever hooked — cap must not degrade Blizzard's UI while
@@ -42,7 +49,7 @@ end
 local function light()
   if live then return end
   live = true
-  for frame in pairs(hooked) do apply(frame, DIM) end
+  for frame in pairs(hooked) do apply(frame, dim()) end
 end
 
 --- `n/live` or `n/off` — frames hooked EVER, and whether the dim is armed. `SetAlpha` hands nothing back, so never that a pixel changed.
