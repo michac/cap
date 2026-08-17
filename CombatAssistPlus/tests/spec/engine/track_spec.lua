@@ -47,23 +47,37 @@ describe("engine / charged readiness", function()
 
   local function chargeWorld() return track:World(100, { needsResource = false }) end
 
-  it("stays unknown without an exact seed and reports zero as unavailable", function()
+  -- ⚠ CONTRACT CHANGE 2026-08-16: the charge ledger no longer drives READINESS, only the
+  -- count and `capped`. Its recovery edge is `ChargeGained`, which the viewer raises only for
+  -- rows with a configured alert — measured zero times across a session — so a ledger-driven
+  -- readiness spent down and never came back. Readiness for every ability, charged or not,
+  -- is the held cooldown state fed by the alert edges and the live dial read.
+  it("stays unknown without an exact seed, and a seed does not make it ready", function()
     assert.equal("unknown", chargeWorld().ready.conflagrate)
     assert.is_true(track:SeedCharges("conflagrate", 0, 2, 9.3))
-    assert.is_false(chargeWorld().ready.conflagrate)
+    assert.equal("unknown", chargeWorld().ready.conflagrate)
     assert.equal("live", chargeWorld().chargeProvenance.conflagrate)
+  end)
+
+  it("takes a charged ability's readiness from the cooldown state, not the count", function()
+    track:SeedCharges("conflagrate", 2, 2, 9.3)
+    assert.equal("unknown", chargeWorld().ready.conflagrate,
+      "a full charge bank is not evidence the cooldown state is known")
+    -- The dial is decisive for charges BY CONSTRUCTION: the viewer skips its spell-cooldown
+    -- source while a charge is banked, so `wasSetFromCooldown` is true exactly at zero.
+    track:Observe{ conflagrate = true }
+    assert.is_false(chargeWorld().ready.conflagrate)
+    track:Observe{ conflagrate = false }
+    assert.is_true(chargeWorld().ready.conflagrate)
   end)
 
   it("seeds, spends, clamps, and gains a charge", function()
     track:SeedCharges("conflagrate", 2, 2, 9.3)
     assert.is_true(track:CastSpell(1, 17962))
-    assert.is_true(chargeWorld().ready.conflagrate)
     assert.equal("napkin", chargeWorld().chargeProvenance.conflagrate)
     track:CastSpell(2, 91591)
     track:CastSpell(3, 17962)
-    assert.is_false(chargeWorld().ready.conflagrate)
     assert.is_true(track:Edge(10, cid, "ChargeGained"))
-    assert.is_true(chargeWorld().ready.conflagrate)
   end)
 
   it("filters duplicate gains inside half a recharge or one second", function()
@@ -75,7 +89,6 @@ describe("engine / charged readiness", function()
     assert.is_true(track:Edge(15, cid, "ChargeGained"))
     local again = track:Edge(20, cid, "ChargeGained")
     assert.is_true(again)
-    assert.is_true(chargeWorld().ready.conflagrate)
   end)
 
   it("re-seeds from live state and retains the last positive recharge", function()
@@ -92,7 +105,9 @@ describe("engine / charged readiness", function()
   -- ⚠ THE REGRESSION THIS FILE EXISTS FOR, from the 2026-08-16 flight: the alert channel
   -- only reports one direction on a stock configuration, so a latch fed by edges alone goes
   -- down and never comes back. The direct read is what breaks the latch open.
-  describe("readiness, when the client can answer directly", function()
+  -- The held cooldown state: several sources, each knowing one half, and one rule about the
+  -- ambiguous case that is the whole reason the state is HELD rather than fetched.
+  describe("the held cooldown state", function()
     local function newTrack()
       local t = ns.Track.New()
       t:Bind(ns.Track.Binding(
@@ -115,12 +130,24 @@ describe("engine / charged readiness", function()
       assert.is_false(t:World(10, { onCooldown = { eye_beam = true } }).ready.eye_beam)
     end)
 
-    it("falls back to the latch when the client will not give a boolean", function()
+    -- ⚠ THE RULE THE WHOLE DESIGN TURNS ON. A dial owned by an aura says nothing about the
+    -- cooldown running underneath it, so an unreadable row must not overwrite what cap was
+    -- told. Answering `false` here is what held The Hunt for an entire flight.
+    it("keeps what it was told when the dial is busy saying something else", function()
       local t = newTrack()
       t:Edge(0, 7, "OnCooldown")
       assert.is_false(t:World(10, { onCooldown = { eye_beam = nil } }).ready.eye_beam)
+      assert.is_false(t:World(20, { onCooldown = {} }).ready.eye_beam)
+    end)
+
+    it("comes off cooldown on the edge that actually arrives without configuration", function()
+      local t = newTrack()
+      t:Edge(0, 7, "OnCooldown")
+      assert.is_false(t:World(10, {}).ready.eye_beam)
+      -- Sense maps the OnCooldownDone widget script onto this edge; it is the only OFF signal
+      -- that arrives for a row the player configured no alert on.
       t:Edge(1, 7, "Available")
-      assert.is_true(t:World(10, { onCooldown = {} }).ready.eye_beam)
+      assert.is_true(t:World(10, {}).ready.eye_beam)
     end)
 
     it("still reports unknown when neither source has anything to say", function()

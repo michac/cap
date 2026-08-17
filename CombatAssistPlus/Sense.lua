@@ -144,33 +144,60 @@ local function readCooldown(spellID)
   return (start + duration - GetTime()) <= 0
 end
 
---- "Is this row's own cooldown running?", as a plain boolean, in combat or out.
+--- "Is this row's own cooldown running?" — true / false / nil, where **nil means the dial is
+--- busy saying something else** and the caller must keep whatever it already believed.
 ---
---- Two plain reads ANDed, and both halves are load-bearing:
----   · the item's Cooldown widget is shown iff `CooldownFrame_Set` ran with a live duration
----     (`[T1 src @12.1.0: CooldownViewer.lua:1141-1151]`), which is Blizzard's own verdict
----     mirrored into widget state — the same shape as `Bar.Pip:IsShown()`, measured plain in
----     combat on tab 2 (`knowledge/addon-dev/cooldown-manager.md` §7);
----   · `wasSetFromCooldown` says the dial is showing a COOLDOWN rather than an aura's
----     remaining time, which the same table records as a plain boolean in and out of combat.
----     Without it an aura's swipe reads as a cooldown.
+--- Three plain reads, and every one of them is load-bearing:
+---   · the Cooldown widget is shown iff `CooldownFrame_Set` ran with a live duration
+---     `[T1 src @12.1.0: CooldownViewer.lua:1141-1151]`;
+---   · `wasSetFromCooldown` says the SPELL-COOLDOWN source contributed this refresh, rather
+---     than an aura or a charge recharge `[client 2026-08-16]`. ⚠ It is not a latch and says
+---     nothing about availability — it is reset every `CacheCooldownValues` and set by whichever
+---     source fired, so it answers "what does the dial mean right now";
+---   · `isOnGCD` — because the GLOBAL sets `cooldownIsActive` too, and without this term every
+---     icon on the bar wears a cooldown treatment on every press. Blizzard's own definition is
+---     `isOnActualCooldown = not isOnGCD and cooldownIsActive` `[T1 src @12.1.0: :996]`, and
+---     `isOnGCD` was measured plain on 9 of 9 rows in combat while its two siblings sealed.
 ---
---- The times behind both are secret; neither of these is. Returns nil for "cannot tell",
---- never a guess.
----
---- `@pending-test: cdm-cooldown-widget-shown-in-combat` — the widget's shown state is the one
---- link inferred rather than measured. Until it drains, the edge latch below still runs and
---- this read only ever corroborates it.
+--- ⚠⚠ **Not showing this row's cooldown is NOT evidence that no cooldown is running.** While a
+--- player aura owns the dial — demon form is the case that found this — the cooldown underneath
+--- is real and invisible here. Answering `false` there told cap an ability was available when it
+--- was not, which held The Hunt for a whole flight. So that case answers `nil` and abstains.
 local function readRowCooldown(frame)
   if type(frame) ~= "table" or type(frame.GetCooldownFrame) ~= "function" then return nil end
   local okFrame, cooldownFrame = pcall(frame.GetCooldownFrame, frame)
   if not okFrame or type(cooldownFrame) ~= "table" then return nil end
   local okShown, shown = pcall(cooldownFrame.IsShown, cooldownFrame)
   if not okShown or type(shown) ~= "boolean" then return nil end
+  -- Nothing drawn at all is the one unambiguous negative: no source claimed the dial.
   if not shown then return false end
-  local source = frame.wasSetFromCooldown
+  local source, gcd = frame.wasSetFromCooldown, frame.isOnGCD
   if type(source) ~= "boolean" then return nil end
-  return source
+  if not source then return nil end
+  if gcd == true then return false end
+  if type(gcd) ~= "boolean" then return nil end
+  return true
+end
+
+--- The three flags behind that answer, for the capture. Written so a flight can say WHY a row
+--- read the way it did instead of leaving the next person to re-derive it from the source.
+local function readRowFlags(frame)
+  if type(frame) ~= "table" then return "-" end
+  local function bit(v)
+    if v == true then return "1" end
+    if v == false then return "0" end
+    return "?"
+  end
+  local shown
+  if type(frame.GetCooldownFrame) == "function" then
+    local ok, cd = pcall(frame.GetCooldownFrame, frame)
+    if ok and type(cd) == "table" then
+      local okShown, v = pcall(cd.IsShown, cd)
+      shown = okShown and v or nil
+    end
+  end
+  return bit(shown) .. bit(frame.wasSetFromCooldown) .. bit(frame.wasSetFromAura)
+    .. bit(frame.wasSetFromCharges) .. bit(frame.isOnGCD)
 end
 
 local function readCharges(spellID)
@@ -368,6 +395,9 @@ function Sense.Render(snap)
     .. " R{" .. table.concat(g, " ") .. "}"
     .. " W{" .. (#why > 0 and table.concat(why, " ") or "-") .. "}"
     .. " Q{" .. (#(snap.charges or {}) > 0 and table.concat(snap.charges, " ") or "-") .. "}"
+    -- F{} — per row, `shown wasSetFromCooldown wasSetFromAura wasSetFromCharges isOnGCD` as
+    -- 1/0/?. This is what says WHY a row read on-cooldown, ready, or abstained.
+    .. " F{" .. (#(snap.flags or {}) > 0 and table.concat(snap.flags, " ") or "-") .. "}"
     .. " S{" .. table.concat(s, " ") .. "}"
 end
 
@@ -378,7 +408,7 @@ end
 local lastBody
 
 local function buildReads()
-  local proc, identity, capped, affordable, onCooldown = {}, {}, {}, {}, {}
+  local proc, identity, capped, affordable, onCooldown, flags = {}, {}, {}, {}, {}, {}
   local byAbility = (state.reads or {}).byAbility or {}
   local infoOf = {}
 
@@ -397,6 +427,7 @@ local function buildReads()
     -- Read every tick for every row, needs or no needs: this is the one gate that must not
     -- be able to stick, and a state read cannot — unlike a latch, it has nothing to hold.
     onCooldown[id] = readRowCooldown(item.row.frame)
+    flags[#flags + 1] = id .. ":" .. readRowFlags(item.row.frame)
     if needs.identity then identity[id] = readIdentity(info) end
     if needs.capped then capped[id] = readCapped(live) end
     if needs.affordable then affordable[id] = readAffordable(live) end
@@ -405,7 +436,7 @@ local function buildReads()
   local have, max = readResource()
   return {
     proc = proc, identity = identity, capped = capped, affordable = affordable,
-    onCooldown = onCooldown,
+    onCooldown = onCooldown, cooldownFlags = flags,
     resource = have, resourceMax = max,
     needsResource = state.reads and state.reads.resource,
   }
@@ -491,7 +522,8 @@ function evaluate(now, why, edge)
     return
   end
 
-  local world, health = state.track:World(now, buildReads())
+  local reads = buildReads()
+  local world, health = state.track:World(now, reads)
   local out = ns.Signal.Evaluate(state.bound, world)
 
   local charges = {}
@@ -504,7 +536,7 @@ function evaluate(now, why, edge)
     order = state.order,
     out = out, health = health,
     settled = state.settled, settledBy = state.settledBy,
-    dark = state.dark, charges = charges,
+    dark = state.dark, charges = charges, flags = reads.cooldownFlags,
   }
   local body = Sense.Render(snap)
   if edge or body ~= lastBody then write(snap, body, why, edge) end

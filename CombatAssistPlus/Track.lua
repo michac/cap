@@ -44,10 +44,42 @@ function Instance:Bind(binding)
   end
 end
 
+-- ---------------------------------------------------------------------------
+-- The cooldown state — cap's own, held, not fetched
+-- ---------------------------------------------------------------------------
+--
+-- `self.ready[id]` is a HELD representation of whether each ability is on cooldown, fed by
+-- several sources that each know one half of the story. Nothing here is a read on demand,
+-- because no single read answers in every state: the Cooldown Manager's dial is shared by
+-- four sources, and while an AURA owns it (demon form, a buff row) the dial says nothing at
+-- all about the cooldown running underneath it.
+--
+-- Sources, and which direction each can push:
+--
+--   OnCooldown alert   -> ON.   Fires for every row unconditionally (the data-refresh path).
+--   OnCooldownDone     -> OFF.  The engine's widget script, outside the alert system, so it
+--                               arrives for rows with no configured alert (§5.1).
+--   Available alert    -> OFF.  Real when it comes; only comes for configured rows.
+--   the live dial read -> EITHER, and CRUCIALLY only when it is decisive. `nil` means the
+--                               dial is showing something else and the state is LEFT ALONE.
+--   out-of-combat seed -> EITHER. The exact read, while it is legal.
+--
+-- ⚠ The old design used the alert edges ALONE, and `Available` only fires for rows the player
+-- configured an alert on — so it went on and never came off. The fix is not a different single
+-- source; it is that OFF now has three independent suppliers and the ambiguous case abstains.
 function Instance:setReady(cid, value)
   for _, id in ipairs(self.byCid[cid] or {}) do
-    local ability = self.abilities[id]
-    if not ability.charged then self.ready[id] = value end
+    self.ready[id] = value
+  end
+end
+
+--- Fold in the live dial read. `nil` for a row is NOT "ready" — it is "the dial is busy saying
+--- something else", and the held state is the only thing that knows better, so it stands.
+function Instance:Observe(live)
+  for id, onCooldown in pairs(live or {}) do
+    if onCooldown ~= nil and self.abilities[id] then
+      self.ready[id] = not onCooldown
+    end
   end
 end
 
@@ -83,6 +115,14 @@ end
 function Instance:SeedReady(cid, value)
   if value ~= nil then self:setReady(cid, value and true or false) end
 end
+
+--- Charged abilities no longer take their readiness from the charge ledger. The ledger's
+--- recovery edge is `ChargeGained`, which is one of the three the viewer only raises for rows
+--- with a configured alert — measured ZERO times across a whole session — so a ledger-driven
+--- readiness decremented on cast and never came back. The dial answers it correctly instead:
+--- the Cooldown Manager SKIPS its spell-cooldown source entirely while a charge is banked
+--- `[T1 src @12.1.0: CooldownViewer.lua:979]`, so `wasSetFromCooldown` is true for a charged
+--- ability exactly when it has none left. The ledger still owns the COUNT and `capped`.
 
 function Instance:SeedCharges(id, currentCharges, maxCharges, recharge)
   local ability = self.abilities[id]
@@ -130,6 +170,7 @@ Track.COPIED = COPIED
 
 function Instance:World(_, reads)
   reads = reads or {}
+  self:Observe(reads.onCooldown)
   local world = {
     ready = {}, resource = reads.resource, resourceMax = reads.resourceMax,
     chargeProvenance = {},
@@ -140,19 +181,7 @@ function Instance:World(_, reads)
   for id, ability in pairs(self.abilities) do
     health.abilities = health.abilities + 1
     local charge = self.charges[id]
-    local ready
-    if ability.charged then
-      if charge then ready = charge.current > 0 end
-    else
-      -- ⚠ THE DIRECT READ OUTRANKS THE LATCH, and that ordering is the fix for a real bug.
-      -- The latch is fed by CDM alert edges, and `Available` only fires for rows the player
-      -- configured an alert on — so on a stock setup a row goes not-ready on its first cast
-      -- and never comes back (`knowledge/addon-dev/cooldown-manager.md` §5.1). The direct
-      -- read has no memory and therefore nothing to get stuck; the latch stays underneath it
-      -- as the answer for a client that will not give us the boolean.
-      local live = (reads.onCooldown or {})[id]
-      if live ~= nil then ready = not live else ready = self.ready[id] end
-    end
+    local ready = self.ready[id]
     world.ready[id] = ready == nil and UNKNOWN or ready
     if ability.charged and charge then world.chargeProvenance[id] = charge.provenance end
     local needs = ability.needs
