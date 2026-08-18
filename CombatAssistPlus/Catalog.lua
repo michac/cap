@@ -8,6 +8,10 @@ ns.Catalog = Catalog
 local registry = {}
 local TIERS = { COOLDOWN = 3, ROTATION = 2, FALLBACK = 1 }
 Catalog.TIERS = TIERS
+-- `subject = true` means "argument 1 is an ability id, declared in `abilities`". `talent = true`
+-- means "argument 1 is a talent id, declared in `talents`" — a separate subject class because a
+-- talent has no CDM row and must never be resolved as if it did. `aoe` takes no subject at all:
+-- it is cap's OWN state (the /cap aoe toggle), the one gate that is not a game read.
 local PREDICATES = {
   ready = { arity = 1, subject = true },
   proc = { arity = 1, subject = true },
@@ -15,6 +19,8 @@ local PREDICATES = {
   capped = { arity = 1, subject = true },
   affordable = { arity = 1, subject = true },
   resource = { arity = 2 },
+  talent = { arity = 1, talent = true },
+  aoe = { arity = 0 },
 }
 Catalog.PREDICATES = PREDICATES
 local DISPLAYS = {
@@ -84,6 +90,23 @@ function Catalog.Check(cat)
     end
   end
 
+  -- Talents are declared the way abilities are, and for the same reason: a term names a
+  -- readable id, never a raw number. `node` + `entry` are what the trait config is keyed on —
+  -- the thing the APL's `talent.<x>` actually means — so they are read directly rather than
+  -- inferred from a spell being known or from how many charges a button has.
+  local talents = {}
+  for _, talent in ipairs(cat.talents or {}) do
+    if type(talent.id) ~= "string" or talent.id == "" then
+      fail("shape", nil, "talent has no id")
+    elseif talents[talent.id] then
+      fail("shape", talent.id, "duplicate talent id")
+    else
+      talents[talent.id] = talent
+    end
+    if type(talent.node) ~= "number" then fail("shape", talent.id, "talent has no numeric node id") end
+    if type(talent.entry) ~= "number" then fail("shape", talent.id, "talent has no numeric entry id") end
+  end
+
   local entries = {}
   for _, entry in ipairs(cat.entries or {}) do
     if type(entry.id) ~= "string" or entry.id == "" then
@@ -136,13 +159,19 @@ function Catalog.Check(cat)
           bySlot[cue.slot] = marker.cue
         end
       end
+      -- A marker is a readable cue, a sealed cue, or a sealed cue WITH readable gates. The last
+      -- shape exists because a graded cue may curve on exactly one secret but may be gated on as
+      -- many readable facts as you like — so `when` beside a `display` never contributes a cue of
+      -- its own, it only decides whether the client is allowed to paint the sealed one.
       local readable = marker.when ~= nil
       local sealed = marker.display ~= nil
-      if readable == sealed then
-        fail("shape", entry.id, "marker " .. tostring(marker.id) .. " needs exactly one of when or display")
-      elseif readable and (type(marker.when) ~= "table" or #marker.when == 0) then
+      if not (readable or sealed) then
+        fail("shape", entry.id, "marker " .. tostring(marker.id) .. " needs a when or a display")
+      end
+      if readable and (type(marker.when) ~= "table" or #marker.when == 0) then
         fail("shape", entry.id, "marker " .. tostring(marker.id) .. " has no readable condition")
-      elseif sealed then
+      end
+      if sealed then
         local display = marker.display
         if type(display) ~= "table" or not DISPLAYS[display.kind] then
           fail("display", entry.id, "marker " .. tostring(marker.id) .. " names unsupported display "
@@ -156,13 +185,22 @@ function Catalog.Check(cat)
             fail("display", entry.id, "player-aura-stacks currently supports min = 2")
           end
         elseif display.kind == "sealed-power-percent" then
-          -- The break point is authored as a GENERATION amount, never as a percentage: the
-          -- percentage depends on the player's max power, which only the client can read.
+          -- The break point is NEVER authored as a percentage: the percentage depends on the
+          -- player's max power, which only the client can read. It is authored either as a
+          -- GENERATION amount (break at `(max - generation)/max` — "one more press overflows")
+          -- or as an absolute resource THRESHOLD lifted off a priority condition (break at
+          -- `threshold/max`). Exactly one, because two would be two break points.
           if type(display.power) ~= "string" then
             fail("display", entry.id, "sealed-power-percent needs a power type name")
           end
-          if type(display.generation) ~= "number" or display.generation <= 0 then
-            fail("display", entry.id, "sealed-power-percent needs a positive generation amount")
+          local generation = type(display.generation) == "number" and display.generation or nil
+          local threshold = type(display.threshold) == "number" and display.threshold or nil
+          if (generation == nil) == (threshold == nil) then
+            fail("display", entry.id,
+              "sealed-power-percent needs exactly one of generation or threshold")
+          elseif (generation or threshold) <= 0 then
+            fail("display", entry.id,
+              "sealed-power-percent needs a positive generation or threshold")
           end
           -- Unlike a readable marker, a graded one has no verdict to report: the cue IS the
           -- whole of it, so a graded display without one would arm and draw nothing.
@@ -174,8 +212,16 @@ function Catalog.Check(cat)
             fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
               .. tostring(display.ability))
           end
-          if type(display.within) ~= "number" or display.within <= 0 then
-            fail("display", entry.id, "sealed-cooldown-range needs a positive window in seconds")
+          -- `within` = "ends inside this many seconds"; `beyond` = "has at least this long
+          -- left". Exactly one, because two would be two curves on one badge.
+          local within = type(display.within) == "number" and display.within or nil
+          local beyond = type(display.beyond) == "number" and display.beyond or nil
+          if (within == nil) == (beyond == nil) then
+            fail("display", entry.id,
+              "sealed-cooldown-range needs exactly one of within or beyond")
+          elseif (within or beyond) <= 0 then
+            fail("display", entry.id,
+              "sealed-cooldown-range needs a positive window in seconds")
           end
           if marker.cue == nil then
             fail("cue", entry.id, "marker " .. tostring(marker.id) .. " is a graded display with no cue")
@@ -199,6 +245,9 @@ function Catalog.Check(cat)
     end
     if spec.subject and not abilities[term[2]] then
       fail("subject", entry.id, where .. " names undeclared ability " .. tostring(term[2]))
+    end
+    if spec.talent and not talents[term[2]] then
+      fail("subject", entry.id, where .. " names undeclared talent " .. tostring(term[2]))
     end
     if name == "identity" and term[3] ~= "base" and term[3] ~= "transformed" then
       fail("predicate", entry.id, "identity accepts only base or transformed")
@@ -298,11 +347,15 @@ function Catalog.CheckBound(cat, rows)
 end
 
 function Catalog.Reads(cat)
-  local out = { byAbility = {}, resource = false }
+  local out = { byAbility = {}, resource = false, talent = {}, aoe = false }
   eachCondition(cat, function(_, term)
     local name = term[1]
     if name == "resource" then
       out.resource = true
+    elseif name == "aoe" then
+      out.aoe = true
+    elseif name == "talent" then
+      out.talent[term[2]] = true
     elseif PREDICATES[name] and PREDICATES[name].subject then
       out.byAbility[term[2]] = out.byAbility[term[2]] or {}
       out.byAbility[term[2]][name] = true

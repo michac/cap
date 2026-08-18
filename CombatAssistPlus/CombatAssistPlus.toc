@@ -9,6 +9,7 @@
 Core.lua
 Capture.lua
 Bind.lua
+Talents.lua
 Catalog.lua
 Catalogs\Demonology.lua
 Catalogs\Destruction.lua

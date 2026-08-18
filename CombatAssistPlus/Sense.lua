@@ -344,7 +344,9 @@ local function pair(t)
   return num(t.known) .. "/" .. num(t.known + t.unknown)
 end
 
-local PREDICATE_ORDER = { "ready", "proc", "identity", "capped", "affordable", "resource" }
+local PREDICATE_ORDER = {
+  "ready", "proc", "identity", "capped", "affordable", "resource", "talent", "aoe",
+}
 
 --- The body a line carries. No clock, no game reads, no `pairs()` over anything whose
 --- order would move — a key that reorders breaks dedup nondeterministically.
@@ -434,11 +436,22 @@ local function buildReads()
   end
 
   local have, max = readResource()
+  local reads = state.reads or {}
+  -- Written out rather than folded into the table below: `x and Mode.IsAoE() or nil` collapses
+  -- a legitimate `false` to nil, which would read as "cap does not know its own toggle".
+  local aoe
+  if reads.aoe then aoe = ns.Mode.IsAoE() and true or false end
   return {
     proc = proc, identity = identity, capped = capped, affordable = affordable,
     onCooldown = onCooldown, cooldownFlags = flags,
     resource = have, resourceMax = max,
-    needsResource = state.reads and state.reads.resource,
+    needsResource = reads.resource,
+    -- Cached, so this is a table lookup on all but the first tick after a talent change.
+    talent = next(reads.talent or {}) and ns.Talents.Get(state.catalog.talents) or nil,
+    needsTalent = state.talentOrder,
+    -- cap's OWN state, not a game read — no restriction applies and it can never be unknown.
+    aoe = aoe,
+    needsAoE = reads.aoe,
   }
 end
 
@@ -641,6 +654,16 @@ local function rebind(generation)
     report("check", findings)
     state.reads = ns.Catalog.Reads(cat)
     state.power = Enum and Enum.PowerType and cat.power and Enum.PowerType[cat.power] or nil
+    -- Declaration order, so the health tally counts in a fixed order. `Reads.talent` is a set
+    -- and a `pairs()` walk over it would move the numbers for no reason.
+    state.talentOrder = {}
+    for _, talent in ipairs(cat.talents or {}) do
+      if state.reads.talent[talent.id] then
+        state.talentOrder[#state.talentOrder + 1] = talent.id
+      end
+    end
+    -- A talent read taken under the previous catalog says nothing about this one.
+    ns.Talents.Invalidate()
   end
   state.catalog = cat
 

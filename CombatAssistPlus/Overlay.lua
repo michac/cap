@@ -27,6 +27,13 @@ local function acquire(cid)
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
   f.gradedPlans, f.graded, f.gradedStatus = {}, {}, {}
+  -- A graded cue gets its OWN badge instance, keyed by marker rather than by cue. Two markers
+  -- may name one cue — that union is how the band grammar expresses an OR — and a shared frame
+  -- cannot carry an OR of two SEALED bands: each writes the badge's alpha from its own curve,
+  -- the values are secret and so cannot be compared or maxed, and whichever wrote last would
+  -- win. Stacked instances at the same slot do the OR in the compositor instead: either alpha
+  -- being opaque makes the badge visible, and both being opaque draws the same glyph twice.
+  f.gradedBadges = {}
   pool[cid] = f
   return f
 end
@@ -37,6 +44,7 @@ local function quiet(f)
   if f.border then f.border:Hide() end
   if f.hatch then f.hatch:Hide() end
   for _, badge in pairs(f.badges or {}) do badge:Hide() end
+  for _, badge in pairs(f.gradedBadges or {}) do badge:Hide() end
 end
 
 --- Arm every graded cue this row declares and has not armed yet. Separate from the aura
@@ -56,12 +64,19 @@ local function configure(f, item, declared)
   for _, container in pairs(f.channels) do container:Hide() end
   f.channelStatus = {}
   f.gradedPlans, f.graded, f.gradedStatus = {}, {}, {}
+  -- Frames are kept and reused, but a badge belonging to a marker this catalog no longer
+  -- declares would never be reached by `graded()` again and would sit lit forever.
+  for _, badge in pairs(f.gradedBadges) do badge:Hide() end
   for _, marker in ipairs(item.entry.markers or {}) do
     -- A readable marker is still evaluated and still reported; the shelf's cue vocabulary has
     -- no drawn form for the two ad-hoc Warlock ones, so nothing is drawn for it.
     local gradedPlan = ns.Channel.GradedPlan(marker)
     if gradedPlan then
       f.gradedPlans[marker.id] = gradedPlan
+      -- One instance per MARKER, so a two-band union stacks rather than overwrites. Built here
+      -- because the marker set is not known at acquire time; `configure` runs on the bind path,
+      -- which `Bind.resolve` refuses to run in combat.
+      f.gradedBadges[marker.id] = f.gradedBadges[marker.id] or ns.Paint.Badge(f, marker.cue)
     elseif not marker.when then
       local plan = ns.Channel.Plan(marker, declared)
       local key = plan and (marker.id .. "/" .. plan.spell) or marker.id
@@ -111,18 +126,29 @@ end
 --- and its visibility is the client's to decide: cap writes the evaluated result into the badge
 --- frame's alpha and nowhere else. The value is written and forgotten; it is never compared, not
 --- even against nil, which is why the evaluator answers `ok, value`.
-local function graded(f)
+local function graded(f, verdict)
+  local gates = (verdict or {}).gates or {}
   for id, armed in pairs(f.graded) do
-    local badge = f.badges[armed.cue]
-    local ok, value = ns.Channel.GradedAlpha(armed)
-    if badge and ok then
-      badge:Show()
-      badge.frame:SetAlpha(value)
-      f.gradedStatus[id] = "armed"
-    elseif badge then
-      -- An evaluation that threw is a refusal, not an empty badge left lit at its last alpha.
-      badge:Hide()
-      f.gradedStatus[id] = "refused"
+    local badge = f.gradedBadges[id]
+    if badge then
+      -- ONE SECRET, MANY READABLE GATES. The curve reads the secret; readable terms beside it
+      -- decide whether the client may paint the result at all. `false` is a deliberate
+      -- withholding, reported as its own status rather than as a refusal — nothing failed.
+      if gates[id] == false then
+        badge:Hide()
+        f.gradedStatus[id] = "gated"
+      else
+        local ok, value = ns.Channel.GradedAlpha(armed)
+        if ok then
+          badge:Show()
+          badge.frame:SetAlpha(value)
+          f.gradedStatus[id] = "armed"
+        else
+          -- An evaluation that threw is a refusal, not an empty badge left lit at its last alpha.
+          badge:Hide()
+          f.gradedStatus[id] = "refused"
+        end
+      end
     end
   end
 end
@@ -136,18 +162,20 @@ local function paint(f, verdict, silent)
   f.border.silent = false
   if f.hatch then f.hatch:SetShown(d.hatch) end
 
+  -- The shared badges are the READABLE cues' and only theirs; graded cues own their own frames
+  -- now, so this no longer has to leave a key alone on their behalf. A cue carried by both (a
+  -- readable marker and a band naming one `blocked`) simply draws two stacked instances.
   local wanted = {}
   for _, key in ipairs(d.cues or {}) do wanted[key] = true end
-  for _, armed in pairs(f.graded) do wanted[armed.cue] = "graded" end
   for key, badge in pairs(f.badges) do
-    if wanted[key] == true then
+    if wanted[key] then
       badge.frame:SetAlpha(1)
       badge:Show()
-    elseif not wanted[key] then
+    else
       badge:Hide()
     end
   end
-  graded(f)
+  graded(f, verdict)
   return d
 end
 

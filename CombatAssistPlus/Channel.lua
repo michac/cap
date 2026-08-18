@@ -38,16 +38,33 @@ function Channel.PowerBreak(generation, max)
   return (max - generation) / max
 end
 
+--- The same curve authored the other way round. Some priority terms are an ABSOLUTE resource
+--- level ("press this while Fury is at or under 100") rather than "one more press overflows",
+--- and a generation amount cannot express one without smuggling a hardcoded max into the
+--- catalog. The break is then the threshold as a fraction of the client's max — cap still
+--- authors exactly one number and performs exactly one division, and still never learns which
+--- side the secret fell on. Pure; nil is the inert path.
+function Channel.ThresholdBreak(threshold, max)
+  if issecretvalue and (issecretvalue(threshold) or issecretvalue(max)) then return nil end
+  if type(threshold) ~= "number" or type(max) ~= "number" then return nil end
+  if max <= 0 or threshold <= 0 or threshold >= max then return nil end
+  return threshold / max
+end
+
 --- Pure dependency binding for the graded cue, the sibling of `Channel.Plan`. A sealed power
---- display draws its cue and nothing else, so a plan without one is not a plan.
+--- display draws its cue and nothing else, so a plan without one is not a plan. Exactly one of
+--- `generation` and `threshold` authors the break; both or neither is not a plan either.
 function Channel.PowerPlan(marker)
   local display = marker and marker.display
   if not (display and display.kind == "sealed-power-percent" and marker.cue
-      and type(display.power) == "string" and type(display.generation) == "number") then
+      and type(display.power) == "string") then
     return nil
   end
+  local generation = type(display.generation) == "number" and display.generation or nil
+  local threshold = type(display.threshold) == "number" and display.threshold or nil
+  if (generation == nil) == (threshold == nil) then return nil end
   return { kind = display.kind, power = display.power,
-    generation = display.generation, cue = marker.cue }
+    generation = generation, threshold = threshold, cue = marker.cue }
 end
 
 --- The curve's points, in the order `AddPoint` wants them. Authored entirely by cap out of
@@ -78,7 +95,12 @@ function Channel.ArmPower(plan)
   end
 
   local okMax, max = pcall(UnitPowerMax, "player", powerType)
-  local points = Channel.PowerPoints(okMax and Channel.PowerBreak(plan.generation, max) or nil)
+  local brk
+  if okMax then
+    brk = plan.threshold and Channel.ThresholdBreak(plan.threshold, max)
+      or Channel.PowerBreak(plan.generation, max)
+  end
+  local points = Channel.PowerPoints(brk)
   if not points then return nil, "refused" end
 
   local curve
@@ -110,25 +132,44 @@ end
 --- something already waiting for them.
 local LIVE = 0.001
 
---- Pure dependency binding for the range hold: draw the cue while another ability's cooldown
---- is running AND ends within `within` seconds.
+--- Pure dependency binding for the range hold. Two senses, exactly one per marker:
+---   `within` — the cue lights while the dependency's cooldown is running and ends INSIDE the
+---              window. "It is about to be up, so wait for it."
+---   `beyond` — the cue lights while the cooldown is running and has AT LEAST that long left.
+---              "It is nowhere near, so this is not its moment."
+--- Both are the same Step curve read at a different x; neither is ever read back.
 function Channel.HoldPlan(marker)
   local display = marker and marker.display
   if not (display and display.kind == "sealed-cooldown-range" and marker.cue
-      and type(display.ability) == "string" and type(display.within) == "number"
-      and display.within > LIVE) then
+      and type(display.ability) == "string") then
     return nil
   end
+  local within = type(display.within) == "number" and display.within > LIVE and display.within
+  local beyond = type(display.beyond) == "number" and display.beyond > LIVE and display.beyond
+  if (within and beyond) or not (within or beyond) then return nil end
   return { kind = display.kind, ability = display.ability,
-    within = display.within, cue = marker.cue }
+    within = within or nil, beyond = beyond or nil, cue = marker.cue }
 end
 
---- Three points, which is the band: nothing at zero remaining (the dependency is up, not
+--- Three points, which is the window: nothing at zero remaining (the dependency is up, not
 --- imminent), the cue while the clock runs inside the window, nothing again beyond it. Step
 --- holds the previous point's value, so each x is where the value CHANGES.
 function Channel.HoldPoints(within)
   if type(within) ~= "number" or within <= LIVE then return nil end
   return { { 0, 0 }, { LIVE, 1 }, { within, 0 } }
+end
+
+--- TWO points, which is the whole of the inverted sense — and the answer to whether this curve
+--- can say "far away" as well as "nearly here". It can, and it needs no new machinery: Step
+--- holds the LAST point's value out to infinity, so a rise at the threshold with nothing after
+--- it lights for every remaining time at or past it.
+---
+--- Zero still reads nothing, and that is not incidental: a dependency that is READY is not far
+--- away, and the one shape this must never take is a badge that lights on a cooldown which has
+--- come back.
+function Channel.BeyondPoints(beyond)
+  if type(beyond) ~= "number" or beyond <= LIVE then return nil end
+  return { { 0, 0 }, { beyond, 1 } }
 end
 
 --- Arm the range hold. The duration object is fetched per evaluation rather than kept: it
@@ -144,7 +185,8 @@ function Channel.ArmHold(plan, abilities)
     return nil, "refused"
   end
 
-  local points = Channel.HoldPoints(plan.within)
+  local points = plan.beyond and Channel.BeyondPoints(plan.beyond)
+    or Channel.HoldPoints(plan.within)
   if not points then return nil, "refused" end
 
   local curve

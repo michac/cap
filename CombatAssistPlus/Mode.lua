@@ -62,6 +62,11 @@ end
 local function set(value)
   store().mode = value
   paint()
+  -- The toggle is a catalog gate now (the `aoe` predicate), so flipping it changes what the
+  -- row draws — and nothing else would wake the verdict. `Bind.Evaluate` re-runs the verdict
+  -- only; it never re-resolves rows, so it is safe to call mid-combat, which is exactly when
+  -- a player reaches for this.
+  if ns.Bind and ns.Bind.Evaluate then ns.Bind.Evaluate("mode") end
   ns.Emit("target mode: " .. value .. ".")
 end
 

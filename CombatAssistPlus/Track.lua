@@ -176,6 +176,10 @@ function Instance:World(_, reads)
     chargeProvenance = {},
   }
   for _, name in ipairs(COPIED) do world[name] = reads[name] or {} end
+  -- Neither of these is per-ability, so neither goes through COPIED or the charge ledger.
+  -- `talent` is keyed by the catalog's talent ids; `aoe` is a single boolean, cap's own.
+  world.talent = reads.talent or {}
+  world.aoe = reads.aoe
 
   local health = { predicates = {}, abilities = 0 }
   for id, ability in pairs(self.abilities) do
@@ -191,6 +195,13 @@ function Instance:World(_, reads)
     end
   end
   if (reads.needsResource ~= false) then tally(health.predicates, "resource", world.resource) end
+  -- Tallied only when the catalog asks for them, so a spec that names neither reports neither
+  -- rather than a permanent unknown. `needsTalent` is the ordered id list, so the count is
+  -- deterministic — a `pairs()` walk here would be a health number that moves for no reason.
+  for _, id in ipairs(reads.needsTalent or {}) do
+    tally(health.predicates, "talent", world.talent[id])
+  end
+  if reads.needsAoE then tally(health.predicates, "aoe", world.aoe) end
   return world, health
 end
 

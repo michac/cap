@@ -12,11 +12,56 @@ describe("engine / catalog", function()
   end)
 
   it("rejects unused or sealed vocabulary as a Lua predicate", function()
-    for _, name in ipairs({ "elapsed", "casts", "cooldownRemaining", "stacks", "talent" }) do
+    for _, name in ipairs({ "elapsed", "casts", "cooldownRemaining", "stacks" }) do
       local broken = H.copy(cat)
       broken.entries[1].bands[1].when = { { name, "tyrant" } }
       assert.is_truthy(H.checks(ns.Catalog.Check(broken)).predicate, name)
     end
+  end)
+
+  it("keeps talent and ability subjects in separate namespaces", function()
+    -- `talent` became a real predicate on 2026-08-17. Its argument is a TALENT id, so naming an
+    -- ability there must still fail — a talent has no CDM row and resolving it as one would
+    -- silently demand a row that can never bind.
+    local broken = H.copy(cat)
+    broken.entries[1].bands[1].when = { { "talent", "tyrant" } }
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).subject)
+
+    -- …and the reverse: an ability predicate may not name a talent.
+    local havoc = H.copy(H.catalogBySpec(ns, 577))
+    havoc.entries[1].bands[1].when = { { "ready", "a_fire_inside" } }
+    assert.is_truthy(H.checks(ns.Catalog.Check(havoc)).subject)
+  end)
+
+  it("takes no subject for aoe, and reports arity when one is given", function()
+    local broken = H.copy(cat)
+    broken.entries[1].bands[1].when = { { "aoe" } }
+    assert.same({}, ns.Catalog.Check(broken))
+
+    broken = H.copy(cat)
+    broken.entries[1].bands[1].when = { { "aoe", "tyrant" } }
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).predicate)
+  end)
+
+  it("requires a declared talent to carry numeric node and entry ids", function()
+    local havoc = H.copy(H.catalogBySpec(ns, 577))
+    havoc.talents[1].node = nil
+    assert.is_truthy(H.checks(ns.Catalog.Check(havoc)).shape)
+
+    havoc = H.copy(H.catalogBySpec(ns, 577))
+    havoc.talents[1].entry = "117741"
+    assert.is_truthy(H.checks(ns.Catalog.Check(havoc)).shape)
+  end)
+
+  it("routes talent and aoe terms to their own read buckets, not to byAbility", function()
+    local reads = ns.Catalog.Reads(H.catalogBySpec(ns, 577))
+    assert.is_true(reads.aoe)
+    assert.is_true(reads.talent.a_fire_inside)
+    assert.is_nil(reads.byAbility.a_fire_inside)
+    -- Demonology names neither, so it must ask for neither.
+    local quiet = ns.Catalog.Reads(cat)
+    assert.is_false(quiet.aoe)
+    assert.same({}, quiet.talent)
   end)
 
   it("accepts only discrete bands in descending priority order", function()
@@ -91,17 +136,50 @@ describe("engine / catalog", function()
     assert.equal("demonbolt", out.after)
   end)
 
-  it("admits exactly one readable or sealed marker form", function()
+  it("admits a readable marker, a sealed one, or a sealed one carrying readable gates", function()
     local destruction = H.catalogBySpec(ns, 267)
     assert.same({}, ns.Catalog.Check(destruction))
 
-    local both = H.copy(destruction)
-    both.entries[1].markers[1].when = { { "ready", "conflagrate" } }
-    assert.is_truthy(H.checks(ns.Catalog.Check(both)).shape)
+    -- A `when` BESIDE a `display` is the gate form: one secret, many readable gates. It was a
+    -- shape error until 2026-08-17, which is what made a talent-gated band inexpressible.
+    local gated = H.copy(destruction)
+    gated.entries[1].markers[1].when = { { "ready", "conflagrate" } }
+    assert.same({}, ns.Catalog.Check(gated))
 
     local neither = H.copy(destruction)
     neither.entries[1].markers[1].display = nil
     assert.is_truthy(H.checks(ns.Catalog.Check(neither)).shape)
+
+    -- A gate still has to be a real condition; an empty one is a typo, not a permanent yes.
+    local empty = H.copy(destruction)
+    empty.entries[1].markers[1].when = {}
+    assert.is_truthy(H.checks(ns.Catalog.Check(empty)).shape)
+  end)
+
+  it("takes exactly one of within or beyond on a sealed cooldown range", function()
+    local havoc = H.catalogBySpec(ns, 577)
+    local function band(target, id)
+      for _, e in ipairs(target.entries) do
+        if e.id == "the_hunt" then
+          for _, m in ipairs(e.markers) do if m.id == id then return m end end
+        end
+      end
+    end
+    -- The shipped pair is one of each sense, which is the point of the pair.
+    assert.equal(10, band(havoc, "hunt_awaits_eye_beam").display.beyond)
+    assert.equal(15, band(havoc, "hunt_awaits_meta").display.within)
+
+    local broken = H.copy(havoc)
+    band(broken, "hunt_awaits_meta").display.beyond = 10
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(havoc)
+    band(broken, "hunt_awaits_meta").display.within = nil
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(havoc)
+    band(broken, "hunt_awaits_eye_beam").display.beyond = 0
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
   end)
 
   it("rejects unsupported displays and undeclared sealed dependencies", function()
@@ -122,8 +200,18 @@ describe("engine / catalog", function()
       end
     end
 
+    -- Exactly one of generation / threshold authors the break. Neither is not a break point,
+    -- and both is two of them.
     local broken = H.copy(havoc)
-    generator(broken).display.generation = nil
+    generator(broken).display.threshold = nil
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(havoc)
+    generator(broken).display.generation = 15
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(havoc)
+    generator(broken).display.threshold = 0
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
 
     broken = H.copy(havoc)

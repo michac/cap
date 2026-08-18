@@ -11,6 +11,12 @@ local function subject(term, world)
   if name == "proc" then return (world.proc or {})[id] end
   if name == "capped" then return (world.capped or {})[id] end
   if name == "affordable" then return (world.affordable or {})[id] end
+  -- Is this talent taken? Read from the trait config, not from a proxy — see Talents.lua.
+  -- nil/UNKNOWN when the read refused, which never becomes "not taken".
+  if name == "talent" then return (world.talent or {})[id] end
+  -- The one gate that is not a game read at all: cap's own /cap aoe toggle. It has no
+  -- subject, so `id` is nil here by design.
+  if name == "aoe" then return world.aoe end
   if name == "identity" then
     local value = (world.identity or {})[id]
     if value == nil or value == UNKNOWN then return UNKNOWN end
@@ -38,6 +44,7 @@ end
 local function termLabel(term)
   local prefix = term.negate and "!" or ""
   local name = term[1]
+  if name == "aoe" then return prefix .. "aoe" end
   if name == "resource" then return prefix .. "resource" .. tostring(term[2]) .. tostring(term[3]) end
   if name == "identity" then return prefix .. "identity:" .. tostring(term[2]) .. ":" .. tostring(term[3]) end
   return prefix .. tostring(name) .. ":" .. tostring(term[2])
@@ -109,7 +116,7 @@ function Signal.Evaluate(resolved, world)
       entry = entry.id, row = bound.row, tier = selected, charged = bound.charged,
       oncd = ready == false,
       emphasized = selected ~= nil, blindTier = blindTier, markers = {}, cues = {},
-      reasons = {},
+      reasons = {}, gates = {},
     }
     if selected then
       out.emphasized = out.emphasized + 1
@@ -120,7 +127,13 @@ function Signal.Evaluate(resolved, world)
       -- Sealed displays are acquired by Channel and never become Lua predicates.
       if marker.when then
         local state, parts = Signal.Explain(marker.when, world)
-        if state == "on" then
+        if marker.display then
+          -- A READABLE GATE on a sealed cue. It never contributes a cue — the client paints
+          -- that from the curve — it only says whether the paint is allowed at all. `blind` is
+          -- `false` here for the same reason `off` is: an unknown must not license a badge.
+          verdict.gates[marker.id] = state == "on"
+          if state == "blind" then out.unknowns = out.unknowns + 1 end
+        elseif state == "on" then
           verdict.markers[#verdict.markers + 1] = marker.id
           if marker.cue then cues[marker.cue] = true end
           out.markers = out.markers + 1

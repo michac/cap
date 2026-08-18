@@ -18,6 +18,8 @@ end
 function H.fresh()
   local ns = {}
   H.load(ns, "Catalog.lua")
+  -- Its event frame is guarded on `CreateFrame`, so only the pure half loads here.
+  H.load(ns, "Talents.lua")
   H.load(ns, "Signal.lua")
   H.load(ns, "Track.lua")
   H.load(ns, "Style.lua")
@@ -96,7 +98,7 @@ function H.blindWorld()
   local blind = setmetatable({}, { __index = function() return U end })
   return {
     ready = blind, proc = blind, identity = blind, capped = blind, affordable = blind,
-    resource = U, resourceMax = U,
+    talent = blind, resource = U, resourceMax = U, aoe = U,
   }
 end
 
@@ -107,6 +109,9 @@ function H.world(over)
   local w = {
     ready = yes, proc = no, capped = no, affordable = yes,
     identity = setmetatable({}, { __index = function() return "base" end }),
+    -- Every talent taken, and `single` — the mode's own resting state (Mode.lua), so a test
+    -- that says nothing about targets is testing the single-target row.
+    talent = yes, aoe = false,
     resource = 0, resourceMax = 5,
   }
   for k, v in pairs(over or {}) do w[k] = v end
