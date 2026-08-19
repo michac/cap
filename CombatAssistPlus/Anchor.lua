@@ -1,18 +1,13 @@
--- Anchor.lua — draws the Essential viewer's rows in the catalog's authored order.
+-- Anchor.lua — draws the Essential viewer's rows in the catalog's authored order, so that
+-- "scan left to right, press the first thing not ruled out" means something.
 --
--- The reading model asks you to scan left to right and press the first item that is not
--- ruled out, which only means anything if left-to-right IS the priority order. Blizzard
--- orders the row by the player's saved Cooldown Manager layout, so without this the scan
--- direction carries no information.
+-- It re-anchors, and only re-anchors: `layoutIndex` is both the grid sort key and the
+-- cooldownID data index, so rewriting it moves icon and contents together and the row
+-- looks unchanged. Nothing here writes the player's saved layout or adds a row.
 --
--- It re-anchors, and only re-anchors. `layoutIndex` is both the grid sort key and the
--- cooldownID data index, so rewriting it swaps the icons AND their contents and the row
--- looks unchanged; the positional move is ClearAllPoints() + SetPoint() with the index
--- left alone. Nothing here writes the player's saved layout, and a row the player has not
--- configured stays absent — this reorders what is already shown and adds nothing to it.
---
--- Reads drawn position with GetLeft/GetTop rather than through Bind or Catalog.OrderCheck,
--- which both sort by layoutIndex and therefore cannot see a SetPoint re-anchor at all.
+-- Two invariants an editor would silently break: position is read with GetLeft/GetTop,
+-- never through Bind or Catalog.OrderCheck, which sort by layoutIndex and cannot see a
+-- SetPoint; and cap stops ordering only by asking (Anchor.Judge, ask), never by latching.
 local ADDON, ns = ...
 
 local issecretvalue = issecretvalue
@@ -30,6 +25,15 @@ local DEFAULT_GAP = 4
 -- The viewer builds its frames on its own schedule, so the first arm waits rather than
 -- racing it. A failed arm retries on the next event anyway; this only avoids the noise.
 local SETTLE = 1.0
+-- Judged over several rounds: one unattributable move is ordinary, and stopping on it
+-- leaves the row in someone else's order.
+local CONTENTION_STRIKES = 3
+local CONTENTION_WINDOW = 10
+-- "Keep trying" is honoured for this long before the dialog may open again.
+local ASK_COOLDOWN = 60
+-- A destructive teardown re-pools every frame; the rebuild lets the viewer settle first.
+local REARM_DELAY = 0.3
+local ASK_KEY = "CAP_ANCHOR_CONTENTION"
 
 local stream = ns.Capture.Open("anchor", { sessions = 8, cap = 2000, dedup = false })
 
@@ -95,11 +99,17 @@ function Anchor.Render(snap)
   local s = {
     "stomp:" .. num(snap.stomps), "icombat:" .. num(snap.stompsCombat),
     "disp:" .. num(snap.displaced), "cont:" .. num(snap.contended),
+    "stale:" .. num(snap.staleSeen), "strike:" .. num(snap.strikes),
   }
+  -- STALE outranks a position mismatch: the order the other terms report is about the
+  -- wrong frames.
+  local verdict = "MISMATCH"
+  if (snap.stale or 0) > 0 then verdict = "STALE:" .. num(snap.stale)
+  elseif snap.match then verdict = "ok" end
   return "A{" .. table.concat(a, " ") .. "}"
     .. " P{" .. list(snap.planned) .. "}"
     .. " D{" .. list(snap.drawn) .. "}"
-    .. " X{" .. (snap.match and "ok" or "MISMATCH") .. "}"
+    .. " X{" .. verdict .. "}"
     .. " S{" .. table.concat(s, " ") .. "}"
 end
 
@@ -125,6 +135,44 @@ function Anchor.Diagnose(census)
 end
 
 -- ---------------------------------------------------------------------------
+-- Pure: what a displacement means, and what to do about it
+-- ---------------------------------------------------------------------------
+
+--- Judges one displacement, with the clock and counters supplied so it is decidable
+--- without a client. `attributed` is a move just after one of our own hooks fired —
+--- Blizzard's layout engine, which cap re-asserts against. Anything else is contention,
+--- counted rather than obeyed: only a run of strikes may stop the row, and stopping it
+--- means asking.
+function Anchor.Judge(s)
+  s = s or {}
+  local now = s.now or 0
+  local strikes, strikeAt = s.strikes or 0, s.strikeAt
+  local action, attributed
+
+  if s.lastCauseAt ~= nil and (now - s.lastCauseAt) <= ATTRIBUTION_WINDOW then
+    attributed, action = true, "reassert"
+  else
+    attributed = false
+    if strikeAt ~= nil and (now - strikeAt) > CONTENTION_WINDOW then strikes, strikeAt = 0, nil end
+    if strikes == 0 then strikeAt = now end
+    strikes = strikes + 1
+    if strikes < CONTENTION_STRIKES then
+      action = "reassert"
+    elseif s.askedAt ~= nil and (now - s.askedAt) <= ASK_COOLDOWN then
+      action, strikes, strikeAt = "reassert", 0, nil
+    else
+      action, strikes, strikeAt = "ask", 0, nil
+    end
+  end
+
+  -- cap cannot write geometry in a pull, so a re-assert waits; a question is held, and
+  -- the caller opens it leaving combat.
+  if s.combat and action == "reassert" then action = "hold" end
+
+  return { action = action, attributed = attributed, strikes = strikes, strikeAt = strikeAt }
+end
+
+-- ---------------------------------------------------------------------------
 -- Session state
 -- ---------------------------------------------------------------------------
 
@@ -140,9 +188,17 @@ local P = {
   displaced = 0,
   contended = 0,
   lastCauseAt = nil,
+  staleSeen = 0,
+  strikes = 0,
+  strikeAt = nil,
+  askedAt = nil,
+  asking = false,
+  askPending = false,
+  staleLatched = false,
+  generation = nil,
   dirty = false,
-  warned = false,
   pending = false,
+  rearmPending = false,
   anchor = nil,
   ticker = nil,
   hooked = false,
@@ -182,7 +238,7 @@ end
 -- Writing
 -- ---------------------------------------------------------------------------
 
-local function snapshot(drawn, match)
+local function snapshot(drawn, match, stale)
   return {
     n = P.plan and #P.plan.order or 0,
     named = P.plan and P.plan.named or 0,
@@ -191,6 +247,9 @@ local function snapshot(drawn, match)
     planned = P.planned,
     drawn = drawn,
     match = match,
+    stale = stale,
+    staleSeen = P.staleSeen,
+    strikes = P.strikes,
     stomps = P.stomps,
     stompsCombat = P.stompsCombat,
     displaced = P.displaced,
@@ -213,8 +272,8 @@ local function write(body, edge)
 end
 
 local function mark(edge)
-  local drawn, match = Anchor.Drawn()
-  write(Anchor.Render(snapshot(drawn, match)), edge)
+  local drawn, match, stale = Anchor.Drawn()
+  write(Anchor.Render(snapshot(drawn, match, stale)), edge)
 end
 
 local function stampMeta()
@@ -238,10 +297,21 @@ end
 -- Reading the drawn order — the measurement the existing instruments cannot make
 -- ---------------------------------------------------------------------------
 
---- Tracked cooldownIDs sorted by drawn left edge, plus whether that agrees with the plan.
+--- The cooldownID the frame is CURRENTLY serving, or nil if it will not answer. The pool
+--- re-issues frames, so the id cap recorded on taking one is a claim about the past.
+local function liveID(frame)
+  local ok, id = pcall(frame.GetCooldownID, frame)
+  if not ok or not plain(id) then return nil end
+  return id
+end
+
+--- Tracked cooldownIDs by drawn left edge, whether that agrees with the plan, and how
+--- many tracked frames now serve a different row.
 function Anchor.Drawn()
-  local seen = {}
+  local seen, stale = {}, 0
   for _, t in ipairs(P.tracked) do
+    local live = liveID(t.frame)
+    if live ~= nil and live ~= t.cooldownID then stale = stale + 1 end
     local left = geometry(t.frame)
     if left then seen[#seen + 1] = { cooldownID = t.cooldownID, left = left } end
   end
@@ -254,7 +324,7 @@ function Anchor.Drawn()
     drawn[i] = seen[i].cooldownID
     if drawn[i] ~= P.planned[i] then match = false end
   end
-  return drawn, match
+  return drawn, match, stale
 end
 
 -- ---------------------------------------------------------------------------
@@ -334,12 +404,50 @@ local function schedule(why)
   end)
 end
 
+-- Defined with arming; the stomp hook and the sampler both reach it from above.
+local rearm
+
+local function scheduleRearm(why)
+  if not P.armed or P.rearmPending then return end
+  P.rearmPending = true
+  C_Timer.After(REARM_DELAY, function()
+    P.rearmPending = false
+    if P.armed then rearm(why) end
+  end)
+end
+
 -- ---------------------------------------------------------------------------
 -- The sampler
 -- ---------------------------------------------------------------------------
 
+local ask
+
 local function sample()
-  if not P.armed then return end
+  if not P.armed or P.asking then return end
+
+  -- Identity before position: re-placing frames the plan no longer owns scrambles the
+  -- row rather than ordering it.
+  local _, _, stale = Anchor.Drawn()
+  if stale > 0 then
+    -- One episode per latch; `adopt` clears it, so a rebuild that worked lets the next
+    -- tick look again and one that did not is a fresh strike rather than a 2 Hz loop.
+    if P.staleLatched then return end
+    P.staleLatched = true
+    P.staleSeen, P.dirty = P.staleSeen + 1, false
+    mark(("# stale n=%d combat=%s"):format(stale, bit(P.combat)))
+    -- `lastCauseAt` is deliberately withheld: a re-pool is a re-pool whoever caused it,
+    -- and attributing it would re-arm against the same frames forever.
+    local verdict = Anchor.Judge{
+      now = GetTime(), combat = InCombatLockdown(),
+      strikes = P.strikes, strikeAt = P.strikeAt, askedAt = P.askedAt,
+    }
+    P.strikes, P.strikeAt = verdict.strikes, verdict.strikeAt
+    if verdict.action == "reassert" then scheduleRearm("stale")
+    elseif verdict.action == "ask" then ask() end
+    return
+  end
+  P.staleLatched = false
+
   local moved = 0
   for _, t in ipairs(P.tracked) do
     local want = P.expected[t.cooldownID]
@@ -356,27 +464,22 @@ local function sample()
   if P.dirty then return end
   P.dirty = true
 
-  local attributed = P.lastCauseAt and (GetTime() - P.lastCauseAt) <= ATTRIBUTION_WINDOW
-  if attributed then
+  local verdict = Anchor.Judge{
+    now = GetTime(), lastCauseAt = P.lastCauseAt, combat = InCombatLockdown(),
+    strikes = P.strikes, strikeAt = P.strikeAt, askedAt = P.askedAt,
+  }
+  P.strikes, P.strikeAt = verdict.strikes, verdict.strikeAt
+
+  if verdict.attributed then
     P.displaced = P.displaced + 1
     mark(("# displaced n=%d combat=%s"):format(moved, bit(P.combat)))
   else
     P.contended = P.contended + 1
-    mark(("# contended n=%d combat=%s"):format(moved, bit(P.combat)))
-    -- Backing off rather than re-asserting: another addon that re-anchors these frames
-    -- wins every round anyway, and a fight between two riders at 2 Hz is worse for the
-    -- player than one of them losing quietly. Say it once, then leave the row alone.
-    if not P.warned then
-      P.warned = true
-      ns.Emit("another addon is moving the Cooldown Manager's icons, so cap cannot order "
-        .. "them — the row's left-to-right order is not cap's and should not be read as a "
-        .. "priority. Disable that addon's Cooldown Manager module, or /cap anchor off.")
-    end
-    return
+    mark(("# contended n=%d strike=%d combat=%s"):format(moved, P.strikes, bit(P.combat)))
   end
-  -- Re-assert only out of combat: the layout teardown reaches combat, where a re-anchor
-  -- is not available to us, and the row recovers on the next out-of-combat pass.
-  if not InCombatLockdown() then schedule("displaced") end
+
+  if verdict.action == "reassert" then schedule("displaced")
+  elseif verdict.action == "ask" then ask() end
 end
 
 -- ---------------------------------------------------------------------------
@@ -389,8 +492,12 @@ local function onStomp(source, destructive)
   P.lastCauseAt = GetTime()
   if P.combat then P.stompsCombat = P.stompsCombat + 1 end
   mark(("# stomp %s destructive=%s combat=%s"):format(source, bit(destructive), bit(P.combat)))
-  if destructive then P.expected = {} end
-  schedule(source)
+  if destructive then
+    P.expected = {}
+    scheduleRearm(source)
+  else
+    schedule(source)
+  end
 end
 
 local function installHooks()
@@ -462,6 +569,19 @@ function Anchor.Census()
   return { exists = true, rows = #viewerRows() }
 end
 
+--- Takes the plan's frames as the ones cap owns, stamping the generation with them so a
+--- later row change is distinguishable from a frame re-issue.
+local function adopt(rows, entries)
+  P.plan = Anchor.Plan(rows, entries)
+  P.tracked, P.planned = {}, {}
+  for i, item in ipairs(P.plan.order) do
+    P.tracked[i] = { cooldownID = item.cooldownID, frame = item.row.frame }
+    P.planned[i] = item.cooldownID
+  end
+  P.generation = ns.Bind.Generation and ns.Bind.Generation() or nil
+  P.staleLatched = false
+end
+
 local function disarm()
   P.armed = false
   if P.ticker then P.ticker:Cancel(); P.ticker = nil end
@@ -475,6 +595,7 @@ local function disarm()
   end
   mark("# restored orphans=" .. orphans)
   P.tracked, P.expected, P.planned, P.plan = {}, {}, {}, nil
+  P.strikes, P.strikeAt, P.dirty, P.generation = 0, nil, false, nil
   return orphans
 end
 
@@ -494,17 +615,14 @@ local function arm()
     return false, "no-catalog"
   end
 
-  P.plan = Anchor.Plan(rows, entries)
-  P.tracked, P.planned = {}, {}
-  for i, item in ipairs(P.plan.order) do
-    P.tracked[i] = { cooldownID = item.cooldownID, frame = item.row.frame }
-    P.planned[i] = item.cooldownID
-  end
+  adopt(rows, entries)
   P.armed = true
-  P.warned = false
   installHooks()
   mark("# armed")
   stampMeta()
+  -- The first placement is itself a cause: without it the next displacement has no
+  -- preceding event and reads as another addon by construction.
+  P.lastCauseAt = GetTime()
   if not apply("armed") then
     P.armed = false
     tell("no-geometry", "could not read the Cooldown Manager's geometry — the row keeps "
@@ -516,11 +634,91 @@ local function arm()
   return true, nil
 end
 
---- Arms if enabled and not already armed; re-applies if it is. Every caller is an event.
+--- Rebuilds the plan against the frames the viewer holds NOW. Re-binding first is the
+--- point: Bind's rows carry frames taken before the teardown.
+function rearm(why)
+  if not P.armed or InCombatLockdown() then return false end
+  if ns.Bind.Resolve then ns.Bind.Resolve("anchor-" .. why) end
+  local rows = viewerRows()
+  local entries, cat = authored(rows)
+  if not cat then
+    disarm()
+    tell("no-catalog", "no catalog for this spec and hero tree, so cap has no order to "
+      .. "impose — the row keeps Blizzard's.")
+    return false
+  end
+  adopt(rows, entries)
+  P.dirty = false
+  mark("# rearmed why=" .. why)
+  stampMeta()
+  P.lastCauseAt = GetTime()
+  return apply("rearmed")
+end
+
+--- Turns ordering off and persists it; only the player turns it on again.
+function Anchor.Disable()
+  store().anchor = false
+  if P.armed then disarm() end
+  ns.Emit("ordering off — the row keeps Blizzard's order. /cap anchor on to turn it back on.")
+end
+
+--- Drops the strike run and rebuilds from scratch — the one recovery path.
+function Anchor.Retry()
+  P.strikes, P.strikeAt, P.dirty, P.told = 0, nil, false, nil
+  if InCombatLockdown() then return false, "combat" end
+  if P.armed then disarm() end
+  return arm()
+end
+
+local function asking()
+  return StaticPopup_IsCustomGenericConfirmationShown
+    and StaticPopup_IsCustomGenericConfirmationShown(ASK_KEY) or false
+end
+
+-- cap stops only by being told to, never by latching. Held out of combat: a dialog
+-- mid-pull is its own problem.
+function ask()
+  if P.asking then return end
+  if InCombatLockdown() then P.askPending = true; return end
+  if not StaticPopup_ShowCustomGenericConfirmation then
+    P.askedAt, P.askPending = GetTime(), false
+    ns.Emit("something else is moving the Cooldown Manager's icons, so the row's order is "
+      .. "not cap's. /cap anchor off to stop trying, /cap anchor retry to rebuild.")
+    return
+  end
+  P.asking, P.askPending = true, false
+  P.askedAt = GetTime()
+  mark("# asking")
+  StaticPopup_ShowCustomGenericConfirmation{
+    referenceKey = ASK_KEY,
+    showAlert = true,
+    text = "Combat Assist Plus\n\nSomething else is moving the Cooldown Manager's icons, so "
+      .. "cap cannot order them. The row's left-to-right order is not cap's and should not be "
+      .. "read as a priority.\n\nTurn cap's ordering off?",
+    acceptText = "Turn it off",
+    cancelText = "Keep trying",
+    callback = function()
+      P.asking = false
+      Anchor.Disable()
+    end,
+    cancelCallback = function()
+      P.asking = false
+      Anchor.Retry()
+    end,
+  }
+end
+
+--- Arms if enabled and not armed; otherwise rebuilds or re-applies. Callers are events.
 local function refresh()
   if not Anchor.Enabled() then return end
-  if InCombatLockdown() then return end
-  if P.armed then schedule("event") else arm() end
+  if P.asking and not asking() then P.asking = false end
+  if P.asking or InCombatLockdown() then return end
+  if not P.armed then arm(); return end
+  if P.generation ~= (ns.Bind.Generation and ns.Bind.Generation() or nil) then
+    scheduleRearm("generation")
+  else
+    schedule("event")
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -554,6 +752,7 @@ events:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_REGEN_ENABLED" then
     P.combat = false
     if P.armed then mark("# combat end") end
+    if P.askPending then ask(); return end
   end
   if event == "PLAYER_ENTERING_WORLD" then
     C_Timer.After(SETTLE, refresh)
@@ -573,12 +772,18 @@ local function statusLine()
     if message then ns.Emit("  " .. message) end
     return
   end
-  local drawn, match = Anchor.Drawn()
+  local drawn, match, stale = Anchor.Drawn()
   ns.Emit(("ordering %d rows on %s — drawn order %s the authored one."):format(
     #drawn, VIEWER, match and "matches" or "DIFFERS from"))
-  ns.Emit(("layout rebuilds %d (%d in combat), displaced %d, contended %d%s."):format(
-    P.stomps, P.stompsCombat, P.displaced, P.contended,
-    P.contended > 0 and " — another addon is moving these frames" or ""))
+  ns.Emit(("layout rebuilds %d (%d in combat), displaced %d, contended %d, re-pooled %d."):format(
+    P.stomps, P.stompsCombat, P.displaced, P.contended, P.staleSeen))
+  if stale > 0 then
+    ns.Emit(("  %d frames are serving other rows right now — rebuilding."):format(stale))
+  end
+  if P.contended > 0 then
+    ns.Emit(("  something else is moving these frames (%d of %d strikes). /cap anchor retry "
+      .. "to rebuild now."):format(P.strikes, CONTENTION_STRIKES))
+  end
 end
 
 local function rowsLine()
@@ -603,37 +808,40 @@ local function rowsLine()
   end
 end
 
-local function set(on)
-  store().anchor = on and true or false
-  if on then
-    P.told = nil
-    if not P.armed then arm() end
-    ns.Emit("ordering on.")
-  else
-    if P.armed then disarm() end
-    ns.Emit("ordering off — the row keeps Blizzard's order.")
-  end
+local function enable()
+  store().anchor = true
+  P.told, P.askedAt = nil, nil
+  if not P.armed then arm() end
+  ns.Emit("ordering on.")
+end
+
+local function retryLine()
+  local ok, why = Anchor.Retry()
+  if why == "combat" then ns.Emit("out of combat only."); return end
+  ns.Emit(ok and "rebuilt from the Cooldown Manager's current frames."
+    or "could not rebuild — see /cap anchor status.")
 end
 
 local actions = {
   [""] = statusLine,
   status = statusLine,
   rows = rowsLine,
-  on = function() set(true) end,
-  off = function() set(false) end,
+  retry = retryLine,
+  on = enable,
+  off = Anchor.Disable,
 }
 
 ns.RegisterCommand{
-  name = "anchor", order = 35, args = "[on|off|rows]",
+  name = "anchor", order = 35, args = "[on|off|retry|rows]",
   desc = "Draw the Cooldown Manager row in the catalog's priority order",
   handler = function(rest)
     local verb = (rest or ""):lower()
     local action = actions[verb]
     if not action then
-      ns.Emit("usage: /cap anchor  or  /cap anchor on|off|rows")
+      ns.Emit("usage: /cap anchor  or  /cap anchor on|off|retry|rows")
       return
     end
-    if (verb == "on" or verb == "off") and InCombatLockdown() then
+    if (verb == "on" or verb == "off" or verb == "retry") and InCombatLockdown() then
       ns.Emit("out of combat only.")
       return
     end

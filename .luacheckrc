@@ -77,10 +77,14 @@ stds.wow = {
     -- never in ours.  Confirmed present in the 12.1 client source at
     -- Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.lua:359, :460.
     "PanelTemplates_SetTab", "PanelTemplates_SetNumTabs",
-    -- probes/AnchorOrder.lua.  Everything it calls is already named above except the
-    -- callback registry the Cooldown Manager's settings pane raises its data change on;
-    -- the viewer itself is reached through `_G`, so no viewer name is declared here.
+    -- Anchor.lua.  The callback registry the Cooldown Manager's settings pane raises its
+    -- data change on; the viewer itself is reached through `_G`, so no viewer name is
+    -- declared here.
     "EventRegistry",
+    -- Anchor.lua's contention dialog.  The generic-confirmation helpers take the whole
+    -- prompt as data, so no StaticPopupDialogs entry is registered under our own key.
+    -- Present in the 12.1 client source at Blizzard_StaticPopup/StaticPopup.lua:232, :236.
+    "StaticPopup_ShowCustomGenericConfirmation", "StaticPopup_IsCustomGenericConfirmationShown",
   },
   -- The addon's true global writes.  Every module binds its namespace as a local
   -- (`local ADDON, ns = ...`), so there is no shared-namespace global to declare —
