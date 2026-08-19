@@ -110,7 +110,7 @@ end
 
 --- Can the player pay for this right now. The SECOND return of `C_Spell.IsSpellUsable` is
 --- `insufficientPower`, which is the only one that means affordability — `isUsable` is false for
---- a spell merely on cooldown, which the lane border already says. `AllowedWhenTainted`, so this
+--- a spell merely on cooldown, which the cooldown hatch already says. `AllowedWhenTainted`, so this
 --- answers in combat. `nil` — never `false` — when the call refuses, so a refused read is unknown.
 local function readAffordable(spellID)
   if not (C_Spell and C_Spell.IsSpellUsable) then return nil end

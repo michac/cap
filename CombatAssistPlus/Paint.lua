@@ -9,8 +9,8 @@ local issecretvalue = issecretvalue
 local Paint = {}
 ns.Paint = Paint
 
--- ONE ticker in the addon walks every visible frame-stepper — badge sprites and the lane border's
--- arrival alike (cdm-rider-patterns.md §14). Its period is ns.Style.motion.tick_s.
+-- ONE ticker in the addon walks every visible frame-stepper — the badge sprites, and nothing
+-- else now the scan edge is still (cdm-rider-patterns.md §14). Period: ns.Style.motion.tick_s.
 local stepping, ticker = {}, nil
 
 -- A stepper registers itself, but only its PARENT knows when the row went away: Overlay hides the
@@ -98,32 +98,6 @@ function Paint.FatRing(thickness_px, mult)
   return math.max(math.floor(thickness_px * (mult or 1) + 0.5), thickness_px + 1)
 end
 
---- The band a ring flipbook actually draws at. The sheet is minified onto the row, and the band
---- with it — there is no nine-slice, because slice margins apply to a whole texture and the frames
---- are picked with SetTexCoord.
-function Paint.RingBand(thickness_px, tile_px, drawn_px)
-  if not tile_px or tile_px <= 0 then return thickness_px end
-  return thickness_px * drawn_px / tile_px
-end
-
---- Which arrival frame is showing, 1-based, CLAMPED: the walk is one shot and rests on the last
---- frame. `nil` once it has rested, so a stepper knows when to deregister.
-function Paint.ArrivalFrame(count, elapsed, stepSeconds)
-  if count < 2 or stepSeconds <= 0 then return count end
-  local i = math.floor(elapsed / stepSeconds) + 1
-  if i >= count then return count end
-  return i
-end
-
---- A frame's cell in a grid sheet, as SetTexCoord's left, right, bottom, top. Frames fill the grid
---- row-major, which is the order capart.ring_flipbook pastes them in.
-function Paint.FrameCoords(index, grid)
-  local i = math.max(index - 1, 0)
-  local col, row = i % grid, math.floor(i / grid)
-  local s = 1 / grid
-  return col * s, (col + 1) * s, row * s, (row + 1) * s
-end
-
 --- Tiles a `tile_px` sheet across `w`x`h` at its authored size rather than stretching one copy,
 --- offset along u by `phase_pct` of a stripe period. Returns SetTexCoord's left, right, bottom, top.
 function Paint.StripeTexCoord(w, h, tile_px, pitch_px, phase_pct)
@@ -139,18 +113,12 @@ function Paint.ShouldReplay(lastAt, now, duration)
 end
 
 -- ---------------------------------------------------------------------------
--- V2 · lane border, with the one-shot arrival snap
+-- V2 · the scan edge
 -- ---------------------------------------------------------------------------
 
---- The one ring sheet every lane draws. Lanes differ by hue; the band is the shelf's, once.
-function Paint.RingTexture()
-  local r = ns.Style.ring
-  return r.texture_root .. r.texture .. ".tga"
-end
-
 --- Fire-and-forget, so it must land on its final values: animations restore alpha only under
---- SetToFinalAlpha, and never restore vertex color at all. The declared border does not use this —
---- its arrival is a frame walk — but Part 7's arrival variants are ABOUT a Scale animation, and `a`
+--- SetToFinalAlpha, and never restore vertex color at all. Nothing in the live overlay animates —
+--- the scan edge is still — but Part 7's arrival variants are ABOUT a Scale animation, and `a`
 --- lets each supply its own numbers.
 function Paint.Arrival(edge, a)
   a = a or ns.Style.arrival
@@ -168,19 +136,6 @@ function Paint.Arrival(edge, a)
   fade:SetSmoothing(a.smoothing)
   snap:SetToFinalAlpha(true)
   return snap
-end
-
---- Arrival is a CHANGE of drawn lane — absent → present, or one lane → another. The live path
---- repaints at 10 Hz, so repainting the same lane is emphatically NOT arrival; nor is the first
---- draw after cap resumed drawing, which `silent` marks (roster churn is not arrival). Rate
---- limited per row to the snap's own duration, so a lane that flickers cannot stack snaps.
---- Pure, so the rule is desk-testable while the frame work around it is not.
-function Paint.ShouldSnap(border, name, now)
-  if border.silent or not name then return false end
-  if border.lane == name then return false end
-  local last = border.snappedAt
-  if last and now - last < ns.Style.arrival.duration_s then return false end
-  return true
 end
 
 --- A host's drawn size, falling back to the nominal icon: a CDM item's width can read secret.
@@ -203,89 +158,62 @@ local function fit(edge, host)
   end
 end
 
---- One border per host, carrying a pre-built ring texture for every lane — one texture object per
---- lane, so switching lane is Show/Hide plus SetVertexColor and never SetTexture, which is all cap
---- is allowed to write in combat. Every lane draws the same sheet; only the hue differs.
---- The arrival is a one-shot walk over the sheet's frames on the shared ticker. Nothing scales, so
---- the border cannot draw outside its own rect and cannot reach a neighbouring row.
---@unverified whether the frame walk reads as motion rather than as steps at the shelf's tick, and
---@unverified whether a band authored in one cell survives minification onto a row-sized rect.
---@unverified render-shelf.md Part 5 question 8 — this flight's acceptance set.
-function Paint.Border(host, lane)
+--- Four colour strips forming a ring on the host's own rect. Also the subject of Part 7's arrival
+--- variants, which ask how the client scales this construction — so it is built once, here.
+local function buildRing(host, thickness)
+  local parts = {}
+  local function part(a, b, horizontal)
+    local t = host:CreateTexture(nil, "OVERLAY")
+    t:SetColorTexture(1, 1, 1, 1)
+    if horizontal then
+      t:SetPoint(a); t:SetPoint(b); t:SetHeight(thickness)
+    else
+      t:SetPoint(a, host, a, 0, -thickness)
+      t:SetPoint(b, host, b, 0, thickness)
+      t:SetWidth(thickness)
+    end
+    t:Hide()
+    parts[#parts + 1] = t
+  end
+  part("TOPLEFT", "TOPRIGHT", true)
+  part("BOTTOMLEFT", "BOTTOMRIGHT", true)
+  part("TOPLEFT", "BOTTOMLEFT", false)
+  part("TOPRIGHT", "BOTTOMRIGHT", false)
+  return parts
+end
+
+--- ONE border per host, and one treatment: the row is IN THE SCAN or it is not. Switching is
+--- Show/Hide on a frame built out of combat, which is all cap is allowed to write in combat.
+--- Nothing scales and nothing steps, so the edge cannot draw outside its own rect and cannot
+--- reach a neighbouring row at any row gap.
+---
+--- ⚠ ADD blend, cap's first use: an additive edge reads as a hot line lit over the icon rather
+--- than as a painted frame, which is what lets full brightness sit on so restrained an area
+--- (`tokens.ready`). SetBlendMode's five values are Tier-1 — frames-textures-animation.md §5.2.
+function Paint.Border(host)
   local edge = CreateFrame("Frame", nil, host)
   edge:SetPoint("CENTER", host, "CENTER", 0, 0)
   fit(edge, host)
   edge:Hide()
 
-  local frames, grid = ns.Style.ring.frames, ns.Style.ring.grid
-  local rings = {}
-  for name in pairs(ns.Style.lanes) do
-    local t = edge:CreateTexture(nil, "OVERLAY")
-    t:SetTexture(Paint.RingTexture(), nil, nil, "TRILINEAR")
-    t:SetAllPoints(edge)
-    t:SetTexCoord(Paint.FrameCoords(frames, grid))
-    t:Hide()
-    rings[name] = t
+  local ready = ns.Style.ready
+  local parts = buildRing(edge, ready.line_px)
+  for _, t in ipairs(parts) do
+    t:SetColorTexture(ready.rgb[1], ready.rgb[2], ready.rgb[3], ready.alpha)
+    t:SetBlendMode("ADD")
+    t:Show()
   end
 
-  local border = { frame = edge, rings = rings }
+  local border = { frame = edge, parts = parts }
 
-  --- Walked by the shared ticker until it lands on the resting frame, then deregistered.
-  function border:Step(now)
-    local i = Paint.ArrivalFrame(frames, now - (self.snappedAt or now), ns.Style.motion.tick_s)
-    if i ~= self.shownFrame then
-      local t = rings[self.lane]
-      if t then t:SetTexCoord(Paint.FrameCoords(i, grid)) end
-      self.shownFrame = i
-    end
-    if i >= frames then stepEvery(self, false) end
-  end
-
-  function border:SetLane(name)
-    local spec = ns.Style.lanes[name]
-    if not spec then return self:Hide() end
-    local now = GetTime()
-    local arrived = Paint.ShouldSnap(self, name, now)
+  function border:SetShown(on)
+    if not on then return self:Hide() end
     fit(edge, host)
-    for ring, t in pairs(rings) do
-      if ring == name then
-        t:SetVertexColor(spec.rgb[1], spec.rgb[2], spec.rgb[3])
-        t:SetAlpha(1)
-        t:Show()
-      else
-        t:Hide()
-      end
-    end
-    self.lane = name
     edge:Show()
-    if arrived then
-      self.snappedAt = now
-      self:Snap()
-    end
   end
 
-  --- A hidden row's border is ABSENT, so its next lane is an arrival. That is what makes a row
-  --- the CDM stopped showing — or one cap stopped drawing — snap when it comes back.
-  function border:Hide()
-    self.lane = nil
-    edge:Hide()
-    stepEvery(self, false)
-  end
+  function border:Hide() edge:Hide() end
 
-  --- The arrival: the frame walk starts here and stops itself on the resting frame.
-  function border:Snap()
-    if not edge:IsShown() then return end
-    self.snappedAt = GetTime()
-    self.shownFrame = nil
-    self:Step(self.snappedAt)
-    stepEvery(self, true)
-  end
-
-  -- The constructor's own first paint is not an arrival: nothing became available, the frame
-  -- was just built.
-  border.silent = true
-  if lane then border:SetLane(lane) end
-  border.silent = false
   return border
 end
 
@@ -294,7 +222,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Diagonal stripes across the icon face, drawn while the Cooldown Manager says the ability is
---- down. One tiling white-alpha sheet tinted by SetVertexColor, exactly as the lane border is.
+--- down. One tiling white-alpha sheet tinted by SetVertexColor.
 ---
 --- ⚠ The wrap mode is set ONCE, here, and can never be changed afterwards:
 --- `[T2 bug: WoWUIBugs #250, created 2022-08-13, closed]` reports that re-calling SetTexture with
@@ -463,30 +391,6 @@ end
 -- number arrives as an argument, so a winner is promoted by aiming the builder at ns.Style.
 -- ---------------------------------------------------------------------------
 
---- Four colour strips forming a ring. The declared border is one texture; this construction is
---- the subject of the arrival variants, which ask how the client scales it.
-local function buildRing(host, thickness)
-  local parts = {}
-  local function part(a, b, horizontal)
-    local t = host:CreateTexture(nil, "OVERLAY")
-    t:SetColorTexture(1, 1, 1, 1)
-    if horizontal then
-      t:SetPoint(a); t:SetPoint(b); t:SetHeight(thickness)
-    else
-      t:SetPoint(a, host, a, 0, -thickness)
-      t:SetPoint(b, host, b, 0, thickness)
-      t:SetWidth(thickness)
-    end
-    t:Hide()
-    parts[#parts + 1] = t
-  end
-  part("TOPLEFT", "TOPRIGHT", true)
-  part("BOTTOMLEFT", "BOTTOMRIGHT", true)
-  part("TOPLEFT", "BOTTOMLEFT", false)
-  part("TOPRIGHT", "BOTTOMRIGHT", false)
-  return parts
-end
-
 --- The same four strips with thickness as an ANCHOR OFFSET: three anchors each and no
 --- SetWidth/SetHeight. Pixel-identical to buildRing at rest, corner insets included.
 local function buildRingRelative(host, t)
@@ -509,7 +413,7 @@ local function buildRingRelative(host, t)
   return parts
 end
 
---- One ring in one colour on its own frame, left alone: no lane switching, no arrival.
+--- One ring in one colour on its own frame, left alone: no switching, no arrival.
 --- `o` is { rgb, thickness_px, relative, alpha }.
 function Paint.Ring(host, o)
   local edge = CreateFrame("Frame", nil, host)
@@ -519,6 +423,9 @@ function Paint.Ring(host, o)
   local parts = build(edge, o.thickness_px)
   for _, t in ipairs(parts) do
     t:SetVertexColor(o.rgb[1], o.rgb[2], o.rgb[3])
+    -- `add` makes the lab's ring the same additive line the declared scan edge is, so a
+    -- hairline experiment is comparing area against the real treatment and not against a wash.
+    if o.add then t:SetBlendMode("ADD") end
     t:Show()
   end
   edge:SetAlpha(o.alpha or 1)
@@ -583,6 +490,75 @@ function Paint.Ghost(host, o)
   end
 
   return ghost
+end
+
+--- A soft additive halo reaching `glow_px` OUTSIDE the host's rect. `o` is
+--- { rgb, glow_px, rest_alpha, flare_alpha, flare_mult, decay_s, period_s }, and which of those an
+--- entry declares picks the behaviour: static, a continuous breathe between a floor and a peak, or
+--- a one-shot flare that decays back to the floor. The floor is the point — a treatment that is
+--- never absent, only varying, is what separates these from a blink.
+function Paint.Halo(host, o)
+  local w, h = extent(host)
+  local reach = o.glow_px or 0
+
+  local layer = CreateFrame("Frame", nil, host)
+  layer:SetPoint("CENTER", host, "CENTER", 0, 0)
+  layer:SetSize(w + 2 * reach, h + 2 * reach)
+  layer:SetFrameLevel(math.max(host:GetFrameLevel() - 1, 0))
+
+  local t = layer:CreateTexture(nil, "BACKGROUND")
+  setArt(t, ns.Style.badges.halo_texture)
+  t:SetAllPoints(layer)
+  t:SetBlendMode("ADD")
+  t:SetVertexColor(o.rgb[1], o.rgb[2], o.rgb[3])
+
+  local rest = o.rest_alpha or 1
+  layer:SetAlpha(rest)
+
+  local halo = { frame = layer, texture = t }
+  local group
+
+  if o.period_s then
+    group = layer:CreateAnimationGroup()
+    group:SetLooping("BOUNCE")
+    local breathe = group:CreateAnimation("Alpha")
+    breathe:SetFromAlpha(rest)
+    breathe:SetToAlpha(o.flare_alpha or 1)
+    breathe:SetDuration(o.period_s / 2)
+    breathe:SetSmoothing("IN_OUT")
+  elseif o.decay_s then
+    group = layer:CreateAnimationGroup()
+    local fade = group:CreateAnimation("Alpha")
+    fade:SetFromAlpha(o.flare_alpha or 1)
+    fade:SetToAlpha(rest)
+    fade:SetDuration(o.decay_s)
+    fade:SetSmoothing("OUT")
+    if o.flare_mult then
+      local shrink = group:CreateAnimation("Scale")
+      shrink:SetScaleFrom(o.flare_mult, o.flare_mult)
+      shrink:SetScaleTo(1, 1)
+      shrink:SetOrigin("CENTER", 0, 0)
+      shrink:SetDuration(o.decay_s)
+      shrink:SetSmoothing("OUT")
+    end
+    -- ⚠ Fire-and-forget onto the FLOOR, never onto nothing: alpha is restored only under
+    -- SetToFinalAlpha, and this treatment's whole claim is that the resting row stays lit.
+    group:SetToFinalAlpha(true)
+  end
+
+  function halo:Play()
+    if not group then return end
+    group:Stop()
+    layer:SetAlpha(rest)
+    group:Play()
+  end
+
+  function halo:Stop()
+    if group then group:Stop() end
+    layer:SetAlpha(rest)
+  end
+
+  return halo
 end
 
 --- The sheet tiled across an icon-sized host: white art, so colour is the vertex colour. Its own

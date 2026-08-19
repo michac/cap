@@ -1,4 +1,4 @@
--- The composition seam: catalog cue -> verdict cue set -> lane + badges.
+-- The composition seam: catalog cue -> verdict cue set -> scan membership + badges.
 -- No assertion here fixes a colour, a slot or a rate — those are the shelf's.
 local H = require("CombatAssistPlus.tests.mock_ns")
 
@@ -189,7 +189,7 @@ describe("engine / composition", function()
     function()
       local d = ns.Treatment.For{ tier = "ROTATION", cues = { "capped", "blocked" } }
       assert.same({ "capped", "blocked" }, d.cues)
-      assert.equal("ROTATION", d.lane)
+      assert.is_true(d.scan)
     end)
 
   it("offers no cue at all when the reads refuse", function()

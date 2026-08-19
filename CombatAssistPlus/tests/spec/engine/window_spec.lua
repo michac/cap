@@ -52,22 +52,28 @@ describe("engine / style window", function()
     assert.equal(248, ns.StylePanel.StageWidth(56, 120, 0, 62, 8))
   end)
 
-  it("files every Part 7 entry onto exactly one lab tab", function()
+  it("files every Part 7 entry onto one lab tab AND gives the gallery a way to draw it", function()
     local seen = 0
     for key, entry in pairs(ns.LabStyle) do
       if key:sub(1, 1) ~= "_" then
         seen = seen + 1
         local tab = ns.StylePanel.LabTab(entry.draws)
-        assert.is_true(tab == "stripes" or tab == "arrival",
+        assert.is_true(tab == "stripes" or tab == "arrival" or tab == "ready",
                        key .. " has no lab tab to draw on")
+        -- An entry nothing can draw is invisible in the client, which is the only place a
+        -- treatment can be judged at all — so it is worse than absent, not merely unfinished.
+        assert.is_true(ns.StylePanel.CanDraw(entry.draws),
+                       key .. " draws `" .. tostring(entry.draws) .. "`, which nothing implements")
       end
     end
     assert.is_true(seen > 0, "the lab is empty, so this contract proves nothing")
   end)
 
-  it("routes an arrival experiment to the arrival tab and everything else to stripes", function()
+  it("routes each experiment family to its own tab, and anything else to stripes", function()
     assert.equal("arrival", ns.StylePanel.LabTab("arrival-sweep"))
     assert.equal("arrival", ns.StylePanel.LabTab("arrival-ghost"))
+    assert.equal("ready", ns.StylePanel.LabTab("ready-glow"))
+    assert.equal("ready", ns.StylePanel.LabTab("ready-line"))
     assert.equal("stripes", ns.StylePanel.LabTab("stripes"))
     assert.equal("stripes", ns.StylePanel.LabTab(nil))
   end)

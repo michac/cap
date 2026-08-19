@@ -16,7 +16,7 @@ ns.Style = {
     quality = 90,
   },
   badges = {
-    asset_root = "artifacts/assets/kenney",
+    asset_root = "previews/assets/kenney",
     diameter_pct = 40,
     halo_falloff = 0.7,
     halo_texture = "halo",
@@ -45,7 +45,7 @@ ns.Style = {
     },
     sprite_inset_pct = 16,
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\badges\\",
-    tint = "lane",
+    tint = "shelf",
   },
   budget = {
     max_base64_kb = 512,
@@ -120,24 +120,24 @@ ns.Style = {
     texture = "stripes",
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
-    tint = "lane",
-  },
-  lanes = {
-    CHARGES = {
-      rgb = { 0.62, 0.42, 0.95 },
-    },
-    COOLDOWN = {
-      rgb = { 1.00, 0.82, 0.22 },
-    },
-    FALLBACK = {
-      rgb = { 0.78, 0.8, 0.86 },
-    },
-    ROTATION = {
-      rgb = { 0.35, 0.68, 1.00 },
-    },
+    tint = "shelf",
   },
   motion = {
     tick_s = 0.025,
+  },
+  panel = {
+    anchor = "BOTTOM",
+    gap_px = 6,
+    grow = "RIGHT",
+    icon_px = 50,
+    x = 0,
+    y = 190,
+  },
+  ready = {
+    _comment = "IN THE SCAN. One treatment, no roles, no motion. An icon either participates in the read or it does not; rank comes from row order and elimination, not from a hue ladder. Full brightness on a restrained AREA: additive, so it reads as a hot edge rather than as a wash, and it sits ON the icon rect so it can never bleed into a neighbour at any row gap.",
+    alpha = 1.00,
+    line_px = 2,
+    rgb = { 1.00, 0.86, 0.45 },
   },
   ring = {
     corner_px = 4,
@@ -148,7 +148,7 @@ ns.Style = {
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     thickness_px = 2,
     tile_px = 64,
-    tint = "lane",
+    tint = "shelf",
     travel_px = 5,
   },
   surfaces = {
@@ -173,57 +173,57 @@ ns.Style = {
   },
   verdicts = {
     below = {
-      border = true,
       cues = {  },
+      scan = true,
       swipe = false,
     },
     cd = {
-      border = false,
       cues = {  },
       hatch = true,
+      scan = false,
       swipe = true,
     },
     ["hold-readable"] = {
-      border = true,
       cues = {
         "blocked",
       },
+      scan = true,
       swipe = false,
     },
     ["hold-sealed"] = {
-      border = true,
       cues = {
         "blocked",
       },
+      scan = true,
       swipe = false,
     },
     overcap = {
-      border = true,
       cues = {
         "overcap",
       },
+      scan = true,
       swipe = false,
     },
     press = {
-      border = true,
       cues = {  },
+      scan = true,
       swipe = false,
     },
     ["press-promoted"] = {
-      border = true,
       cues = {  },
+      scan = true,
       swipe = false,
     },
     starved = {
-      border = true,
       cues = {
         "starved",
       },
+      scan = true,
       swipe = false,
     },
     weave = {
-      border = true,
       cues = {  },
+      scan = true,
       swipe = false,
     },
   },

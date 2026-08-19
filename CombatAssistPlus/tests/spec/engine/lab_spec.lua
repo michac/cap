@@ -95,10 +95,10 @@ describe("engine / lab", function()
       assert.equal(0, ns.Paint.Overhang(60, 1.00))
       assert.equal(30, ns.Paint.Overhang(60, 2.00))
       assert.equal(7.5, ns.Paint.Overhang(60, 1.25))
-      -- The live border frame is the icon plus two pixels of padding on each side, against a
-      -- row pitch of icon + row_gap: two pixels of clear space, which 2.00x crosses by 28.
+      -- The live border frame is the icon rect itself, against a row pitch of icon + row_gap:
+      -- row_gap of clear space, which 2.00x crosses many times over.
       local S = ns.Style.surfaces
-      local frame, gap = S.icon_px + 4, S.icon_px + S.row_gap_px
+      local frame, gap = S.icon_px, S.icon_px + S.row_gap_px
       assert.is_true(ns.Paint.CrossesNeighbour(frame, 2.00, gap))
       assert.is_false(ns.Paint.CrossesNeighbour(frame, 1.00, gap))
     end)

@@ -10,13 +10,13 @@ local SP = ns.StylePanel
 
 local PAD, LABEL_H, CAPTION_H, SPREAD = 8, 13, 11, 18
 
--- Sample art: the Havoc roster ability the artifact draws for each lane, so the gallery and
--- havoc-stepper.html show the same icon under the same border.
+-- Sample art: Havoc roster abilities the artifact also draws, so the gallery and
+-- havoc-stepper.html show the same icons under the same treatments.
 local SAMPLE = {
-  { lane = "COOLDOWN", spell = 191427, name = "Metamorphosis" },
-  { lane = "ROTATION", spell = 188499, name = "Blade Dance" },
-  { lane = "FALLBACK", spell = 344865, name = "Fel Rush" },
-  { lane = "CHARGES", spell = 258920, name = "Immolation Aura" },
+  { spell = 191427, name = "Metamorphosis" },
+  { spell = 188499, name = "Blade Dance" },
+  { spell = 344865, name = "Fel Rush" },
+  { spell = 258920, name = "Immolation Aura" },
 }
 
 -- The pane being filled and its top-down cursor: a pane is built by pointing these at it.
@@ -97,37 +97,23 @@ end
 -- The gallery
 -- ---------------------------------------------------------------------------
 
-local function buildLanes()
-  section("V2 · lane borders")
-  local x = PAD
-  for _, s in ipairs(SAMPLE) do
-    local host = swatch(x, y, s.spell, s.lane:lower())
-    ns.Paint.Border(host, s.lane)
-    x = x + icon() + SPREAD
-  end
-  y = y + icon() + CAPTION_H + 6
-  note("CHARGES has no live subject yet — no catalog reports charges, so it draws here only.")
-  local ring = ns.Style.ring
-  note(("One ring flipbook for every lane, tinted per lane: a %dpx band in a %dpx cell draws at " ..
-        "%.1fpx here. Click the arrival swatch below to watch its %d frames."):format(
-       ring.thickness_px, ring.tile_px,
-       ns.Paint.RingBand(ring.thickness_px, ring.tile_px, icon()), ring.frames))
-end
-
-local function buildMotion()
-  section("V2 · arrival snap  ·  V7 · swipe")
+local function buildScan()
+  section("V2 · the scan edge  ·  V7 · swipe")
   local x = PAD
 
-  local host = swatch(x, y, SAMPLE[1].spell, "click to fire")
-  local border = ns.Paint.Border(host, "COOLDOWN")
-  replayOnClick({ host }, { function() border:Snap() end }, ns.Style.arrival.duration_s)
-  border:Snap()
+  local inScan = swatch(x, y, SAMPLE[1].spell, "in the scan")
+  ns.Paint.Border(inScan):SetShown(true)
   x = x + icon() + SPREAD
 
-  local swiped = swatch(x, y, SAMPLE[3].spell, "swipe")
-  swipe(swiped)
+  swatch(x, y, SAMPLE[2].spell, "not in the scan")
+  x = x + icon() + SPREAD
+
+  swipe(swatch(x, y, SAMPLE[3].spell, "swipe"))
 
   y = y + icon() + CAPTION_H + 6
+  local r = ns.Style.ready
+  note(("One binary treatment: a %dpx additive edge ON the icon rect, or nothing. There is no " ..
+        "hue ladder and no motion — priority is row order plus the overlays."):format(r.line_px))
 end
 
 --- Cue keys in slot order, so the gallery is laid out the same way on every login.
@@ -208,7 +194,7 @@ local function buildSlots()
   local x = PAD + icon() + SPREAD * 2
   for i = 1, 3 do
     local row = swatch(x, y, SAMPLE[i].spell, i == 2 and "row gap" or nil)
-    ns.Paint.Border(row, SAMPLE[i].lane)
+    ns.Paint.Border(row):SetShown(true)
     local badge = ns.Paint.Badge(row, "blocked")
     if badge then
       badge:Show()
@@ -312,7 +298,7 @@ local function arrivalRow(caption, make)
   local cx = PAD + icon() + ISOLATION + n * pitch()
   for i = 1, n do
     for _, step in ipairs({ -i, i }) do
-      ns.Paint.Border(swatch(cx + step * pitch(), y, SAMPLE[2].spell), "ROTATION")
+      ns.Paint.Border(swatch(cx + step * pitch(), y, SAMPLE[2].spell)):SetShown(true)
     end
   end
   place(cx, "with neighbours")
@@ -321,23 +307,23 @@ local function arrivalRow(caption, make)
   return hosts, plays
 end
 
-local function subjectLane()
-  return ns.Style.lanes.COOLDOWN
+local function subjectColor()
+  return ns.Style.ready
 end
 
 --- The lab's four-strip rings take a band width as an argument; the style declares one.
 local function subjectBand()
-  return ns.Style.ring.thickness_px
+  return ns.Style.ready.line_px
 end
 
 --- Today's builder at each declared from_scale — the control that can falsify the diagnosis.
 local function drawSweep(key, entry)
-  local a, lane = ns.Style.arrival, subjectLane()
+  local a, hue = ns.Style.arrival, subjectColor()
   for _, scale in ipairs(entry.from_scale_sweep or {}) do
     local crosses = ns.Paint.CrossesNeighbour(icon(), scale, pitch())
     local caption = ("%.2fx · %s"):format(scale, crosses and "reaches the neighbour" or "clear")
     local hosts, plays = arrivalRow(caption, function(host)
-      local ring = ns.Paint.Ring(host, { rgb = lane.rgb, thickness_px = subjectBand() })
+      local ring = ns.Paint.Ring(host, { rgb = hue.rgb, thickness_px = subjectBand() })
       local snap = ns.Paint.Arrival(ring.frame, {
         from_scale = scale, from_alpha = a.from_alpha,
         duration_s = a.duration_s, smoothing = a.smoothing,
@@ -346,17 +332,16 @@ local function drawSweep(key, entry)
     end)
     replayOnClick(hosts, plays, a.duration_s)
   end
-  note("⚠ The gallery's ring is the icon itself. On a real row the border frame is 2px larger " ..
-       "on every side, so it starts 4px closer to its neighbour and overhangs further at the " ..
-       "same scale — a value that reads clear here is not yet clear there.")
+  note("⚠ The gallery's ring is the icon itself, which is now also what a live row draws on: " ..
+       "the scan edge sits ON the icon rect, so a value that reads clear here reads clear there.")
 end
 
 --- Variant B: the declared snap on a ring whose thickness is an anchor offset.
 local function drawRelative(key, entry)
-  local a, lane = ns.Style.arrival, subjectLane()
+  local a, hue = ns.Style.arrival, subjectColor()
   local hosts, plays = arrivalRow("relative ring", function(host)
     local ring = ns.Paint.Ring(host, {
-      rgb = lane.rgb, thickness_px = subjectBand(), relative = true,
+      rgb = hue.rgb, thickness_px = subjectBand(), relative = true,
     })
     local snap = ns.Paint.Arrival(ring.frame)
     return function() snap:Stop(); snap:Play() end
@@ -366,11 +351,11 @@ end
 
 --- Variant C: no Scale anywhere. Two pre-built rings; only alpha moves, so nothing overhangs.
 local function drawThickness(key, entry)
-  local lane = subjectLane()
+  local hue = subjectColor()
   local hosts, plays = arrivalRow("fat ring, alpha only", function(host)
-    ns.Paint.Ring(host, { rgb = lane.rgb, thickness_px = subjectBand() })
+    ns.Paint.Ring(host, { rgb = hue.rgb, thickness_px = subjectBand() })
     local fat = ns.Paint.Ring(host, {
-      rgb = lane.rgb, thickness_px = ns.Paint.FatRing(subjectBand(), entry.fat_mult),
+      rgb = hue.rgb, thickness_px = ns.Paint.FatRing(subjectBand(), entry.fat_mult),
     })
     local flash = ns.Paint.Flash(fat.frame, entry.duration_s)
     return function() flash:Stop(); flash:Play() end
@@ -380,11 +365,11 @@ end
 
 --- Variant D: the declared border, never animated, plus a ghost that grows outward and fades.
 local function drawGhost(key, entry)
-  local lane = subjectLane()
+  local hue = subjectColor()
   local hosts, plays = arrivalRow("ghost ping", function(host)
-    ns.Paint.Border(host, "COOLDOWN")
+    ns.Paint.Border(host):SetShown(true)
     local ghost = ns.Paint.Ghost(host, {
-      rgb = lane.rgb, thickness_px = subjectBand(),
+      rgb = hue.rgb, thickness_px = subjectBand(),
       from_scale = entry.from_scale, to_scale = entry.to_scale,
       from_alpha = entry.from_alpha, to_alpha = entry.to_alpha,
       duration_s = entry.duration_s, smoothing = entry.smoothing,
@@ -394,13 +379,65 @@ local function drawGhost(key, entry)
   replayOnClick(hosts, plays, entry.duration_s)
 end
 
+--- A readiness cell: one icon, or `kind = "row"` — four icons at the TRUE row pitch, which is what
+--- the candles test needs. `make(host, cell)` applies the treatment and returns a replay.
+local function readyCells(entry, make)
+  local hosts, plays = {}, {}
+  local x = PAD
+  for _, cell in ipairs(entry.cells or {}) do
+    local names = cell.kind == "row" and (cell.abilities or {}) or { cell.ability }
+    for i, name in ipairs(names) do
+      local host = swatch(x, y, spellOf(name), i == 1 and (cell.ability or "row") or nil)
+      hosts[#hosts + 1] = host
+      plays[#plays + 1] = make(host, cell)
+      x = x + icon() + (cell.kind == "row" and ns.Style.surfaces.row_gap_px or 0)
+    end
+    x = x + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+  return hosts, plays
+end
+
+--- The halo family: static, breathing, or flaring and decaying to a floor. Every one of them
+--- rests LIT, so each is played once as the section is built and replays on click.
+local function drawReadyGlow(key, entry)
+  local hosts, plays = readyCells(entry, function(host)
+    local halo = ns.Paint.Halo(host, entry)
+    halo:Play()
+    return function() halo:Play() end
+  end)
+  replayOnClick(hosts, plays, entry.decay_s or entry.period_s or 0)
+end
+
+--- The hairline family: full brightness on a restrained area, at the width the CELL asks for —
+--- the ladder is the experiment, so a per-cell `line_px` overrides the entry's.
+local function drawReadyLine(key, entry)
+  readyCells(entry, function(host, cell)
+    ns.Paint.Ring(host, {
+      rgb = entry.rgb,
+      thickness_px = cell.line_px or entry.line_px,
+      alpha = entry.rest_alpha,
+      add = true,
+    })
+    return function() end
+  end)
+end
+
 local DRAWS = {
   ["stripes"] = drawStripes,
   ["arrival-sweep"] = drawSweep,
   ["arrival-relative"] = drawRelative,
   ["arrival-thickness"] = drawThickness,
   ["arrival-ghost"] = drawGhost,
+  ["ready-glow"] = drawReadyGlow,
+  ["ready-line"] = drawReadyLine,
 }
+
+--- Whether the gallery can actually draw an entry. A Part 7 entry nothing can draw is invisible
+--- in the client, which is the only place it could ever have been judged.
+function SP.CanDraw(draws)
+  return DRAWS[draws] ~= nil
+end
 
 --- `count` swatches on one line, each `size` wide, `gap` between them, `pad` on both ends.
 function SP.RowWidth(count, size, gap, pad)
@@ -413,9 +450,12 @@ function SP.StageWidth(size, isolation, neighbours, pitch_px, pad)
   return pad * 2 + size * 2 + isolation + 2 * neighbours * pitch_px
 end
 
---- Which lab tab an entry draws on: arrival experiments need the stage, everything else does not.
+--- Which lab tab an entry draws on, from its `draws` family: arrival experiments need the
+--- isolation stage, readiness experiments need the true row pitch, everything else needs neither.
 function SP.LabTab(draws)
-  return tostring(draws):find("^arrival") and "arrival" or "stripes"
+  local family = tostring(draws):match("^%a+")
+  if family == "arrival" or family == "ready" then return family end
+  return "stripes"
 end
 
 local function collect(into, from)
@@ -437,8 +477,7 @@ local function buildStyle(pane)
   text(container, "GameFontNormal", PAD, y, "render shelf v" .. tostring(ns.Style.version), 320)
   y = y + LABEL_H + 4
 
-  buildLanes()
-  buildMotion()
+  buildScan()
   buildHatch()
   collect(badges, buildCues())
   collect(badges, buildSlots())
@@ -455,6 +494,9 @@ local LAB_BLURB = {
             "the style, nothing on it decides anything, and none of it reaches a Cooldown " ..
             "Manager row. Read arrival-control-sweep first: it is the falsifier. An arrival " ..
             "row replays on click, rate limited to its own duration.",
+  ready = "Candidate readiness treatments, drawn so they can be judged in the client. Nothing " ..
+          "on this tab is the style and none of it reaches a Cooldown Manager row. Each entry " ..
+          "draws alone and then four at once at the TRUE row pitch — the candles test.",
 }
 
 local function buildLabPane(which)
@@ -489,6 +531,7 @@ local TABS = {
   { id = "style", label = "Style", build = buildStyle },
   { id = "stripes", label = "Lab · stripes", build = buildLabPane("stripes") },
   { id = "arrival", label = "Lab · arrival", build = buildLabPane("arrival") },
+  { id = "ready", label = "Lab · ready", build = buildLabPane("ready") },
 }
 
 -- ---------------------------------------------------------------------------
@@ -541,7 +584,7 @@ local function show(arg)
 end
 
 ns.RegisterCommand{
-  name = "style", order = 45, args = "[style|stripes|arrival]",
+  name = "style", order = 45, args = "[style|stripes|arrival|ready]",
   desc = "Open the render-shelf gallery in its own window",
   handler = function(rest)
     local arg = (rest or ""):lower()

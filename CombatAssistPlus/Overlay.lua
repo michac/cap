@@ -1,15 +1,14 @@
--- Overlay.lua — addon-owned lane borders on CDM rows, drawn through ns.Paint.
--- No stock-proc suppression: the first flight tests coexistence.
+-- Overlay.lua — addon-owned scan edges, cue badges and cooldown hatches on CDM rows, drawn
+-- through ns.Paint. No stock-proc suppression: the first flight tests coexistence.
 local ADDON, ns = ...
 
 local issecretvalue = issecretvalue
-local PAD = 2
 
 ns.Overlay = ns.Overlay or {}
 local Overlay = ns.Overlay
 local stream = ns.Capture.Open("draw", { sessions = 8, cap = 2000, dedup = false })
 local pool = {}
-local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false, fresh = true }
+local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false }
 
 --- One pooled frame per row, carrying every primitive the shelf declares — a badge per cue
 --- key, built once. Acquisition happens out of combat (Bind.resolve refuses to run in it), so
@@ -20,9 +19,10 @@ local function acquire(cid)
   f = CreateFrame("Frame", nil, UIParent)
   f:Hide()
   f.border = ns.Paint.Border(f)
-  -- Inset by PAD: the overlay frame sits PAD outside the item so the border has room, and the
-  -- hatch is a statement about the icon face, which is inside that.
-  f.hatch = ns.Paint.Hatch(f, PAD)
+  -- The overlay frame is the item's own rect: the scan edge sits ON the icon (tokens.ready) and
+  -- the hatch is a statement about the icon face, so neither needs room outside it. Only the
+  -- badges reach past the corner, and a texture is free to overhang its frame.
+  f.hatch = ns.Paint.Hatch(f)
   f.badges = {}
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
@@ -109,8 +109,8 @@ local function anchor(f, cid)
   if not item then f.anchoredTo = nil; return nil, false end
   if f.anchoredTo ~= item then
     f:ClearAllPoints()
-    f:SetPoint("TOPLEFT", item, "TOPLEFT", -PAD, PAD)
-    f:SetPoint("BOTTOMRIGHT", item, "BOTTOMRIGHT", PAD, -PAD)
+    f:SetPoint("TOPLEFT", item, "TOPLEFT", 0, 0)
+    f:SetPoint("BOTTOMRIGHT", item, "BOTTOMRIGHT", 0, 0)
     f.anchoredTo = item
   end
   return item, confirmed
@@ -153,13 +153,11 @@ local function graded(f, verdict)
   end
 end
 
---- Compose one row: the cooldown hatch, the lane border, then a badge per cue — the order
+--- Compose one row: the cooldown hatch, the scan edge, then a badge per cue — the order
 --- render-shelf.md Part 2.5 fixes, bottom to top.
-local function paint(f, verdict, silent)
+local function paint(f, verdict)
   local d = ns.Treatment.For(verdict)
-  f.border.silent = silent
-  if d.lane then f.border:SetLane(d.lane) else f.border:Hide() end
-  f.border.silent = false
+  f.border:SetShown(d.scan)
   if f.hatch then f.hatch:SetShown(d.hatch) end
 
   -- The shared badges are the READABLE cues' and only theirs; graded cues own their own frames
@@ -179,13 +177,14 @@ local function paint(f, verdict, silent)
   return d
 end
 
---- `id:LANE[+cue,cue]`, or `id:off` where the row draws nothing at all. A trailing `~` is V11's
---- cooldown hatch, which is independent of the lane — so `id:off~` is a real state, and reading a
---- bare `off` as "nothing drawn" would be wrong.
+--- `id:scan[+cue,cue]`, or `id:off` where the row draws nothing at all. A trailing `~` is V11's
+--- cooldown hatch, which is independent of the scan — so `id:off~` is a real state, and reading a
+--- bare `off` as "nothing drawn" would be wrong. The ROLE TIER is deliberately not here: it is a
+--- model fact, recoverable from Sense.lua's tier stream, and the paint no longer branches on it.
 local function cell(id, d)
   local hatch = (d and d.hatch) and "~" or ""
-  if not (d and d.lane) then return id .. ":off" .. hatch end
-  local s = id .. ":" .. d.lane
+  if not (d and d.scan) then return id .. ":off" .. hatch end
+  local s = id .. ":scan"
   if #(d.cues or {}) > 0 then s = s .. "+" .. table.concat(d.cues, ",") end
   return s .. hatch
 end
@@ -229,11 +228,9 @@ local function barReport()
   return ns.Bars.Report()
 end
 
---- Cap has stopped drawing — unsettled, dark, or catalog-less. The next draw is a resume, not
---- an arrival, so it is marked silent: twelve rows snapping in unison says nothing became
---- available, only that cap started looking again.
+--- Cap has stopped drawing — unsettled, dark, or catalog-less. Every row goes quiet; the scan
+--- edge is a still treatment, so resuming needs no first-draw special case.
 local function hideAll(edge)
-  state.fresh = true
   for _, f in pairs(pool) do quiet(f); f:Hide() end
   local bars, bar = barReport()
   write(Overlay.Render{ entries = 0, rows = 0, anchored = 0, confirmed = 0,
@@ -242,7 +239,6 @@ end
 
 local function rebuild(bound)
   state.bound, state.order, state.rowOf, state.itemOf = bound, {}, {}, {}
-  state.fresh = true
   local live = {}
   for _, item in ipairs(bound.entries or {}) do
     state.order[#state.order + 1] = item.entry.id
@@ -261,8 +257,6 @@ end
 local function draw(out, bound, edge)
   if not (out and bound) then state.bound = nil; hideAll(edge); return end
   if bound ~= state.bound then rebuild(bound) end
-  local fresh = state.fresh
-  state.fresh = false
 
   local rows, anchored, confirmed, hidden, noframe = 0, 0, 0, 0, 0
   local cells, marks, channels = {}, {}, {}
@@ -303,7 +297,7 @@ local function draw(out, bound, edge)
     else
       anchored = anchored + 1
       if ok then confirmed = confirmed + 1 end
-      cells[#cells + 1] = cell(id, paint(f, verdict, fresh))
+      cells[#cells + 1] = cell(id, paint(f, verdict))
       f:Show()
       for _, marker in ipairs(verdict.markers or {}) do marks[#marks + 1] = id .. ":" .. marker end
     end

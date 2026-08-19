@@ -76,7 +76,7 @@ describe("product characterization / Havoc pilot", function()
       local full = immolation(true, { aoe = aoe })
       assert.same({ "capped" }, full.cues, "a banked charge is worth spending at any count")
       assert.is_false(skips(full), "capped is the one positive cue and must not read as skip")
-      assert.equal("CHARGES", ns.Treatment.For(full).lane)
+      assert.is_true(ns.Treatment.For(full).scan)
     end
   end)
 
@@ -280,7 +280,7 @@ describe("product characterization / Havoc pilot", function()
     local v = hold("metamorphosis", { metamorphosis = true })
     assert.same({}, v.cues)
     assert.is_false(skips(v))
-    assert.equal("COOLDOWN", ns.Treatment.For(v).lane)
+    assert.is_true(ns.Treatment.For(v).scan)
   end)
 
   it("holds The Hunt on TWO sealed bands — one per axis — and never on readiness alone", function()
@@ -371,13 +371,13 @@ describe("product characterization / Havoc pilot", function()
     end
   end)
 
-  it("leaves no FALLBACK row without charges — the lane has no subject on this spec", function()
+  it("leaves no FALLBACK row without charges — the tier has no subject on this spec", function()
     local byAbility = {}
     for _, a in ipairs(cat.abilities) do byAbility[a.id] = a end
     for _, entry in ipairs(cat.entries) do
       if entry.bands[1].tier == "FALLBACK" then
         assert.is_true(byAbility[entry.ability].charged,
-          entry.id .. " would draw a FALLBACK border, which catalog.md says never happens")
+          entry.id .. " is filed FALLBACK, which catalog.md says never happens here")
       end
     end
   end)

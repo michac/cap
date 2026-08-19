@@ -5,35 +5,36 @@ describe("engine / presentation", function()
   local ns
   before_each(function() ns = H.fresh() end)
 
-  it("draws each discrete tier as one whole lane treatment", function()
-    assert.same({ "COOLDOWN", "ROTATION", "FALLBACK" }, ns.Treatment.ORDER)
-    for _, tier in ipairs(ns.Treatment.ORDER) do
+  it("draws every role tier as the ONE scan treatment, with nothing to tell them apart", function()
+    for _, tier in ipairs({ "COOLDOWN", "ROTATION", "FALLBACK" }) do
       local d = ns.Treatment.For{ tier = tier }
-      assert.is_true(d.emphasized, tier .. " draws nothing")
-      assert.equal(tier, d.lane)
-      -- The lanes differ by HUE alone: one ring, one band, no per-lane thickness to carry
-      -- through the verdict (render-shelf V2).
+      assert.is_true(d.scan, tier .. " draws nothing")
+      -- The tier stays in the MODEL and reaches the paint as one bit. Anything here that could
+      -- tell one tier from another is a hue ladder growing back (render-shelf V2).
+      assert.is_nil(d.lane, tier .. " still carries a drawn lane")
       assert.is_nil(d.thickness, tier .. " still carries a band width the border cannot use")
     end
+    assert.is_nil(ns.Treatment.ORDER, "the lane validation set should be gone with the lanes")
     assert.is_nil(ns.Treatment.Pulse)
   end)
 
-  it("substitutes CHARGES for every role lane, never stacking with one", function()
-    for _, tier in ipairs(ns.Treatment.ORDER) do
-      local d = ns.Treatment.For{ tier = tier, charged = true }
-      assert.equal("CHARGES", d.lane, tier .. " kept its role lane on a charged row")
+  it("draws a charged row exactly as it draws any other in-scan row", function()
+    -- CHARGES was a fourth hue that REPLACED the role lane. With one treatment there is nothing
+    -- for it to replace: the catalog still authors `charged`, and the paint no longer reads it.
+    for _, tier in ipairs({ "COOLDOWN", "ROTATION", "FALLBACK" }) do
+      assert.same(ns.Treatment.For{ tier = tier },
+                  ns.Treatment.For{ tier = tier, charged = true })
     end
-    -- A row with no readable tier draws no border, charged or not.
-    assert.is_false(ns.Treatment.For{ charged = true }.emphasized)
+    -- A row with no readable tier is out of the scan, charged or not.
+    assert.is_false(ns.Treatment.For{ charged = true }.scan)
   end)
 
-  it("carries the authored charged flag from the catalog through to the lane", function()
+  it("carries the authored charged flag from the catalog through to the verdict", function()
     local cat = H.catalogBySpec(ns, 267)
     local resolved = ns.Catalog.Resolve(cat, H.destructionRows())
     assert.is_true(resolved.entries[1].charged)
     local v = ns.Signal.Evaluate(resolved, H.world()).byEntry.conflagrate
     assert.is_true(v.charged)
-    assert.equal("CHARGES", ns.Treatment.For(v).lane)
   end)
 
   it("has no ad-hoc marker vocabulary beside the shelf's cues", function()
@@ -68,15 +69,9 @@ describe("engine / presentation", function()
     -- It is a fact about the button, not about cap's opinion of it, so a row cap has no tier
     -- for still wears it. `Overlay.cell` renders that as `id:off~`, which is why a bare `off`
     -- can no longer be read as "nothing drawn".
-    it("is independent of whether a lane was selected", function()
+    it("is independent of whether the row is in the scan", function()
       local d = ns.Treatment.For{ oncd = true }
-      assert.is_false(d.emphasized)
-      assert.is_true(d.hatch)
-    end)
-
-    it("survives the CHARGES substitution, which only moves the hue", function()
-      local d = ns.Treatment.For{ tier = "ROTATION", charged = true, oncd = true }
-      assert.equal("CHARGES", d.lane)
+      assert.is_false(d.scan)
       assert.is_true(d.hatch)
     end)
   end)
