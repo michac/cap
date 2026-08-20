@@ -38,7 +38,7 @@ ns.Style = {
     tint = "shelf",
   },
   budget = {
-    max_base64_kb = 750,
+    max_base64_kb = 300,
   },
   cues = {
     aoe_only = {
