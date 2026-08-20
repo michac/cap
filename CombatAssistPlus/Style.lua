@@ -18,6 +18,10 @@ ns.Style = {
   badges = {
     asset_root = "previews/assets/kenney",
     diameter_pct = 40,
+    flow = {
+      anchor = "top-right-corner",
+      direction = "down",
+    },
     halo_falloff = 0.7,
     halo_texture = "halo",
     overhang_px = 2,
@@ -29,29 +33,28 @@ ns.Style = {
       texture = "plate",
     },
     rgb = { 0.95, 0.3, 0.3 },
-    slots = {
-      {
-        anchor = "top-right-corner",
-        id = 1,
-      },
-      {
-        anchor = "left-of-1-along-top",
-        id = 2,
-      },
-      {
-        anchor = "below-1-along-right",
-        id = 3,
-      },
-    },
     sprite_inset_pct = 16,
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\badges\\",
     tint = "shelf",
   },
   budget = {
-    max_base64_kb = 512,
+    max_base64_kb = 750,
   },
   cues = {
+    aoe_only = {
+      budgeted = false,
+      duration_s = 1.2,
+      frames = {
+        "pawns",
+      },
+      loop = "HOLD",
+      means = "the AoE spender, in single target — the other one is the answer here",
+      open = false,
+      polarity = "negative",
+      rank = 7,
+    },
     blocked = {
+      budgeted = true,
       duration_s = 2.00,
       frames = {
         "timer_0",
@@ -64,9 +67,10 @@ ns.Style = {
       means = "held for a cooldown, or a readable dependency says the press would be wasted. The sweep is a steady pace, NOT elapsed time.",
       open = false,
       polarity = "negative",
-      slot = 1,
+      rank = 3,
     },
     capped = {
+      budgeted = false,
       duration_s = 1.2,
       frames = {
         "cards_stack",
@@ -82,10 +86,11 @@ ns.Style = {
       means = "charges are at max and the recharge is stalled — you are losing one right now",
       open = false,
       polarity = "positive",
+      rank = 2,
       rgb = { 1.00, 0.78, 0.25 },
-      slot = 3,
     },
     overcap = {
+      budgeted = false,
       duration_s = 1.2,
       frames = {
         "flask_half",
@@ -95,9 +100,41 @@ ns.Style = {
       means = "pressing would waste resource",
       open = false,
       polarity = "negative",
-      slot = 2,
+      rank = 5,
+    },
+    priority = {
+      budgeted = false,
+      duration_s = 1.2,
+      frames = {
+        "fire",
+      },
+      glow = {
+        alpha_max = 0.55,
+        alpha_min = 0.15,
+        hz = 1.2,
+        scale = 1.55,
+      },
+      loop = "HOLD",
+      means = "press this one — the scan would reach it late, or only after stepping over more skips than a reader can hold at once",
+      open = false,
+      polarity = "positive",
+      rank = 1,
+      rgb = { 1.00, 0.78, 0.25 },
+    },
+    st_only = {
+      budgeted = false,
+      duration_s = 1.2,
+      frames = {
+        "pawn",
+      },
+      loop = "HOLD",
+      means = "the single-target spender, while AoE mode is on — the other one is the answer here",
+      open = false,
+      polarity = "negative",
+      rank = 6,
     },
     starved = {
+      budgeted = false,
       duration_s = 1.2,
       frames = {
         "flask_empty",
@@ -107,7 +144,7 @@ ns.Style = {
       means = "you cannot afford it",
       open = false,
       polarity = "negative",
-      slot = 2,
+      rank = 4,
     },
   },
   hatch = {
@@ -117,10 +154,34 @@ ns.Style = {
     phase_pct = 50,
     pitch_px = 16,
     rgb = { 0.00, 0.00, 0.00 },
+    skip = {
+      alpha = 0.45,
+      border = {
+        alpha = 1.00,
+        line_px = 2,
+        rgb = { 0.95, 0.3, 0.3 },
+      },
+      overhang_px = 2,
+      phase_pct = 0,
+      rgb = { 0.95, 0.3, 0.3 },
+    },
     texture = "stripes",
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
     tint = "shelf",
+  },
+  hotkey = {
+    _comment = "V15. CHROME, not a cue (spec.md §3.8): it names the row and asserts nothing about the press. No polarity, no rank, no badge slot, no motion — and deliberately NO `tint` key, because Part 4's tint guard scans art and this has none. `font` is a FULL CLIENT PATH, not a filename: this is cap's OWN shipped file, exported from tokens.preview.hotkey_font, which is the only third-party asset the addon redistributes. `outline` is a client FONT FLAG and the only dark edge cap can ask for: OUTLINE or THICKOUTLINE, nothing between them and nothing wider. Blank when the ability is unbound or reached only through a macro; never a placeholder.",
+    alpha = 0.85,
+    anchor = "TOPLEFT",
+    font = "Interface\\AddOns\\CombatAssistPlus\\Media\\fonts\\CapKeyMono.ttf",
+    offset = {
+      x = 2,
+      y = -2,
+    },
+    outline = "THICKOUTLINE",
+    rgb = { 0.92, 0.92, 0.9 },
+    size = 14,
   },
   motion = {
     tick_s = 0.025,
@@ -132,6 +193,19 @@ ns.Style = {
     icon_px = 50,
     x = 0,
     y = 190,
+  },
+  promotion = {
+    alpha = 1.00,
+    cell = 64,
+    cols = 8,
+    fps = 30,
+    frames = 32,
+    rgb = { 1.00, 0.82, 0.27 },
+    rows = 4,
+    spread = 2.00,
+    texture = "procring",
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
+    tint = "lane",
   },
   ready = {
     _comment = "IN THE SCAN. One treatment, no roles, no motion. An icon either participates in the read or it does not; rank comes from row order and elimination, not from a hue ladder. Full brightness on a restrained AREA: additive, so it reads as a hot edge rather than as a wash, and it sits ON the icon rect so it can never bleed into a neighbour at any row gap.",
@@ -194,6 +268,11 @@ ns.Style = {
       cues = {
         "blocked",
       },
+      scan = true,
+      swipe = false,
+    },
+    ["off-mode"] = {
+      cues = {  },
       scan = true,
       swipe = false,
     },

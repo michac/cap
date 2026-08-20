@@ -34,6 +34,7 @@ end
 function Instance:Bind(binding)
   self.abilities = (binding or {}).abilities or {}
   self.byCid, self.bySpell, self.ready, self.charges = {}, {}, {}, {}
+  self.aura = {}
   for id, ability in pairs(self.abilities) do
     self.byCid[ability.cid] = self.byCid[ability.cid] or {}
     self.byCid[ability.cid][#self.byCid[ability.cid] + 1] = id
@@ -87,10 +88,40 @@ local function clamp(value, maximum)
   return math.max(0, math.min(maximum, value))
 end
 
+--- The AURA latch, and why it is a latch rather than a read.
+---
+--- Aura secrecy is COMBAT-GATED: out of combat `C_UnitAuras` answers a tainted caller
+--- normally, and in combat the spell-keyed getters return a silent `nil` that is
+--- indistinguishable from "no such aura" (`security-taint-and-restricted-data.md` §4.7.1). So
+--- the exact read is legal exactly when it is not needed. Sources, in the same shape as
+--- `ready` above:
+---
+---   out-of-combat seed -> EITHER. The exact read, while it is legal. `SeedAura`.
+---   OnAuraApplied      -> ON.
+---   OnAuraRemoved      -> OFF.
+---
+--- ⚠ There is no third supplier and no timeout. A row the player never enabled has no cid, so
+--- nothing here is ever written for it and `World` reports UNKNOWN — a marker on it stays dark
+--- instead of reading as "the aura is down", which is the one failure that must not happen.
+--- ⚠ A REFRESH of a live aura raises no edge (`cooldown-manager.md` §5.4). Harmless for up/down
+--- and fatal for anything wanting duration, so this holds a boolean and nothing else.
+function Instance:setAura(cid, value)
+  for _, id in ipairs(self.byCid[cid] or {}) do
+    self.aura[id] = value
+  end
+end
+
+--- Seed one ability's aura state from an exact read. `nil` leaves the held state alone.
+function Instance:SeedAura(id, value)
+  if value ~= nil and self.abilities[id] then self.aura[id] = value and true or false end
+end
+
 function Instance:Edge(now, cid, event)
   if not self.byCid[cid] then return false end
   if event == "Available" then self:setReady(cid, true); return true end
   if event == "OnCooldown" then self:setReady(cid, false); return true end
+  if event == "OnAuraApplied" then self:setAura(cid, true); return true end
+  if event == "OnAuraRemoved" then self:setAura(cid, false); return true end
   if event == "ChargeGained" then
     local landed, charged = false, false
     for _, id in ipairs(self.byCid[cid]) do
@@ -172,7 +203,7 @@ function Instance:World(_, reads)
   reads = reads or {}
   self:Observe(reads.onCooldown)
   local world = {
-    ready = {}, resource = reads.resource, resourceMax = reads.resourceMax,
+    ready = {}, aura = {}, resource = reads.resource, resourceMax = reads.resourceMax,
     chargeProvenance = {},
   }
   for _, name in ipairs(COPIED) do world[name] = reads[name] or {} end
@@ -187,9 +218,12 @@ function Instance:World(_, reads)
     local charge = self.charges[id]
     local ready = self.ready[id]
     world.ready[id] = ready == nil and UNKNOWN or ready
+    local aura = self.aura[id]
+    world.aura[id] = aura == nil and UNKNOWN or aura
     if ability.charged and charge then world.chargeProvenance[id] = charge.provenance end
     local needs = ability.needs
     if needs == nil or needs.ready then tally(health.predicates, "ready", ready) end
+    if needs and needs.aura then tally(health.predicates, "aura", aura) end
     for _, name in ipairs(COPIED) do
       if needs == nil or needs[name] then tally(health.predicates, name, world[name][id]) end
     end

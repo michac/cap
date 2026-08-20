@@ -23,6 +23,16 @@ local function acquire(cid)
   -- the hatch is a statement about the icon face, so neither needs room outside it. Only the
   -- badges reach past the corner, and a texture is free to overhang its frame.
   f.hatch = ns.Paint.Hatch(f)
+  -- V11's second cause, its own layer: cap's "ruled out" in cap's colour and phase. Two layers
+  -- rather than one re-tinted, so a row that is somehow both draws both and neither has to know
+  -- about the other.
+  f.skip = ns.Paint.Hatch(f, nil, (ns.Style.hatch or {}).skip)
+  f.promo = ns.Paint.PromotionRing(f)
+  -- V15 · chrome. On CAP'S OWN row frame, which is anchored corner-to-corner onto the CDM item
+  -- rect below, so a top-left anchor lands on the icon. ⚠ Never parented into Blizzard's pooled
+  -- item frames: those are recycled and re-bound on `OnCooldownIDSet`, and since 12.1 they
+  -- participate in secure aura plumbing.
+  f.hotkey = ns.Paint.Hotkey(f)
   f.badges = {}
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
   f.channels, f.channelStatus = {}, {}
@@ -43,6 +53,11 @@ end
 local function quiet(f)
   if f.border then f.border:Hide() end
   if f.hatch then f.hatch:Hide() end
+  if f.skip then f.skip:Hide() end
+  if f.promo then f.promo:Hide() end
+  -- ⚠ Chrome goes quiet with everything else. Every path that stops drawing a row comes through
+  -- here, and a widget missing from this list stays lit on a hidden row forever.
+  if f.hotkey then f.hotkey:Hide() end
   for _, badge in pairs(f.badges or {}) do badge:Hide() end
   for _, badge in pairs(f.gradedBadges or {}) do badge:Hide() end
 end
@@ -128,9 +143,17 @@ end
 --- even against nil, which is why the evaluator answers `ok, value`.
 local function graded(f, verdict)
   local gates = (verdict or {}).gates or {}
+  -- Where a graded badge sits in the flowing stack. It shares its cue's place with the shared
+  -- badge of the same key -- two instances of one cue draw stacked on top of each other, which
+  -- is what the old fixed slots did too. A graded cue nobody else is wearing goes on the end.
+  local order, depth = f.cueOrder or {}, 0
+  for _ in pairs(order) do depth = depth + 1 end
   for id, armed in pairs(f.graded) do
     local badge = f.gradedBadges[id]
     if badge then
+      local plan = f.gradedPlans[id]
+      local at = plan and order[plan.cue] or depth
+      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(at))
       -- ONE SECRET, MANY READABLE GATES. The curve reads the secret; readable terms beside it
       -- decide whether the client may paint the result at all. `false` is a deliberate
       -- withholding, reported as its own status rather than as a refusal — nothing failed.
@@ -155,23 +178,54 @@ end
 
 --- Compose one row: the cooldown hatch, the scan edge, then a badge per cue — the order
 --- render-shelf.md Part 2.5 fixes, bottom to top.
-local function paint(f, verdict)
+local function paint(f, verdict, item)
   local d = ns.Treatment.For(verdict)
   f.border:SetShown(d.scan)
   if f.hatch then f.hatch:SetShown(d.hatch) end
+  if f.skip then f.skip:SetShown(d.skip) end
+
+  -- V15 · which key casts this icon. Above the badges because it is CHROME (`spec.md` §3.8): it
+  -- takes no part in the read they carry, so it neither joins their stack nor waits on it. The
+  -- row's `primary` (`override or base`) is the id fed to the lookup — not the live id, which
+  -- flickers under a transform, and not the authored one, which a choice node can bind past.
+  if f.hotkey then
+    local row = (item or {}).row
+    ns.Paint.Label(f.hotkey, ns.Binds and ns.Binds.For(row and row.primary))
+  end
 
   -- The shared badges are the READABLE cues' and only theirs; graded cues own their own frames
   -- now, so this no longer has to leave a key alone on their behalf. A cue carried by both (a
   -- readable marker and a band naming one `blocked`) simply draws two stacked instances.
+  -- `d.cues` arrives in shelf-RANK order (Signal), so its index IS the badge's place in the
+  -- stack. Re-anchored every update: the same cue sits on the corner when it is alone and one
+  -- step down when a higher-ranked one is showing beside it.
   local wanted = {}
-  for _, key in ipairs(d.cues or {}) do wanted[key] = true end
+  for i, key in ipairs(d.cues or {}) do wanted[key] = i - 1 end
   for key, badge in pairs(f.badges) do
-    if wanted[key] then
+    local at = wanted[key]
+    if at then
+      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(at))
       badge.frame:SetAlpha(1)
       badge:Show()
     else
       badge:Hide()
     end
+  end
+  f.cueOrder = wanted
+
+  -- V14 rides the POSITIVE cue: shown exactly while one is worn, and centred on the BADGE that
+  -- carries it rather than on the row's corner, so it follows the badge down the stack when a
+  -- higher-ranked cue is showing beside it.
+  if f.promo then
+    local host
+    for key, badge in pairs(f.badges or {}) do
+      if wanted[key] and (ns.Style.cues[key] or {}).polarity == "positive" then host = badge end
+    end
+    if host then
+      f.promo.frame:ClearAllPoints()
+      f.promo.frame:SetPoint("CENTER", host, "CENTER", 0, 0)
+    end
+    f.promo:SetShown(host ~= nil)
   end
   graded(f, verdict)
   return d
@@ -297,7 +351,7 @@ local function draw(out, bound, edge)
     else
       anchored = anchored + 1
       if ok then confirmed = confirmed + 1 end
-      cells[#cells + 1] = cell(id, paint(f, verdict))
+      cells[#cells + 1] = cell(id, paint(f, verdict, state.itemOf[id]))
       f:Show()
       for _, marker in ipairs(verdict.markers or {}) do marks[#marks + 1] = id .. ":" .. marker end
     end

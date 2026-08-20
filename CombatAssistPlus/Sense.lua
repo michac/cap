@@ -612,6 +612,30 @@ end
 --- Seeded out of combat only, and it exists for exactly one case: a /reload mid-combat
 --- has no baseline at all, and both defaults are wrong. A row the client will not answer
 --- for is left unknown rather than assumed.
+--- The exact aura read. Legal ONLY out of combat: in combat the spell-keyed getters return a
+--- silent `nil` that cannot be told from "no such aura"
+--- (`security-taint-and-restricted-data.md` §4.7.1), so calling this in combat would seed a
+--- confident false. Callers must gate on `InCombatLockdown()`.
+---
+--- `nil` on any refusal, which `SeedAura` treats as "leave the held state alone" — a refused
+--- read must never be able to write.
+local function readAura(spellID, unit)
+  if not C_UnitAuras then return nil end
+  local ok, data
+  if unit == nil or unit == "player" then
+    if not C_UnitAuras.GetPlayerAuraBySpellID then return nil end
+    ok, data = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+  else
+    if not (UnitExists and UnitExists(unit)) then return nil end
+    if not C_UnitAuras.GetUnitAuraBySpellID then return nil end
+    ok, data = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, spellID)
+  end
+  if not ok then return nil end
+  -- A secret return is not an answer. `type()` alone does not screen one, so ask directly.
+  if issecretvalue and issecretvalue(data) then return nil end
+  return data ~= nil
+end
+
 local function seedBaseline()
   for _, item in ipairs(state.bound.abilities) do
     local id = item.ability.id
@@ -619,6 +643,10 @@ local function seedBaseline()
     if item.ability.charged then
       local current, maximum, recharge = readCharges(spellID)
       if current then state.track:SeedCharges(id, current, maximum, recharge) end
+    elseif item.ability.family == "auras" then
+      -- Seeded, never latched-from-nothing: this is the ONE window where the answer is free.
+      -- In combat the same read is shut, and the alert edges take over from this value.
+      state.track:SeedAura(id, readAura(item.ability.spell, item.ability.unit))
     else
       state.track:SeedReady(item.row.cooldownID, readCooldown(spellID))
     end
@@ -761,6 +789,12 @@ events:SetScript("OnEvent", function(_, event, unit, _, spellID)
   local now = GetTime()
 
   if event == "PLAYER_REGEN_DISABLED" then
+    -- Re-seed BEFORE flipping into the combat regime. The player has had the whole
+    -- out-of-combat window to change target, so the freshest legal read is the one taken at
+    -- the transition; from here it is edges only. `InCombatLockdown()` can already be true in
+    -- this handler, so `readAura` is allowed to refuse and `SeedAura` to ignore it — a stale
+    -- seed is corrected by the first edge, a confident wrong one is not.
+    if state.track and state.bound then seedBaseline() end
     state.combat = true
     markEdgeCombat("start")
     -- Unsettled at combat entry means dark for the whole fight: committing to a roster

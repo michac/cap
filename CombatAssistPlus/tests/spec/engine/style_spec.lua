@@ -35,7 +35,7 @@ describe("engine / style", function()
     assert.is_number(S.ready.line_px)
     assert.is_number(S.ready.alpha)
     for key, cue in pairs(S.cues) do
-      assert.is_number(cue.slot, key .. " has no slot")
+      assert.is_number(cue.rank, key .. " has no rank")
       assert.is_number(cue.duration_s, key .. " has no duration")
       assert.is_true(#cue.frames > 0, key .. " names no frames")
       if cue.glow then
@@ -56,21 +56,22 @@ describe("engine / style", function()
     assert.is_false(ns.Treatment.For{}.scan)
   end)
 
-  it("derives badge geometry from the icon, and the slots step clear of each other", function()
+  it("derives badge geometry from the icon, and the stack steps clear of itself", function()
     local S, g = ns.Style, ns.Paint.Geometry()
     assert.equal(S.badges.diameter_pct / 100 * S.surfaces.icon_px, g.diameter)
     assert.equal(g.diameter + S.badges.padding_px, g.step)
     assert.is_true(g.sprite < g.diameter)
     assert.is_true(g.plate > g.diameter)
 
-    -- Slot 1 hangs off the corner; 2 steps left along the top, 3 down the right.
-    local x1, y1 = ns.Paint.SlotOffset(1)
-    local x2, y2 = ns.Paint.SlotOffset(2)
-    local x3, y3 = ns.Paint.SlotOffset(3)
-    assert.equal(y1, y2)
-    assert.equal(x1, x3)
-    assert.equal(x1 - g.step, x2)
-    assert.equal(y1 - g.step, y3)
+    -- The stack FLOWS down the right edge: index 0 hangs off the corner, and each further
+    -- badge keeps the same x and steps one `step` lower. No fixed slots, so no ceiling.
+    local x0, y0 = ns.Paint.StackOffset(0)
+    local x1, y1 = ns.Paint.StackOffset(1)
+    local x4, y4 = ns.Paint.StackOffset(4)
+    assert.equal(x0, x1)
+    assert.equal(x0, x4)
+    assert.equal(y0 - g.step, y1)
+    assert.equal(y0 - g.step * 4, y4)
   end)
 
   it("overhangs less than the row gap, so a badge cannot land on the next icon", function()

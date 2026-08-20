@@ -20,10 +20,36 @@ describe("engine / track", function()
     assert.is_false(world().ready.tyrant)
   end)
 
-  it("ignores unbound rows and unrelated alert types", function()
+  it("ignores unbound rows, and an aura edge does not move readiness", function()
     assert.is_false(track:Edge(1, 999999, "Available"))
-    assert.is_false(track:Edge(1, H.cid(resolved, "tyrant"), "OnAuraApplied"))
+    -- Accepted now (it drives the aura latch) but it must not touch `ready` -- the two are
+    -- different facts on the same row, and a tracked-buff row has no cooldown to speak of.
+    assert.is_true(track:Edge(1, H.cid(resolved, "tyrant"), "OnAuraApplied"))
     assert.equal("unknown", world().ready.tyrant)
+  end)
+
+  -- The rule the whole target-aura design rests on: an aura cap has heard nothing about reads
+  -- UNKNOWN, never false. A marker on an unbound row must stay dark rather than assert the
+  -- aura is down -- see Track:setAura and specs/retribution/catalog.md cue G.
+  it("starts the aura latch unknown and moves it only on aura edges", function()
+    assert.equal("unknown", world().aura.tyrant)
+    track:Edge(1, H.cid(resolved, "tyrant"), "OnAuraApplied")
+    assert.is_true(world().aura.tyrant)
+    track:Edge(2, H.cid(resolved, "tyrant"), "OnAuraRemoved")
+    assert.is_false(world().aura.tyrant)
+    -- A readiness edge leaves it alone.
+    track:Edge(3, H.cid(resolved, "tyrant"), "OnCooldown")
+    assert.is_false(world().aura.tyrant)
+  end)
+
+  it("leaves the aura latch unknown for a row that never bound", function()
+    assert.is_false(track:Edge(1, 999999, "OnAuraApplied"))
+    assert.equal("unknown", world().aura.tyrant)
+    -- And a refused seed cannot write: `nil` means "leave the held state alone".
+    track:SeedAura("tyrant", nil)
+    assert.equal("unknown", world().aura.tyrant)
+    track:SeedAura("tyrant", false)
+    assert.is_false(world().aura.tyrant)
   end)
 
   it("tallies only predicates the catalog asks for", function()

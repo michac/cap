@@ -25,15 +25,15 @@ describe("engine / composition", function()
     assert.same({ "blocked" }, v.cues)
   end)
 
-  it("orders a cue set by shelf slot, not by marker order", function()
+  it("orders a cue set by shelf rank, not by marker order", function()
     local _, resolved = withMarkers(ns, {
       { id = "second", cue = "starved", when = { { "ready", "conflagrate" } } },
       { id = "first", cue = "blocked", when = { { "ready", "conflagrate" } } },
     })
     local cues = ns.Signal.Evaluate(resolved, H.world()).byEntry.conflagrate.cues
-    local slots = {}
-    for i, key in ipairs(cues) do slots[i] = ns.Style.cues[key].slot end
-    assert.is_true(slots[1] < slots[2], "cue set is not in slot order")
+    local ranks = {}
+    for i, key in ipairs(cues) do ranks[i] = ns.Style.cues[key].rank end
+    assert.is_true(ranks[1] < ranks[2], "cue set is not in rank order")
   end)
 
   describe("the graded cue", function()
@@ -146,13 +146,21 @@ describe("engine / composition", function()
     end)
   end)
 
-  it("refuses two cues that would want the same badge slot", function()
-    local cat = withMarkers(ns, {
+  -- Badges STACK now (render-shelf.md Part 1 -- they flow down the right edge in rank order),
+  -- so two negative cues on one entry is ordinary and draws two badges. What stays undefined is
+  -- two POSITIVE ones: pass 1 says "press the positive cue" and cannot rank two of them.
+  it("allows two negative cues on one entry, and refuses two positive ones", function()
+    local ok = withMarkers(ns, {
       { id = "a", cue = "starved", when = { { "ready", "conflagrate" } } },
       { id = "b", cue = "overcap", when = { { "ready", "conflagrate" } } },
     })
-    assert.equal(ns.Style.cues.starved.slot, ns.Style.cues.overcap.slot)
-    assert.is_truthy(H.checks(ns.Catalog.Check(cat)).cue)
+    assert.same({}, ns.Catalog.Check(ok))
+
+    local clash = withMarkers(ns, {
+      { id = "a", cue = "capped", when = { { "ready", "conflagrate" } } },
+      { id = "b", cue = "priority", when = { { "ready", "conflagrate" } } },
+    })
+    assert.is_truthy(H.checks(ns.Catalog.Check(clash)).cue)
   end)
 
   it("refuses a cue the generated shelf does not declare", function()
@@ -173,16 +181,45 @@ describe("engine / composition", function()
     assert.same({}, ns.Treatment.For(v).cues)
   end)
 
+  -- V11 generalised: a row wearing ANY negative cue is ruled out and stripes, exactly as a
+  -- swiped row does. This is Part 0.5's pass 2 drawn, and it must key on POLARITY rather than on
+  -- a list of cue names, or a cue added later is silently exempt.
+  it("hatches a row for a negative cue, and never for a positive one", function()
+    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "blocked" } }.skip)
+    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "starved" } }.skip)
+    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "overcap" } }.skip)
+    assert.is_false(ns.Treatment.For{ tier = "ROTATION", cues = { "priority" } }.skip)
+    assert.is_false(ns.Treatment.For{ tier = "ROTATION", cues = { "capped" } }.skip)
+    -- A mixed row is still ruled out: the negative is what elimination reads.
+    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "priority", "blocked" } }.skip)
+    -- Blizzard's cause is independent of cap's, and both can be true at once.
+    local both = ns.Treatment.For{ tier = "ROTATION", cues = { "blocked" }, oncd = true }
+    assert.is_true(both.hatch)
+    assert.is_true(both.skip)
+  end)
+
   -- The elimination walk reads off the badge alone: the press is the leftmost row that is
   -- neither swiped nor wearing a NEGATIVE badge. That only decides anything while every cue
-  -- declares a polarity and the positive one is unique.
-  it("keeps the cue vocabulary polarised, with exactly one positive cue", function()
-    local positive = {}
+  -- declares a polarity, and while the positives RANK above the negatives so a promotion packs
+  -- onto the corner where the eye lands first.
+  --
+  -- ⚠ This used to assert exactly ONE positive cue in the vocabulary. That was the old
+  -- three-slot badge geometry read as a reading rule; the real invariant is one positive cue
+  -- per ENTRY, which `Catalog.Check` enforces. render-shelf.md Part 0.5.
+  it("keeps the cue vocabulary polarised, positives ranking first", function()
+    local worstPositive, bestNegative
     for key, cue in pairs(ns.Style.cues) do
       assert.is_string(cue.polarity, key .. " declares no polarity")
-      if cue.polarity == "positive" then positive[#positive + 1] = key end
+      assert.is_number(cue.rank, key .. " declares no rank")
+      if cue.polarity == "positive" then
+        worstPositive = math.max(worstPositive or cue.rank, cue.rank)
+      else
+        bestNegative = math.min(bestNegative or cue.rank, cue.rank)
+      end
     end
-    assert.equal(1, #positive, "the reading model allows exactly one positive cue")
+    assert.is_number(worstPositive, "the vocabulary declares no positive cue at all")
+    assert.is_true(worstPositive < bestNegative,
+      "a negative cue ranks above a positive one, so a skip would sit on the corner")
   end)
 
   it("carries a mixed cue set through whole, so the negative badge is still there to read",

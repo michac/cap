@@ -11,6 +11,9 @@ local function subject(term, world)
   if name == "proc" then return (world.proc or {})[id] end
   if name == "capped" then return (world.capped or {})[id] end
   if name == "affordable" then return (world.affordable or {})[id] end
+  -- Aura up/down, from Track's latch. UNKNOWN until something says otherwise, which is what
+  -- keeps a marker dark on a setup where the tracked-buff row was never enabled.
+  if name == "aura" then return (world.aura or {})[id] end
   -- Is this talent taken? Read from the trait config, not from a proxy — see Talents.lua.
   -- nil/UNKNOWN when the read refused, which never becomes "not taken".
   if name == "talent" then return (world.talent or {})[id] end
@@ -87,7 +90,7 @@ local function tier(entry, world)
   return nil, uncertain
 end
 
---- Cue keys in shelf-slot order, deduped. Two markers may name one cue — that is how an OR is
+--- Cue keys in shelf-RANK order, deduped. Two markers may name one cue — that is how an OR is
 --- authored without an OR in the band grammar — and the order is the shelf's rather than the
 --- catalog's so a capture body stays deterministic across a marker reshuffle.
 local function orderCues(keys)
@@ -95,8 +98,8 @@ local function orderCues(keys)
   local out = {}
   for key in pairs(keys) do out[#out + 1] = key end
   table.sort(out, function(a, b)
-    local sa = (shelf[a] or {}).slot or math.huge
-    local sb = (shelf[b] or {}).slot or math.huge
+    local sa = (shelf[a] or {}).rank or math.huge
+    local sb = (shelf[b] or {}).rank or math.huge
     if sa ~= sb then return sa < sb end
     return a < b
   end)

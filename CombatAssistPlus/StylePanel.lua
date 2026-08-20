@@ -423,7 +423,277 @@ local function drawReadyLine(key, entry)
   end)
 end
 
+--- Part 7 · the blaze. A promotion that SHOUTS rather than points.
+---
+--- The two entries differ in ONE thing: what shape the light has. `behind = "glyph"` tints a
+--- scaled-up copy of the sprite itself, so the flame looks like the source of its own light;
+--- `behind = "plate"` uses the round halo and lets the dark plate sit over it, so the blaze has
+--- a hard circular edge and the glyph keeps its contrast.
+---
+--- ADD blend on both, because that is what the client does with additive art and the whole
+--- reason the gallery exists is to show what the client does rather than what CSS approximates.
+local function drawBlaze(key, entry)
+  -- TWO roots: the SPRITE is `fire`, which the style owns since `priority` took it as a glyph,
+  -- and the SHEET is VFX art the lab still owns. A lab entry citing the style is the legal
+  -- direction (Part 7 rule 1); the alternative is a second copy of `fire` on disk.
+  local root = (ns.LabStyle._sprites or {}).texture_root
+  local sheetRoot = (ns.LabStyle._sheets or {}).texture_root
+  local hosts, plays = readyCells(entry, function(host)
+    local g = ns.Paint.Geometry()
+    local layer = CreateFrame("Frame", nil, host)
+    layer:SetSize(g.diameter, g.diameter)
+    layer:SetPoint("TOPRIGHT", host, "TOPRIGHT", g.overhang, g.overhang)
+
+    -- The bright field, BEHIND everything else in the badge.
+    -- Three shapes for one field, which is the only thing separating these entries:
+    --   glyph  — the lab's own sprite, so the light has the flame's silhouette
+    --   corona — a real ring, keeping its own falloff (a flat colour through a mask would lose
+    --            the part that reads as heat)
+    --   plate  — the style's round halo, so it has a hard disc's edge
+    local blaze = layer:CreateTexture(nil, "BACKGROUND")
+    if entry.behind == "glyph" then
+      blaze:SetTexture(root .. entry.sprite .. ".tga", nil, nil, "TRILINEAR")
+    elseif entry.behind == "corona" or entry.behind == "sheet" then
+      blaze:SetTexture(sheetRoot .. entry.sheet .. ".tga", nil, nil, "TRILINEAR")
+    else
+      blaze:SetTexture(ns.Style.badges.texture_root
+        .. ns.Style.badges.halo_texture .. ".tga", nil, nil, "TRILINEAR")
+    end
+    local spread = entry.spread or 1
+    blaze:SetPoint("CENTER", layer, "CENTER", 0, 0)
+    blaze:SetSize(g.diameter * spread, g.diameter * spread)
+    blaze:SetBlendMode("ADD")
+    -- The corona is baked art with its own gradient; tinting it multiplies that gradient toward
+    -- one colour and flattens the falloff. The other two fields are neutral shapes and want it.
+    -- Baked art keeps its own gradient: tinting it multiplies that toward one colour and
+    -- flattens the falloff. Neutral fields (a shape, or a sheet declaring `tint = "lane"`) are
+    -- the ones that want the authored hue.
+    if entry.behind ~= "corona" and (entry.behind ~= "sheet" or entry.tint == "lane") then
+      blaze:SetVertexColor(entry.rgb[1], entry.rgb[2], entry.rgb[3])
+    end
+
+    -- A sheet field walks its frames, using the same precomputed `cell / sheet` step the
+    -- flipbook family uses -- never `1 / cols`, which would step into the power-of-two padding.
+    if entry.behind == "sheet" and (entry.frames or 1) > 1 and (entry.fps or 0) > 0 then
+      local cols, du, dv = entry.cols or 1, entry.du or 1, entry.dv or 1
+      local n, fps, i, acc = entry.frames, entry.fps, 0, 0
+      local function frame(k)
+        local c, r = k % cols, math.floor(k / cols)
+        blaze:SetTexCoord(c * du, (c + 1) * du, r * dv, (r + 1) * dv)
+      end
+      frame(0)
+      layer:SetScript("OnUpdate", function(_, elapsed)
+        acc = acc + elapsed
+        while acc >= 1 / fps do
+          acc = acc - 1 / fps
+          i = (i + 1) % n
+          frame(i)
+        end
+      end)
+    end
+    blaze:SetAlpha(entry.flare_alpha or entry.rest_alpha or 1)
+
+    -- The plate. Every field EXCEPT `glyph` keeps it, because the layering is glyph on top,
+    -- dark disc under it, effect behind that -- a badge that loses its disc stops reading as a
+    -- badge. `glyph` is the exception on purpose: there the light wears the glyph's own
+    -- silhouette, and a disc between the two would hide the whole treatment.
+    if entry.behind ~= "glyph" then
+      local plate = layer:CreateTexture(nil, "ARTWORK")
+      plate:SetTexture(ns.Style.badges.texture_root
+        .. ns.Style.badges.plate.texture .. ".tga", nil, nil, "TRILINEAR")
+      plate:SetPoint("CENTER", layer, "CENTER", 0, 0)
+      plate:SetSize(g.plate, g.plate)
+      local pl = ns.Style.badges.plate
+      plate:SetVertexColor(pl.rgb[1], pl.rgb[2], pl.rgb[3])
+      plate:SetAlpha(pl.alpha)
+    end
+
+    -- The glyph. Full alpha ALWAYS -- what breathes is the light behind it, never the mark
+    -- carrying the information (render-shelf.md V5).
+    local sprite = layer:CreateTexture(nil, "OVERLAY")
+    sprite:SetTexture(root .. entry.sprite .. ".tga", nil, nil, "TRILINEAR")
+    sprite:SetPoint("CENTER", layer, "CENTER", 0, 0)
+    sprite:SetSize(g.sprite, g.sprite)
+    local gl = entry.glyph_rgb or { 1, 1, 1 }
+    sprite:SetVertexColor(gl[1], gl[2], gl[3])
+
+    local group
+    if entry.period_s then
+      group = layer:CreateAnimationGroup()
+      group:SetLooping("BOUNCE")
+      local breathe = group:CreateAnimation("Alpha")
+      breathe:SetChildKey("blaze")
+      breathe:SetFromAlpha(entry.rest_alpha or 1)
+      breathe:SetToAlpha(entry.flare_alpha or 1)
+      breathe:SetDuration(entry.period_s / 2)
+      breathe:SetSmoothing("IN_OUT")
+      group:Play()
+    end
+    return function() if group then group:Play() end end
+  end)
+  replayOnClick(hosts, plays, entry.period_s or 0)
+end
+
+--- Part 7 · the icon-scale VFX family (the proc-glow candidates).
+---
+--- A flipbook sheet walked with SetTexCoord, which is the thing the browser preview can only
+--- approximate: the client's ADD blend over Blizzard's own icon art is the whole question these
+--- entries exist to ask, and CSS `mix-blend-mode: screen` is not it.
+---
+--- The sheet is padded to a power of two, so a cell's texcoords come from the DECLARED grid and
+--- the padding is never addressed. Frame count is carried, not inferred -- an 8x4 sheet holding
+--- 30 frames has two dead cells and walking into them would show blank.
+local function drawFlipbook(key, entry)
+  local root = (ns.LabStyle._sheets or {}).texture_root
+  local hosts, plays = readyCells(entry, function(host)
+    local layer = CreateFrame("Frame", nil, host)
+    local w, h = host:GetWidth(), host:GetHeight()
+    local scale = entry.scale or 1
+    layer:SetSize(w * scale, h * scale)
+    layer:SetPoint("CENTER", host, "CENTER", 0, 0)
+    layer:SetFrameLevel(math.max(host:GetFrameLevel() - 1, 0))
+
+    local tex = layer:CreateTexture(nil, "OVERLAY")
+    tex:SetTexture(root .. entry.sheet .. ".tga", nil, nil, "TRILINEAR")
+    tex:SetAllPoints(layer)
+    tex:SetBlendMode(entry.blend or "ADD")
+    -- Neutral art takes the authored hue; baked art is drawn as it is. Which one a sheet is
+    -- gets DECLARED (`tint`) and `capart check` fails a declaration the art contradicts.
+    if entry.tint == "lane" and entry.rgb then
+      tex:SetVertexColor(entry.rgb[1], entry.rgb[2], entry.rgb[3])
+    end
+
+    -- ⚠ `du`/`dv` are the texcoord step, precomputed by capart as `cell / sheet`. NOT `1/cols`:
+    -- the sheet is padded to a power of two, so an 8x3 grid of 64px cells sits in a 512x256
+    -- texture with a quarter of the height unused, and dividing by `rows` would stretch every
+    -- frame and walk into the padding.
+    local cols = entry.cols or 1
+    local du, dv = entry.du or 1, entry.dv or 1
+    local function frame(i)
+      local c, r = i % cols, math.floor(i / cols)
+      tex:SetTexCoord(c * du, (c + 1) * du, r * dv, (r + 1) * dv)
+    end
+    frame(0)
+
+    local n, fps = entry.frames or 1, entry.fps or 0
+    if n > 1 and fps > 0 then
+      local i, acc = 0, 0
+      layer:SetScript("OnUpdate", function(_, elapsed)
+        acc = acc + elapsed
+        while acc >= 1 / fps do
+          acc = acc - 1 / fps
+          i = (i + 1) % n
+          frame(i)
+        end
+      end)
+    elseif entry.period_s then
+      -- A single-frame entry cannot shimmer, so it breathes: shape isolated from motion, which
+      -- is exactly the comparison the circular entry exists to make against the square one.
+      local group = layer:CreateAnimationGroup()
+      group:SetLooping("BOUNCE")
+      local a = group:CreateAnimation("Alpha")
+      a:SetFromAlpha(0.45)
+      a:SetToAlpha(1)
+      a:SetDuration(entry.period_s / 2)
+      a:SetSmoothing("IN_OUT")
+      group:Play()
+      return function() group:Play() end
+    end
+    return function() end
+  end)
+  replayOnClick(hosts, plays, entry.period_s or 0)
+end
+
+--- Part 7 · the font candidates for V15's hotkey text.
+---
+--- THE GALLERY IS WHERE A FONT IS DECIDED, not the preview. The browser measures the same advance
+--- widths — the preview embeds the very same subset files — but the client rasterises a TTF into a
+--- signed-distance-field slug (the install's own `Fonts/615960.slug` is FRIZQT's), so the PIXELS
+--- at 14 px are the client's to show and nobody else's.
+---
+--- A candidate's file is either the CLIENT'S, which every install already has and cap only names,
+--- or OURS, subset and shipped to `Media/lab/` by `capart export lab`. That difference is the
+--- whole shipping question, and `entry.font.shippable` is where the entry states it.
+local function drawHotkey(key, entry)
+  local font = entry.font or {}
+  readyCells(entry, function(host, cell)
+    local fs = host:CreateFontString(nil, "OVERLAY")
+    -- ⚠ `SetFont` returns false rather than raising when the file is missing, and a refusal
+    -- leaves a bare FontString on NO font at all — invisible, which would read as "this candidate
+    -- draws nothing" instead of "this candidate is not installed". So the refusal is reported.
+    local ok = font.client_path
+      and fs:SetFont(font.client_path, entry.size_px, entry.outline or "OUTLINE")
+    if not ok then
+      note("`" .. tostring(font.client_path) .. "` did not load — this candidate cannot be " ..
+           "judged here. If it is ours, run `capart export lab`; if it is the client's, the " ..
+           "path is wrong.")
+      return function() end
+    end
+    local T = ns.Style.hotkey
+    fs:SetTextColor(T.rgb[1], T.rgb[2], T.rgb[3])
+    fs:SetAlpha(T.alpha)
+    fs:SetJustifyH("LEFT")
+    fs:SetPoint(T.anchor, host, T.anchor, T.offset.x, T.offset.y)
+    fs:SetText(cell.key or "3")
+
+    -- The title bar, where a candidate has one. Full icon width, anchored to the top edge, with
+    -- the label centred in it — so the bar's size is a constant of the row and never a function
+    -- of what is written in it. That is the whole difference from the plate below.
+    --
+    -- ⚠ `SetGradient` RESETS VERTEX COLOUR TO WHITE (render-shelf.md Part 3), so the fade is
+    -- applied as two full colours rather than as a tint over a gradient. Both stops carry the
+    -- same rgb and differ only in alpha, which is what makes this a scrim rather than a wash.
+    local bar = entry.bar
+    if bar then
+      local t = host:CreateTexture(nil, "ARTWORK")
+      t:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+      t:SetPoint("TOPRIGHT", host, "TOPRIGHT", 0, 0)
+      t:SetHeight(bar.height_px)
+      if bar.fade and CreateColor then
+        t:SetColorTexture(1, 1, 1, 1)
+        t:SetGradient("VERTICAL",
+          CreateColor(bar.rgb[1], bar.rgb[2], bar.rgb[3], 0),
+          CreateColor(bar.rgb[1], bar.rgb[2], bar.rgb[3], bar.alpha))
+      else
+        t:SetColorTexture(bar.rgb[1], bar.rgb[2], bar.rgb[3], bar.alpha)
+      end
+      if bar.rule then
+        local line = host:CreateTexture(nil, "ARTWORK")
+        line:SetColorTexture(bar.rule.rgb[1], bar.rule.rgb[2], bar.rule.rgb[3], bar.rule.alpha)
+        line:SetPoint("TOPLEFT", t, "BOTTOMLEFT", 0, 0)
+        line:SetPoint("TOPRIGHT", t, "BOTTOMRIGHT", 0, 0)
+        line:SetHeight(bar.rule.px)
+      end
+      -- Re-anchored into the bar: the corner offset the style declares is about a corner label,
+      -- and this is not one.
+      fs:ClearAllPoints()
+      fs:SetJustifyH(bar.align == "center" and "CENTER" or "LEFT")
+      fs:SetPoint("CENTER", t, "CENTER", 0, 0)
+    end
+
+    -- The plate, where a candidate has one: contrast from the ground instead of from the stroke.
+    -- An unsized FontString takes the extent of its own text, so anchoring the texture to the
+    -- string's two corners sizes the plate to the label with no measuring — and it re-sizes for
+    -- free when the text changes, which `SetText` on a live row does.
+    --
+    -- ⚠ ARTWORK, not OVERLAY: the layer is shared with the text and the text has to win. And a
+    -- flat `SetColorTexture` rect is the whole primitive — square corners, because rounding one
+    -- means shipping art, which is a different proposal from a colour and an alpha.
+    local plate = entry.plate
+    if plate then
+      local t = host:CreateTexture(nil, "ARTWORK")
+      t:SetColorTexture(plate.rgb[1], plate.rgb[2], plate.rgb[3], plate.alpha)
+      t:SetPoint("TOPLEFT", fs, "TOPLEFT", -(plate.pad_x_px or 0), plate.pad_y_px or 0)
+      t:SetPoint("BOTTOMRIGHT", fs, "BOTTOMRIGHT", plate.pad_x_px or 0, -(plate.pad_y_px or 0))
+    end
+    return function() end
+  end)
+end
+
 local DRAWS = {
+  ["hotkey"] = drawHotkey,
+  ["flipbook"] = drawFlipbook,
+  ["blaze"] = drawBlaze,
   ["stripes"] = drawStripes,
   ["arrival-sweep"] = drawSweep,
   ["arrival-relative"] = drawRelative,
@@ -455,6 +725,11 @@ end
 function SP.LabTab(draws)
   local family = tostring(draws):match("^%a+")
   if family == "arrival" or family == "ready" then return family end
+  -- `blaze` files onto the readiness tab: it is a badge-scale treatment judged against its
+  -- NEIGHBOURS, and that tab is the one drawn at the true row pitch. `hotkey` joins it for the
+  -- same reason — a label is judged against the art under it and the badge beside it, never on
+  -- its own line.
+  if family == "blaze" or family == "flipbook" or family == "hotkey" then return "ready" end
   return "stripes"
 end
 

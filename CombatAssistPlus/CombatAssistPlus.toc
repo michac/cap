@@ -10,10 +10,12 @@ Core.lua
 Capture.lua
 Bind.lua
 Talents.lua
+Binds.lua
 Catalog.lua
 Catalogs\Demonology.lua
 Catalogs\Destruction.lua
 Catalogs\Havoc.lua
+Catalogs\Retribution.lua
 Log.lua
 Signal.lua
 Track.lua

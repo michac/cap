@@ -61,13 +61,15 @@ function Paint.Geometry()
   }
 end
 
---- Offsets from the host's TOPRIGHT for a slot's own TOPRIGHT. Slot 1 hangs off the corner;
---- 2 steps left along the top edge, 3 steps down the right edge.
-function Paint.SlotOffset(slot)
+--- Offsets from the host's TOPRIGHT for the Nth badge's own TOPRIGHT, `index` 0-based.
+---
+--- The stack FLOWS down the right edge (render-shelf.md Part 1, V5): index 0 hangs off the
+--- corner and each further badge steps one diameter+padding below it. There are no fixed slots,
+--- so a badge's position depends on how many lower-ranked cues are showing beside it — which is
+--- why this is called on every update rather than once at creation.
+function Paint.StackOffset(index)
   local g = Paint.Geometry()
-  if slot == 2 then return g.overhang - g.step, g.overhang end
-  if slot == 3 then return g.overhang, g.overhang - g.step end
-  return g.overhang, g.overhang
+  return g.overhang, g.overhang - g.step * (index or 0)
 end
 
 --- Which frame of a cue's list is showing, 1-based. REPEAT wraps; BOUNCE plays forward then
@@ -236,38 +238,129 @@ end
 --@unverified whether the pitch authored for a 128px sheet reads as stripes rather than as a
 --@unverified flat wash once tiled across a 56px icon, and whether black at this alpha reads as
 --@unverified "ruled out" rather than as "dimmed" — render-shelf.md Part 5.
-function Paint.Hatch(host, inset)
+--- V11's hatch. `look` overrides colour and phase without touching the GEOMETRY, which is
+--- shared: one sheet, one pitch, two verdicts. Blizzard's "on cooldown" uses the defaults;
+--- cap's own "ruled out" passes `ns.Style.hatch.skip`.
+function Paint.Hatch(host, inset, look)
   local h = ns.Style.hatch
   if not h then return nil end
+  look = look or h
   inset = inset or 0
+
+  -- A NEGATIVE inset is an overhang. cap's half of V11 is drawn `overhang_px` OUTSIDE the icon
+  -- rect so its red covers V13's yellow scan edge: a ruled-out row should not also be wearing
+  -- the "in the scan" line, and the yellow reads louder than the stripes because it is a hard
+  -- line against a wash.
+  inset = inset - (look.overhang_px or 0)
 
   local t = host:CreateTexture(nil, "ARTWORK")
   t:SetTexture(ns.Style.hatch.texture_root .. h.texture .. ".tga", "REPEAT", "REPEAT",
     "TRILINEAR")
   t:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -inset)
   t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -inset, inset)
-  t:SetVertexColor(h.rgb[1], h.rgb[2], h.rgb[3])
-  t:SetAlpha(h.alpha)
+  t:SetVertexColor(look.rgb[1], look.rgb[2], look.rgb[3])
+  t:SetAlpha(look.alpha)
   t:Hide()
 
-  local hatch = { texture = t }
+  -- Its own border, at V13's weight, on a frame sized to the overhung rect. Only cap's half
+  -- carries one: Blizzard's cause already has the swipe underneath it saying the same thing.
+  local edgeFrame, edgeParts
+  local edge = look.border
+  if edge then
+    edgeFrame = CreateFrame("Frame", nil, host)
+    edgeFrame:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -inset)
+    edgeFrame:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -inset, inset)
+    edgeParts = buildRing(edgeFrame, edge.line_px)
+    for _, part in ipairs(edgeParts) do
+      part:SetColorTexture(edge.rgb[1], edge.rgb[2], edge.rgb[3], edge.alpha)
+      part:Show()
+    end
+    edgeFrame:Hide()
+  end
+
+  local hatch = { texture = t, edge = edgeFrame }
 
   --- Sized from the drawn extent so the stripe pitch is the same on any icon size the client
   --- hands us, rather than stretching with the button.
   function hatch:SetShown(on)
+    if edgeFrame then edgeFrame:SetShown(on and true or false) end
     if not on then return t:Hide() end
     local w, hgt = extent(host)
     w, hgt = w - 2 * inset, hgt - 2 * inset
     if w ~= self.w or hgt ~= self.h then
-      t:SetTexCoord(Paint.StripeTexCoord(w, hgt, h.tile_px, h.pitch_px, h.phase_pct))
+      t:SetTexCoord(Paint.StripeTexCoord(w, hgt, h.tile_px, h.pitch_px, look.phase_pct))
       self.w, self.h = w, hgt
     end
     t:Show()
   end
 
-  function hatch:Hide() t:Hide() end
+  function hatch:Hide()
+    t:Hide()
+    if edgeFrame then edgeFrame:Hide() end
+  end
 
   return hatch
+end
+
+
+--- V14 · the promotion ring. A glowing ring around the badge of a row wearing a positive cue.
+---
+--- A measured replica of Blizzard's proc glow (render-shelf.md V14). Three of its properties are
+--- load-bearing and none of them was guessed:
+---   · it does NOT pulse -- there is deliberately no alpha animation here. The life is hot spots
+---     travelling the rim, and that lives in the SHEET. A promotion that blinks makes its own
+---     information come and go, which is what the text flicker limits exist to forbid.
+---   · it never covers the icon -- the art's interior measures a flat zero.
+---   · it is NEUTRAL art, so `SetVertexColor` reaches the authored hue. Blizzard's is baked gold,
+---     and this is the one way the replica beats the original.
+---
+--- ⚠ `1 / cols` is correct HERE and only here: `procring` is exactly cols x rows cells with no
+--- power-of-two padding (8x64 = 512, 4x64 = 256). The lab's flipbooks are padded and must use
+--- the precomputed `cell / sheet` step instead -- see StylePanel's `drawFlipbook`.
+function Paint.PromotionRing(host)
+  local p = ns.Style.promotion
+  if not p then return nil end
+
+  local layer = CreateFrame("Frame", nil, host)
+  local d = Paint.Geometry().diameter * p.spread
+  layer:SetSize(d, d)
+  layer:SetPoint("CENTER", host, "CENTER", 0, 0)
+  layer:SetFrameLevel(math.max(host:GetFrameLevel() - 1, 0))
+
+  local t = layer:CreateTexture(nil, "BACKGROUND")
+  t:SetTexture(p.texture_root .. p.texture .. ".tga", nil, nil, "TRILINEAR")
+  t:SetAllPoints(layer)
+  t:SetBlendMode("ADD")
+  t:SetVertexColor(p.rgb[1], p.rgb[2], p.rgb[3])
+  t:SetAlpha(p.alpha)
+
+  local i, acc = 0, 0
+  local function frame(k)
+    local c, r = k % p.cols, math.floor(k / p.cols)
+    t:SetTexCoord(c / p.cols, (c + 1) / p.cols, r / p.rows, (r + 1) / p.rows)
+  end
+  frame(0)
+  layer:Hide()
+
+  local ring = { frame = layer, texture = t }
+  function ring:SetShown(on)
+    if not on then
+      layer:SetScript("OnUpdate", nil)
+      return layer:Hide()
+    end
+    if layer:IsShown() then return end
+    layer:SetScript("OnUpdate", function(_, elapsed)
+      acc = acc + elapsed
+      while acc >= 1 / p.fps do
+        acc = acc - 1 / p.fps
+        i = (i + 1) % p.frames
+        frame(i)
+      end
+    end)
+    layer:Show()
+  end
+  function ring:Hide() self:SetShown(false) end
+  return ring
 end
 
 -- ---------------------------------------------------------------------------
@@ -294,7 +387,9 @@ function Paint.Badge(host, key)
 
   local slot = CreateFrame("Frame", nil, host)
   slot:SetSize(g.diameter, g.diameter)
-  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.SlotOffset(cue.slot))
+  -- Anchored at the corner to start; Overlay re-anchors on every update, because the position
+  -- is a function of the whole shown set rather than of this cue alone.
+  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(0))
   slot:Hide()
 
   local halo
@@ -580,4 +675,58 @@ function Paint.Stripes(host, spec)
   local w, h = extent(host)
   t:SetTexCoord(Paint.StripeTexCoord(w, h, spec.tile_px, spec.pitch_px, spec.phase_pct))
   return { frame = layer, texture = t }
+end
+
+--- V15 · the row's name. An outlined FontString in the corner the cue vocabulary does not use.
+---
+--- CHROME, not a cue (`spec.md` §3.8): it says which key casts this icon and nothing about
+--- whether to press it, so it is built here beside the primitives but joins no stack and takes
+--- no part in the read. It never moves, blinks or tints — `ns.Style.text`'s flicker limits bind
+--- text that changes, and this does not.
+function Paint.Hotkey(host)
+  local T = ns.Style.hotkey
+  -- ⚠ ITS OWN FRAME, ABOVE EVERYTHING cap draws. A FontString created on `host` sits at the
+  -- host's own frame level, and every other primitive here is a CHILD frame — the badges at the
+  -- host's level, the hatch at +2 — so a bare FontString would be drawn UNDER a badge that
+  -- overlapped it. Draw order across frames is decided by frame level, not by draw layer, so
+  -- "OVERLAY" alone buys nothing. The label must win every one of those: it is the row's name,
+  -- and a name half-covered by a disc is worse than no name.
+  local layer = CreateFrame("Frame", nil, host)
+  layer:SetAllPoints(host)
+  layer:SetFrameLevel(host:GetFrameLevel() + 5)
+  local fs = layer:CreateFontString(nil, "OVERLAY")
+  -- ⚠ `SetFont`'s returned bool is its only failure signal, and a refusal leaves the string on
+  -- no font at all rather than on a smaller one — a bare FontString has none to fall back to.
+  -- So the shelf's path is tried first and the template's own second, and the caller gets a
+  -- string that is either dressed or plainly invisible, never silently mis-sized.
+  --
+  -- `T.font` is a FULL path, not a filename: V15's face is cap's own shipped file under
+  -- `Media/fonts/`, not one of the client's. That is also the failure this guard now covers —
+  -- a missing `Media/` file, rather than a typo'd `Fonts\` name.
+  if not fs:SetFont(T.font, T.size, T.outline) then
+    local path = fs:GetFont()
+    if path then fs:SetFont(path, T.size, T.outline) end
+  end
+  fs:SetTextColor(T.rgb[1], T.rgb[2], T.rgb[3])
+  fs:SetAlpha(T.alpha)
+  fs:SetJustifyH("LEFT")
+  fs:SetPoint(T.anchor, layer, T.anchor, T.offset.x, T.offset.y)
+  fs:Hide()
+  return fs
+end
+
+--- Write a chrome label, or take it away.
+---
+--- BLANK IS A STATE IT DRAWS, not a failure to draw one: an ability you have not bound has no
+--- key, and a placeholder would be a keybind cap invented. `SetText` on cap's own FontString is
+--- a legal in-combat write (render-shelf.md Part 3), which is what lets a bar-page flip mid-pull
+--- reach the row instead of waiting for the pull to end.
+function Paint.Label(fs, text)
+  if type(text) == "string" and text ~= "" then
+    fs:SetText(text)
+    fs:Show()
+  else
+    fs:SetText("")
+    fs:Hide()
+  end
 end

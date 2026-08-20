@@ -20,6 +20,10 @@ local PREDICATES = {
   affordable = { arity = 1, subject = true },
   resource = { arity = 2 },
   talent = { arity = 1, talent = true },
+  -- Is this AURA on its unit right now? The subject is an ability in the `auras` family, so it
+  -- binds to a Cooldown Manager tracked-buff/bar row and the latch rides that row's alert edges.
+  -- Unbound row (the player never enabled it) => no cid => UNKNOWN, never false. See Track.
+  aura = { arity = 1, subject = true },
   aoe = { arity = 0 },
 }
 Catalog.PREDICATES = PREDICATES
@@ -135,7 +139,7 @@ function Catalog.Check(cat)
         fail("shape", entry.id, "tier " .. tostring(band.tier) .. " has no readable condition")
       end
     end
-    local markerIDs, bySlot = {}, {}
+    local markerIDs, positive = {}, nil
     for _, marker in ipairs(entry.markers or {}) do
       if type(marker.id) ~= "string" or marker.id == "" then
         fail("shape", entry.id, "marker has no id")
@@ -151,12 +155,15 @@ function Catalog.Check(cat)
         if not cue then
           fail("cue", entry.id, "marker " .. tostring(marker.id) .. " names undeclared cue "
             .. tostring(marker.cue))
-        elseif bySlot[cue.slot] and bySlot[cue.slot] ~= marker.cue then
-          -- One badge per slot. Two cues sharing one would draw a stack the player never sees.
-          fail("cue", entry.id, ("cues %s and %s both want badge slot %s")
-            :format(bySlot[cue.slot], marker.cue, tostring(cue.slot)))
-        else
-          bySlot[cue.slot] = marker.cue
+        elseif cue.polarity == "positive" and positive and positive ~= marker.cue then
+          -- Badges STACK now (render-shelf.md Part 1: they flow down the right edge in `rank`
+          -- order), so two cues on one entry is ordinary and no longer a collision. The one
+          -- thing that stays undefined is two POSITIVE cues on a single button: pass 1 says
+          -- "press the positive cue" and says nothing about which of two wins.
+          fail("cue", entry.id, ("cues %s and %s are both positive on one entry; pass 1 has no "
+            .. "tie-break"):format(positive, marker.cue))
+        elseif cue.polarity == "positive" then
+          positive = marker.cue
         end
       end
       -- A marker is a readable cue, a sealed cue, or a sealed cue WITH readable gates. The last

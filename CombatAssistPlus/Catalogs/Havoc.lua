@@ -35,8 +35,9 @@ ns.Catalog.Register{
     { id = "eternal_hunt", node = 110427, entry = 137049, spell = 1270898 },
   },
 
-  -- Entry order IS the authored priority, and `Catalog.OrderCheck` reports when the player's
-  -- Cooldown Manager disagrees with it.
+  -- Entry order IS the authored priority. `Catalog.OrderCheck` compares it against Blizzard's
+  -- `layoutIndex`, which stopped being the drawn order when Anchor shipped -- so read its verdict
+  -- as "the saved layout disagrees", never as "the row on screen disagrees".
   entries = {
     -- Vengeful Retreat is OFF THE GCD, so its rung-5 position in the APL carries no ordering
     -- information: it fires alongside the global-cooldown press, not instead of it. Position 1

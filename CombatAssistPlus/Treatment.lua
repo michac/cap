@@ -9,18 +9,30 @@ Treatment.BAR = {
   fill = { r = 0.72, g = 0.58, b = 0.18, a = 0.82 },
 }
 
---- ONE binary treatment: a row is IN THE SCAN or it is not (render-shelf.md V2). Priority is
+--- ONE binary treatment: a row is IN THE SCAN or it is not (render-shelf.md V13). Priority is
 --- row order plus the overlays, never a hue — so the role tier the catalog authored decides
 --- only WHETHER the row is in the scan, and the tier itself stays in the model.
---- The cooldown hatch (V11) is independent of the scan: a row draws it whenever the CDM says the
---- ability is down, including a row with no tier selected, because "this button is unavailable" is
---- true regardless of whether cap had an opinion about it this instant.
+--- The RULED-OUT hatch (V11) is independent of the scan, and has TWO causes: the CDM says the
+--- ability is down, or cap itself is ruling the row out with a negative cue. Both mean "not this
+--- one", so both stripe -- in different colours, because the two verdicts have different owners.
+---
+--- ⚠ It generalises over POLARITY, never over a list of cue keys. `blocked`, `starved` and
+--- `overcap` all hatch because all three declare themselves negative, and a cue added tomorrow is
+--- covered the day it declares a polarity rather than the day someone remembers this function.
+--- A cue the shelf does not know is treated as negative, which can only make the hatch stricter.
+---
+--- ⚠ This is Part 0.5's pass 2 drawn: *skip what the swipe ran down, and what wears a red cue.*
+--- Until 2026-08-19 only the first half was visible.
 function Treatment.For(verdict)
   local cues = (verdict or {}).cues or {}
-  local hatch = (verdict or {}).oncd == true
+  local skip = false
+  for _, key in ipairs(cues) do
+    if (ns.Style.cues[key] or {}).polarity ~= "positive" then skip = true end
+  end
   return {
     scan = (verdict and verdict.tier) ~= nil,
     cues = cues,
-    hatch = hatch,
+    hatch = (verdict or {}).oncd == true,
+    skip = skip,
   }
 end

@@ -20,6 +20,8 @@ function H.fresh()
   H.load(ns, "Catalog.lua")
   -- Its event frame is guarded on `CreateFrame`, so only the pure half loads here.
   H.load(ns, "Talents.lua")
+  -- Same shape: its event frame is guarded on `CreateFrame`, so only the pure half loads here.
+  H.load(ns, "Binds.lua")
   H.load(ns, "Signal.lua")
   H.load(ns, "Track.lua")
   H.load(ns, "Style.lua")
@@ -30,6 +32,7 @@ function H.fresh()
   H.load(ns, "Catalogs/Destruction.lua")
   -- Last, so `H.catalog(ns)` — registry entry 1 — stays Demonology for every existing spec.
   H.load(ns, "Catalogs/Havoc.lua")
+  H.load(ns, "Catalogs/Retribution.lua")
   return ns
 end
 

@@ -38,6 +38,11 @@ stds.wow = {
     "C_AddOns",
     -- The Cooldown Manager and the CVar that gates it — Bind.lua.
     "C_CooldownViewer", "C_CVar",
+    -- The keybind hint — Binds.lua.  `C_ActionBar` answers spell → action slots and the
+    -- bonus-bar page; `GetBindingKey` / `GetBindingText` are LEGACY GLOBALS that appear in no
+    -- generated API doc (only `C_KeyBindings.*` is documented), which is why they are declared
+    -- by hand here.  Chain: knowledge/addon-dev/cdm-rider-patterns.md §11.
+    "C_ActionBar", "GetBindingKey", "GetBindingText",
     -- Deferred work — Bind.lua coalesces its re-resolve onto a timer.
     "C_Timer",
     -- Enum.CooldownViewerCategory — Bind.lua's viewer table; and
@@ -53,6 +58,10 @@ stds.wow = {
     -- `UnitPower` the secondary resource; which of them is readable when is
     -- knowledge/addon-dev/security-taint-and-restricted-data.md §4.8, §4.12.
     "C_Spell", "C_SpellActivationOverlay", "UnitPower", "UnitPowerMax",
+    -- The out-of-combat AURA seed — Sense.lua.  Aura secrecy is COMBAT-GATED, so the exact
+    -- read is legal exactly while it is not needed; `UnitExists` guards the unit before
+    -- `C_UnitAuras` (declared below) is asked about it.
+    "UnitExists",
     -- The alert choke point cap latches readiness off — Sense.lua.  It cannot be
     -- removed once installed, which is why the hook table is weak-keyed.
     "hooksecurefunc",
@@ -77,6 +86,9 @@ stds.wow = {
     -- never in ours.  Confirmed present in the 12.1 client source at
     -- Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.lua:359, :460.
     "PanelTemplates_SetTab", "PanelTemplates_SetNumTabs",
+    -- The colour object `SetGradient` takes since it stopped accepting bare tables — the
+    -- `/cap style` gallery's Part 7 title-bar candidates (StylePanel.lua).
+    "CreateColor",
     -- Anchor.lua.  The callback registry the Cooldown Manager's settings pane raises its
     -- data change on; the viewer itself is reached through `_G`, so no viewer name is
     -- declared here.
