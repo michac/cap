@@ -7,7 +7,7 @@
 local ADDON, ns = ...
 
 ns.LabStyle = {
-  _comment = "NO AUTHORITY. Part 7. EMPTY, which is its correct resting state and not a defect. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there — which is what happened to every entry this block used to hold. A new idea gets a `lab` key, an `asks`, and a section in Part 7.",
+  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ The three entries below are FLIGHT-GATED, not look-gated: they draw no cells because what they ask is whether the CLIENT honours a rule cap authored, and Part 7 rule 2 already says a preview cannot answer that. They graduate on `aura-container-rule-formatter` / `aura-container-pandemic-region`, not on being looked at in a browser.",
   _sheet = {
     direction = "down",
     duty = 0.5,
@@ -15,5 +15,63 @@ ns.LabStyle = {
     texture = "stripes",
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
+  },
+  count_band = {
+    anchor = "TOP",
+    asks = "Does a tainted-created NumericRuleFormatter get honoured on SetApplicationCount, so cap can author WHICH stack values show a number — including the complement and a middle band — rather than inheriting Blizzard's show-above-1 default?",
+    bands = {
+      {
+        format = "",
+        threshold = 0,
+      },
+      {
+        format = "%d",
+        threshold = 4,
+      },
+    },
+    control_band = {
+      {
+        format = "%d",
+        threshold = 0,
+      },
+    },
+    draws = "client-only",
+    font = "FRIZQT__.TTF",
+    form = "S7",
+    outline = "OUTLINE",
+    pending_test = "aura-container-rule-formatter",
+    size = 14,
+    y = 1,
+  },
+  count_polarity = {
+    asks = "Can ONE count FontString carry two meanings — a negative band and a positive band in different hues — and if inline colour escapes are stripped, does a cap-shipped symbol font carry the same distinction as a SHAPE instead?",
+    draws = "client-only",
+    escape_bands = {
+      {
+        format = "|cffff4040%d|r",
+        threshold = 0,
+      },
+      {
+        format = "|cff40ff70%d|r",
+        threshold = 6,
+      },
+    },
+    font = "FRIZQT__.TTF",
+    form = "S8",
+    high_rgb = { 0.25, 1.00, 0.44 },
+    low_rgb = { 1.00, 0.25, 0.25 },
+    outline = "OUTLINE",
+    pending_test = "aura-container-rule-formatter",
+    size = 14,
+    static_fallback = "SetTextColor at setup carries ONE hue for the whole string and needs no markup at all; SetApplicationCount adds only Text and Shown, so VertexColor stays cap's.",
+  },
+  pandemic_mark = {
+    alpha = 0.85,
+    asks = "Does AddPandemicRegion drive a cap-owned texture from Blizzard's own refresh window, giving cap real ART out of a sealed fact with no curve and no ruleset to get wrong?",
+    draws = "client-only",
+    form = "S9",
+    note = "The only Part 2 form that reaches cap-owned art without a font trick, and the only one that costs an OnUpdate.",
+    pending_test = "aura-container-pandemic-region",
+    rgb = { 1.00, 0.72, 0.2 },
   },
 }

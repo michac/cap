@@ -181,7 +181,7 @@ ns.Style = {
     },
     outline = "THICKOUTLINE",
     rgb = { 0.92, 0.92, 0.9 },
-    size = 14,
+    size = 16,
   },
   motion = {
     tick_s = 0.025,
