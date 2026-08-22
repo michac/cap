@@ -388,4 +388,21 @@ local function draw(out, bound, edge)
     cells = cells, marks = marks, channels = channels, bars = bars, bar = bar }, edge)
 end
 
+--- Drop every acquired sealed display so the next draw builds them again — the seam `/cap band`
+--- needs, because a band's rules are baked into the AuraContainer at `initializeFrame` and
+--- nothing re-reads them afterwards.
+---
+--- ⚠ A FLIGHT INSTRUMENT. Frames cannot be destroyed in Lua, so each call strands the previous
+--- container as a hidden child and builds a fresh one. That is fine for a handful of nudges
+--- while looking at a row and is NOT a thing to call on a timer.
+function Overlay.Rearm()
+  if InCombatLockdown() then return false end
+  for _, f in pairs(pool) do
+    for _, container in pairs(f.channels or {}) do container:Hide() end
+    f.channels, f.channelStatus, f.channelOf = {}, {}, {}
+  end
+  state.bound = nil
+  return true
+end
+
 ns.Sense.OnVerdicts(draw)

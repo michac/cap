@@ -20,7 +20,8 @@ function Channel.Plan(marker, abilities)
       and ability and type(ability.spell) == "number") then
     return nil
   end
-  local rules = Channel.CountRules(display.bands)
+  -- `BandStyle` is the shelf's own table unless `/cap band` is nudging it mid-flight.
+  local rules = Channel.CountRules(display.bands, Channel.BandStyle())
   if not rules then return nil end
   return {
     kind = display.kind, spell = ability.spell, rules = rules,
@@ -77,7 +78,7 @@ end
 --- count FontString per button, so a hatch across the face, a plate, a mark on the corner and a
 --- numeral all have to come out of one string — and the band above the threshold clears every
 --- one of them together.
-function Channel.CountRules(bands, style)
+function Channel.CountRules(bands, style, size)
   style = style or (ns.Style or {}).count
   if not style or type(bands) ~= "table" or #bands == 0 then return nil end
   local root = style.texture_root or ""
@@ -103,8 +104,17 @@ function Channel.CountRules(bands, style)
       -- ⚠ A DIFFERENT ROOT. The hatch is V11's own sheet under `Media/`, where the plate and the
       -- mark are badge art under `Media/badges/`. Both names are injected by `capart export lua`
       -- rather than written in the shelf, so a rename cannot leave a band pointing at nothing.
+      --
+      -- ⚠ AND AN OFFSET, because an inline texture sits on the TEXT BASELINE rather than in the
+      -- middle of the string's box `[client 2026-08-22]`. A mark as tall as the icon therefore
+      -- rises far above the line it is nominally centred on. `hatch_offset_px` pulls it back down
+      -- onto the button; it is one number and `/cap band` tunes it live.
+      local ox, oy = 0, 0
+      if style.hatch_offset_px then
+        ox, oy = style.hatch_offset_px[1], style.hatch_offset_px[2]
+      end
       body = body .. escape(style.hatch_root or root,
-        hued(style.hatch, band.polarity), style.hatch_px)
+        hued(style.hatch, band.polarity), size or style.hatch_px, ox, oy)
     end
     if wantsMark then
       -- The plate goes down first and the glyph over it, both named by THIS band — which is what
@@ -518,4 +528,75 @@ function Channel.Arm(host, marker, abilities)
     return nil, "refused"
   end
   return container, "armed"
+end
+
+-- ---------------------------------------------------------------------------
+-- The band nudge — a FLIGHT INSTRUMENT, not a setting
+-- ---------------------------------------------------------------------------
+
+--- `/cap band [x y [size]]` — move and resize the band's hatch while looking at it.
+---
+--- ⚠ THIS IS NOT A PLAYER SETTING AND MUST NOT BECOME ONE. `render-shelf.md` owns every number
+--- cap draws with, and the shelf is regenerated into `Style.lua` — an override that survived a
+--- session would be the style saying one thing and the client drawing another, which is the
+--- exact failure the generation pipeline exists to prevent. So it lives in memory only, it
+--- prints the value to paste back into Part 6, and a `/reload` forgets it.
+---
+--- It exists because the alternative is a release per guess. An inline escape sits on the text
+--- baseline and cannot tile, so its placement is arithmetic nobody has done before — three
+--- numbers, judged by eye, in a client. One flight with a nudge beats five flights without.
+local override
+
+function Channel.BandOverride()
+  return override
+end
+
+--- The style the band builder should use right now: the shelf's, or the shelf's with the
+--- nudge applied on top. Pure, so the override never leaks into the generated table.
+function Channel.BandStyle()
+  local base = (ns.Style or {}).count
+  if not (base and override) then return base end
+  local out = {}
+  for k, v in pairs(base) do out[k] = v end
+  out.hatch_offset_px = { override.x, override.y }
+  out.hatch_px = override.size or base.hatch_px
+  return out
+end
+
+if ns.RegisterCommand then
+  ns.RegisterCommand{
+    name = "band", order = 46, args = "[x y [size]] | off",
+    desc = "Nudge the sealed band's hatch while looking at it (flight instrument, not saved)",
+    handler = function(rest)
+      local arg = (rest or ""):lower()
+      local base = (ns.Style or {}).count
+      if not base then return ns.Emit("no count style loaded.") end
+      if arg == "off" then
+        override = nil
+        ns.Emit("band nudge cleared — back to the shelf's own numbers. /reload to re-arm.")
+        return
+      end
+      if arg == "" then
+        local o = override or { x = base.hatch_offset_px[1], y = base.hatch_offset_px[2],
+                                size = base.hatch_px }
+        ns.Emit(("band hatch: x=%d y=%d size=%d%s"):format(
+          o.x, o.y, o.size or base.hatch_px, override and "  (nudged)" or "  (the shelf's)"))
+        ns.Emit("usage: /cap band <x> <y> [size]   ·   /cap band off")
+        return
+      end
+      local x, y, size = arg:match("^(-?%d+)%s+(-?%d+)%s*(%d*)$")
+      if not x then
+        return ns.Emit("usage: /cap band <x> <y> [size]   ·   /cap band off")
+      end
+      if InCombatLockdown() then
+        return ns.Emit("the band re-arms out of combat only.")
+      end
+      override = { x = tonumber(x), y = tonumber(y), size = tonumber(size) }
+      ns.Emit(("band hatch → x=%d y=%d size=%d. Paste into render-shelf.md Part 6 as "
+        .. "count.hatch_offset_px = [%d, %d] and count.hatch_px = %d once it looks right.")
+        :format(override.x, override.y, override.size or base.hatch_px,
+                override.x, override.y, override.size or base.hatch_px))
+      if ns.Overlay and ns.Overlay.Rearm then ns.Overlay.Rearm() end
+    end,
+  }
 end
