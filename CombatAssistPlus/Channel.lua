@@ -591,6 +591,20 @@ if ns.RegisterCommand then
                                 size = base.hatch_px }
         ns.Emit(("band hatch: x=%d y=%d size=%d%s"):format(
           o.x, o.y, o.size or base.hatch_px, override and "  (nudged)" or "  (the shelf's)"))
+        -- ⚠ MEASURED, NOT REASONED ABOUT. An escape's size literal lives in the FontString's own
+        -- coordinate space and the shelf's `icon_px` is a screen-pixel intent, so the two differ
+        -- by the effective scale — which is why a mark authored at the icon's screenshot size
+        -- overhangs it. Printing all three ends the guessing: local × scale should equal the
+        -- number a screenshot measures.
+        local row = ns.Overlay and ns.Overlay.AnyHost and ns.Overlay.AnyHost()
+        if row then
+          local w = ns.Paint.Extent(row)
+          local scale = row.GetEffectiveScale and row:GetEffectiveScale() or 1
+          ns.Emit(("row: local %.1f × effective scale %.3f = %.1f screen px  (shelf nominal %d)")
+            :format(w, scale, w * scale, ns.Style.surfaces.icon_px))
+        else
+          ns.Emit("no row anchored yet — the measurement needs a drawn Cooldown Manager row.")
+        end
         ns.Emit("usage: /cap band <x> <y> [size]   ·   /cap band off")
         return
       end

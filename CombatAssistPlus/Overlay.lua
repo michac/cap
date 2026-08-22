@@ -395,6 +395,15 @@ end
 --- ⚠ A FLIGHT INSTRUMENT. Frames cannot be destroyed in Lua, so each call strands the previous
 --- container as a hidden child and builds a fresh one. That is fine for a handful of nudges
 --- while looking at a row and is NOT a thing to call on a timer.
+--- Any anchored row frame, for a diagnostic that needs to measure one. Nil before the first
+--- draw. It is deliberately ANY rather than a named row: the question it answers — what does a
+--- Cooldown Manager item measure, in which units — is the same on every row.
+function Overlay.AnyHost()
+  for _, f in pairs(pool) do
+    if f.anchoredTo then return f end
+  end
+end
+
 function Overlay.Rearm()
   if InCombatLockdown() then return false end
   for _, f in pairs(pool) do
