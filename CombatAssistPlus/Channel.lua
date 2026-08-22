@@ -8,19 +8,156 @@ local issecretvalue = issecretvalue
 ns.Channel = ns.Channel or {}
 local Channel = ns.Channel
 
---- Pure dependency binding. The returned plan is deliberately display vocabulary, not a
---- Signal term; tests use this same path as the live armer.
+--- Pure dependency binding for the BANDED COUNT (render-shelf.md V16/V17). The returned plan is
+--- deliberately display vocabulary, not a Signal term; tests use this same path as the live armer.
+---
+--- ⚠ It validates the SHAPE and never the value. In the client the count is secret: cap hands
+--- over a rule and the client alone decides which band fired.
 function Channel.Plan(marker, abilities)
   local display = marker and marker.display
   local ability = display and abilities and abilities[display.ability]
-  if not (display and display.kind == "player-aura-stacks" and display.min == 2
+  if not (display and display.kind == "sealed-count-bands"
+      and ability and type(ability.spell) == "number") then
+    return nil
+  end
+  local rules = Channel.CountRules(display.bands)
+  if not rules then return nil end
+  return {
+    kind = display.kind, spell = ability.spell, rules = rules,
+    unit = ability.unit or "player", sink = "SetApplicationCount",
+  }
+end
+
+--- One inline texture escape, in the long form the client places rather than flows. `dx`/`dy`
+--- are optional; without them the mark sits where the text would.
+local function escape(root, name, size, dx, dy)
+  local where = (dx and dy) and (":" .. dx .. ":" .. dy) or ""
+  return ("|T%s%s:%d:%d%s|t"):format(root, name, size, size, where)
+end
+
+--- `|cAARRGGBB…|r` from a shelf triple and an alpha. The hue lives INSIDE the band's format
+--- string because that is the only place it can: `SetApplicationCount` seals `Text` and `Shown`
+--- and never `VertexColor`, so a per-band colour has nowhere else to go.
+---
+--- @verify-ingame whether a colour escape tints an INLINE TEXTURE as well as the text after it.
+--- It does for text; the plate below is emitted in its own escape either way, so if it turns out
+--- not to, the plate draws white and the fix is one token rather than a redesign.
+local function tint(rgb, body, alpha)
+  if body == "" or not rgb then return body end
+  return ("|c%02x%02x%02x%02x%s|r"):format(
+    math.floor((alpha or 1) * 255 + 0.5),
+    math.floor(rgb[1] * 255 + 0.5), math.floor(rgb[2] * 255 + 0.5),
+    math.floor(rgb[3] * 255 + 0.5), body)
+end
+
+--- The authored bands as the list `NumericRuleFormatter:SetBreakpoints` wants: one
+--- `{ threshold, format }` per breakpoint, in rising order. Pure — it turns what a catalog MEANT
+--- into arguments for a client object and reads nothing back, which is the same shape
+--- `PowerPoints` and `HoldPoints` have and for the same reason.
+---
+--- ⚠ THIS IS WHERE THE PIXELS ENTER, and it is the only place they do. A catalog names `draw`,
+--- `polarity` and `hatch`; the format string — which texture, at what size, at what offset, in
+--- what hue — is built here out of `ns.Style.count`, which is generated from render-shelf.md
+--- Part 6. `style` is an argument rather than a global read so the builder stays pure and a test
+--- can hand it a table.
+---
+--- ⚠ `threshold` is the MINIMUM input a rule applies to, so a value ON a threshold takes the
+--- UPPER band. Rising order is required rather than sorted here: a table that does not rise is a
+--- table whose author believed something false about what draws, and silently repairing it would
+--- hide that.
+---
+--- ⚠ Several escapes in ONE band is the whole trick, not an optimisation. There is exactly one
+--- count FontString per button, so a hatch across the face, a plate, a mark on the corner and a
+--- numeral all have to come out of one string — and the band above the threshold clears every
+--- one of them together.
+function Channel.CountRules(bands, style)
+  style = style or (ns.Style or {}).count
+  if not style or type(bands) ~= "table" or #bands == 0 then return nil end
+  local root = style.texture_root or ""
+  local out, floor = {}, nil
+  for _, band in ipairs(bands) do
+    if type(band) ~= "table" or type(band.threshold) ~= "number"
+      or type(band.draw) ~= "string" then
+      return nil
+    end
+    if floor and band.threshold <= floor then return nil end
+    floor = band.threshold
+
+    local wantsMark = band.draw == "mark" or band.draw == "count+mark"
+    local wantsCount = band.draw == "count" or band.draw == "count+mark"
+    -- Hue carries POLARITY and only polarity (render-shelf.md V5.1), so one band spends one
+    -- colour on everything it says — except the plate, whose job is contrast and which is
+    -- therefore the badge stack's own dark disc in both polarities.
+    local rgb = (band.polarity == "negative") and style.low_rgb or style.rgb
+    local plate = ns.Style and ns.Style.badges and ns.Style.badges.plate
+
+    local body = ""
+    if band.hatch then
+      -- ⚠ A DIFFERENT ROOT. The hatch is V11's own sheet under `Media/`, where the plate and the
+      -- mark are badge art under `Media/badges/`. Both names are injected by `capart export lua`
+      -- rather than written in the shelf, so a rename cannot leave a band pointing at nothing.
+      body = body .. tint(rgb,
+        escape(style.hatch_root or root, style.hatch, style.hatch_px))
+    end
+    if wantsMark then
+      -- The plate goes down first and the glyph over it, both named by THIS band — which is what
+      -- makes the whole badge ride the band. A plate cap drew as an ordinary texture would stay
+      -- on the row at every value the band blanks (render-shelf.md V16).
+      if plate then
+        body = body .. tint(plate.rgb,
+          escape(root, style.plate, style.plate_px,
+            style.plate_offset_px[1], style.plate_offset_px[2]), plate.alpha)
+      end
+      body = body .. tint(rgb, escape(root, style.mark, style.mark_px,
+        style.mark_offset_px[1], style.mark_offset_px[2]))
+    end
+    if wantsCount then body = body .. tint(rgb, "%d") end
+
+    out[#out + 1] = { threshold = band.threshold, format = body }
+  end
+  if out[1].threshold ~= 0 then return nil end
+  return out
+end
+
+--- Pure dependency binding for the SEALED RADIAL (render-shelf.md V18). `max` reaches the client
+--- as `maxApplications`, which is what makes the clamp turn "or more" into "full".
+function Channel.BarPlan(marker, abilities)
+  local display = marker and marker.display
+  local ability = display and abilities and abilities[display.ability]
+  if not (display and display.kind == "sealed-count-bar"
+      and type(display.max) == "number" and display.max > 0
       and ability and type(ability.spell) == "number") then
     return nil
   end
   return {
-    kind = display.kind, spell = ability.spell, min = display.min,
-    unit = "player", sink = "SetApplicationCount",
+    kind = display.kind, spell = ability.spell, max = display.max,
+    full = display.full and true or false,
+    unit = ability.unit or "player", sink = "SetApplicationBar",
   }
+end
+
+--- Pure dependency binding for the REFRESH WINDOW (render-shelf.md V19). There is no threshold
+--- to bind: the client computes `GetRefreshExtendedDuration - GetAuraBaseDuration` itself, per
+--- spell, and calls SetShown on whatever Region cap registered.
+function Channel.WindowPlan(marker, abilities)
+  local display = marker and marker.display
+  local ability = display and abilities and abilities[display.ability]
+  if not (display and display.kind == "sealed-refresh-window"
+      and ability and type(ability.spell) == "number") then
+    return nil
+  end
+  return {
+    kind = display.kind, spell = ability.spell,
+    unit = ability.unit or "player", sink = "AddPandemicRegion",
+  }
+end
+
+--- The CONTAINER seam, the sibling of `GradedPlan`: three sinks that all need an AuraContainer
+--- slot, against the two graded ones that need only a curve. A marker is at most one of them.
+function Channel.ContainerPlan(marker, abilities)
+  return Channel.Plan(marker, abilities)
+    or Channel.BarPlan(marker, abilities)
+    or Channel.WindowPlan(marker, abilities)
 end
 
 -- ---------------------------------------------------------------------------
@@ -236,38 +373,138 @@ function Channel.GradedAlpha(armed)
   return Channel.PowerAlpha(armed)
 end
 
+--- The banded count's FontString (render-shelf.md V16/V17). ⚠ EVERY number is `ns.Style.count`'s
+--- — the font, the size, the outline — because `surfaces.count_tile` declares all three and a
+--- hardcoded `"Fonts\\FRIZQT__.TTF", 14, "OUTLINE"` here was the style saying one thing and the
+--- client drawing another.
+local function countSink(button, plan, style)
+  local count = button:CreateFontString(nil, "OVERLAY")
+  if not count:SetFont("Fonts\\" .. style.font, style.size, style.outline) then
+    count:SetFontObject("NumberFontNormal")
+  end
+  count:SetPoint("CENTER", button, "CENTER", 0, 0)
+  -- The static floor, and it needs no markup: the sink adds `Text` and `Shown` and never
+  -- `VertexColor`, so this survives even if a later build starts sanitising escapes.
+  count:SetTextColor(style.rgb[1], style.rgb[2], style.rgb[3])
+
+  local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+    and C_StringUtil.CreateNumericRuleFormatter()
+  if not formatter then return false end
+  formatter:SetBreakpoints(plan.rules)
+  button:SetApplicationCount(count, { formatter = formatter })
+
+  -- ⚠ MOTION FOR FREE, GATED ON NOTHING. The sink owns `Text` and `Shown`; the animation channel
+  -- is still cap's, so a loop created here and never stopped is INVISIBLE while the band draws
+  -- nothing and the mark arrives already breathing. One motion per region (render-shelf V16).
+  if style.pulse then
+    local group = ns.Paint.Breathe(count, style.pulse)
+    if group then group:Play() end
+  end
+  return true
+end
+
+--- The sealed radial (render-shelf.md V18). Only `BarValue` is sealed — the aspect goes on the
+--- value, not the widget — so the texture, the size, the render mode and the colour below are
+--- ordinary setup calls the client never touches.
+local function barSink(button, plan, style, badges)
+  local bar = CreateFrame("StatusBar", nil, button)
+  local d = (badges.diameter_pct / 100) * ns.Style.surfaces.icon_px - 2 * style.inset_px
+  bar:SetSize(d, d)
+  bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(0))
+
+  local track = bar:CreateTexture(nil, "BACKGROUND")
+  track:SetAllPoints(bar)
+  track:SetColorTexture(style.track_rgb[1], style.track_rgb[2], style.track_rgb[3],
+    style.track_alpha)
+  local fill = bar:CreateTexture(nil, "ARTWORK")
+  fill:SetColorTexture(style.rgb[1], style.rgb[2], style.rgb[3], style.alpha)
+  bar:SetStatusBarTexture(fill)
+  -- A client without the render mode gets the linear fill rather than nothing at all: the value
+  -- is the fact, and the circle is how it is drawn.
+  if bar.SetRenderMode and Enum and Enum.StatusBarRenderMode then
+    pcall(bar.SetRenderMode, bar, Enum.StatusBarRenderMode.Radial)
+  end
+  button:SetApplicationBar(bar, { maxApplications = plan.max })
+  return true
+end
+
+--- The refresh window (render-shelf.md V19). A FRAME, not a texture, because the client seals its
+--- `Shown` and nothing else — so plate and glyph parented under it appear and vanish together on
+--- Blizzard's own window, with cap authoring no threshold at all.
+local function windowSink(button, style, badges)
+  local region = CreateFrame("Frame", nil, button)
+  local d = (badges.diameter_pct / 100) * ns.Style.surfaces.icon_px
+  region:SetSize(d, d)
+  region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(0))
+
+  local plate = region:CreateTexture(nil, "OVERLAY", nil, 6)
+  plate:SetTexture(badges.texture_root .. badges.plate.texture .. ".tga", nil, nil, "TRILINEAR")
+  plate:SetVertexColor(badges.plate.rgb[1], badges.plate.rgb[2], badges.plate.rgb[3])
+  plate:SetAlpha(badges.plate.alpha)
+  plate:SetSize(d * badges.plate.scale, d * badges.plate.scale)
+  plate:SetPoint("CENTER")
+
+  local sprite = region:CreateTexture(nil, "OVERLAY", nil, 7)
+  sprite:SetTexture(style.texture_root .. style.frame .. ".tga", nil, nil, "TRILINEAR")
+  sprite:SetVertexColor(style.rgb[1], style.rgb[2], style.rgb[3])
+  sprite:SetSize(style.size_px, style.size_px)
+  sprite:SetPoint("CENTER")
+
+  -- Gated for free, the same way V16's is: the client hides the region, so a loop running
+  -- forever on it is invisible until the window opens.
+  if style.pulse then
+    local group = ns.Paint.Breathe(region, style.pulse)
+    if group then group:Play() end
+  end
+  button:AddPandemicRegion(region)
+  return true
+end
+
 --- Acquire one sealed display while unrestricted. The only public states are the audit
 --- states: offered, armed, refused. None claims whether a secret-driven glyph appeared.
+---
+--- ⚠ THE SINK IS CHOSEN BY `plan.kind` AND BY NOTHING ELSE. Three kinds, three client objects,
+--- one acquisition path — because what varies between them is which widget the client is handed,
+--- not how the slot is built.
 function Channel.Arm(host, marker, abilities)
-  local plan = Channel.Plan(marker, abilities)
+  local plan = Channel.ContainerPlan(marker, abilities)
   if not plan or not host or InCombatLockdown() then return nil, "refused" end
   if not (C_AddOns and C_AddOns.LoadAddOn) then return nil, "refused" end
 
   local okLoad = pcall(C_AddOns.LoadAddOn, "Blizzard_AuraContainer")
   if not okLoad then return nil, "refused" end
 
-  local container
+  local container, built
   local ok = pcall(function()
     container = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
     container:SetAllPoints(host)
-    container:AddAuraSlot(marker.id, "HELPFUL", {
+    container:AddAuraSlot(marker.id, plan.unit == "player" and "HELPFUL" or "HARMFUL", {
       candidateFilters = {
         includeSpellIDs = { [plan.spell] = true },
         isFromPlayerOrPlayerPet = true,
       },
       initializeFrame = function(button)
         button:SetAllPoints(container)
-        local count = button:CreateFontString(nil, "OVERLAY")
-        count:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
-        count:SetPoint("TOP", button, "TOP", 0, 1)
-        button:SetApplicationCount(count)
+        if plan.kind == "sealed-count-bands" then
+          built = countSink(button, plan, ns.Style.count)
+        elseif plan.kind == "sealed-count-bar" then
+          built = barSink(button, plan, ns.Style.arc, ns.Style.badges)
+        elseif plan.kind == "sealed-refresh-window" then
+          built = windowSink(button, ns.Style.pandemic, ns.Style.badges)
+        end
       end,
     })
-    container:SetUnit("player")
+    container:SetUnit(plan.unit)
     container:UpdateAllAuras()
   end)
   if not ok then
     if container then container:Hide() end
+    return nil, "refused"
+  end
+  -- ⚠ `built` is false only when a client object cap needs was absent — a missing formatter
+  -- factory, say. It is NOT a claim about whether anything DREW: cap never learns that.
+  if built == false then
+    container:Hide()
     return nil, "refused"
   end
   return container, "armed"

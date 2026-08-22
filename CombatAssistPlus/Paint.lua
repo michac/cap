@@ -730,3 +730,177 @@ function Paint.Label(fs, text)
     fs:Hide()
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- Part 7 · the sealed-display primitives. A secret aura APPLICATION COUNT, or a DoT's remaining
+-- duration, reaching a pixel. Every number is an argument, so a winner is promoted by aiming the
+-- builder at ns.Style.
+--
+-- ⚠ NOTHING HERE READS A SEALED VALUE, and nothing here is a sink. In the client cap hands the
+-- platform a FontString (SetApplicationCount), a StatusBar (SetApplicationBar) or a Region
+-- (AddPandemicRegion) and the client alone drives it. These builders make the WIDGET; the
+-- gallery drives it by hand from a cell's stated value so a treatment can be looked at.
+-- ---------------------------------------------------------------------------
+
+--- Which band a value falls in: the highest threshold the value reaches. Pure, and the same
+--- arithmetic `ApplyApplicationCount` does, which is what makes a gallery cell an argument about
+--- the client rather than about this file.
+---
+--- ⚠ `threshold` is the MINIMUM input the rule applies to, so a value exactly ON a threshold
+--- takes the UPPER band. An off-by-one here is invisible until it is wrong in a pull.
+function Paint.BandFor(bands, value)
+  local hit
+  for _, b in ipairs(bands or {}) do
+    if value >= b.threshold and (not hit or b.threshold >= hit.threshold) then hit = b end
+  end
+  return hit
+end
+
+--- The string a band draws at `value`, with `%d` resolved. Texture escapes are left ALONE: the
+--- client renders `|T…|t` and `|A:…|a` inline `[client 2026-08-21]`, so passing the format
+--- through untouched is what makes the gallery show what the client shows.
+function Paint.BandText(bands, value)
+  local b = Paint.BandFor(bands, value)
+  if not b then return "" end
+  local fmt = b.format or ""
+  if fmt == "" then return "" end
+  return (fmt:gsub("%%d", tostring(value)))
+end
+
+--- A looping alpha (and optionally scale) breath. `o` is { duration_s, alpha = {a0, a1}, scale }.
+---
+--- ⚠ ONE motion per region. Bands choose WHAT is drawn, never HOW it moves, and two loops at
+--- different rates on one row read as malfunction — so a caller attaches this to the frame the
+--- band gates and never to each part inside it.
+function Paint.Breathe(frame, o)
+  local half = (o.duration_s or 1) / 2
+  local a0, a1 = o.alpha and o.alpha[1] or 0.7, o.alpha and o.alpha[2] or 1
+  local group = frame:CreateAnimationGroup()
+  group:SetLooping("REPEAT")
+
+  local up = group:CreateAnimation("Alpha")
+  up:SetFromAlpha(a0); up:SetToAlpha(a1); up:SetDuration(half); up:SetOrder(1)
+  local down = group:CreateAnimation("Alpha")
+  down:SetFromAlpha(a1); down:SetToAlpha(a0); down:SetDuration(half); down:SetOrder(2)
+
+  if o.scale and o.scale ~= 1 then
+    local grow = group:CreateAnimation("Scale")
+    grow:SetScaleFrom(1, 1); grow:SetScaleTo(o.scale, o.scale)
+    grow:SetDuration(half); grow:SetOrder(1)
+    local shrink = group:CreateAnimation("Scale")
+    shrink:SetScaleFrom(o.scale, o.scale); shrink:SetScaleTo(1, 1)
+    shrink:SetDuration(half); shrink:SetOrder(2)
+  end
+  return group
+end
+
+--- The badge stack's own plate, alone, on its own frame at the stack's corner. `index` is the
+--- slot, 0-based.
+---
+--- ⚠ A plate cap draws has NO SINK ON IT. That is the whole finding L5 was built to show: the
+--- count sink seals `Text` and `Shown` on the FontString and nothing else, so a plate behind a
+--- banded numeral draws at every value including the ones the band blanks. The way to make a
+--- plate ride the band is to bake it into the art the escape names, not to draw one here.
+function Paint.CountPlate(host, index)
+  local b, g = ns.Style.badges, Paint.Geometry()
+  local slot = CreateFrame("Frame", nil, host)
+  slot:SetSize(g.diameter, g.diameter)
+  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(index or 0))
+  slot:SetFrameLevel(host:GetFrameLevel() + 4)
+
+  local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
+  plate:SetTexture(b.texture_root .. b.plate.texture .. ".tga", nil, nil, "TRILINEAR")
+  plate:SetVertexColor(b.plate.rgb[1], b.plate.rgb[2], b.plate.rgb[3])
+  plate:SetAlpha(b.plate.alpha)
+  plate:SetSize(g.plate, g.plate)
+  plate:SetPoint("CENTER")
+  return slot
+end
+
+--- The FontString the count sink would be handed, on its own frame so it wins draw order the
+--- way `Paint.Hotkey`'s does. `o` is
+--- { font, size, outline, rgb, place = "centre"|"badge", y_px }.
+---
+--- Returns { frame, fs, SetBand(text) }. `SetBand("")` leaves an EMPTY string rather than
+--- hiding the frame: a band that draws nothing is a state the treatment has, and the corner it
+--- leaves behind is the thing being judged.
+function Paint.CountString(host, o)
+  local layer = CreateFrame("Frame", nil, host)
+  layer:SetFrameLevel(host:GetFrameLevel() + 5)
+
+  local fs = layer:CreateFontString(nil, "OVERLAY")
+  -- ⚠ `SetFont` signals failure only through its returned bool, and a refusal leaves the string
+  -- on no font at all rather than on a smaller one. The shelf's path is tried first and the
+  -- template's own second.
+  local path = "Fonts\\" .. (o.font or ns.Style.surfaces.count_tile.font)
+  if not fs:SetFont(path, o.size or ns.Style.surfaces.count_tile.size,
+                    o.outline or ns.Style.surfaces.count_tile.outline) then
+    fs:SetFontObject("NumberFontNormal")
+  end
+  if o.rgb then fs:SetTextColor(o.rgb[1], o.rgb[2], o.rgb[3]) end
+
+  if o.place == "badge" then
+    local g = Paint.Geometry()
+    layer:SetSize(g.diameter, g.diameter)
+    layer:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(o.index or 0))
+    fs:SetPoint("CENTER", layer, "CENTER", 0, 0)
+  else
+    layer:SetAllPoints(host)
+    fs:SetPoint("TOP", layer, "TOP", 0, -(o.y_px or 1))
+  end
+
+  local band = { frame = layer, fs = fs }
+  function band:SetBand(text) fs:SetText(text or "") end
+  return band
+end
+
+--- A StatusBar the application-bar sink would be handed. `o` is
+--- { rgb, track_rgb, track_alpha, mode = "bar"|"radial", w, h, inset_px }.
+---
+--- ⚠ A BAR HAS NO BLANK STATE. `SetValue` clamps into [0, max], so at zero the track still
+--- draws — there is no band, no complement, no "nothing until N". That is the straight trade
+--- against the formatter, which can be silent and cannot be a shape.
+---
+--- ⚠ Radial is a RENDER MODE, not a masked fill: at 12.1 `SetRenderMode` drives the managed
+--- texture's radial progress percent instead of moving anchors, so the circle needs no
+--- MaskTexture. A client without it falls back to the linear fill rather than drawing nothing.
+function Paint.CountBar(host, o)
+  local bar = CreateFrame("StatusBar", nil, host)
+  bar:SetSize(o.w, o.h)
+  bar:SetFrameLevel(host:GetFrameLevel() + 4)
+
+  local track = bar:CreateTexture(nil, "BACKGROUND")
+  track:SetAllPoints(bar)
+  local tr = o.track_rgb or { 0, 0, 0 }
+  track:SetColorTexture(tr[1], tr[2], tr[3], o.track_alpha or 0.55)
+
+  local fill = bar:CreateTexture(nil, "ARTWORK")
+  fill:SetColorTexture(o.rgb[1], o.rgb[2], o.rgb[3], 1)
+  bar:SetStatusBarTexture(fill)
+
+  if o.mode == "radial" and bar.SetRenderMode and Enum and Enum.StatusBarRenderMode then
+    pcall(bar.SetRenderMode, bar, Enum.StatusBarRenderMode.Radial)
+  elseif o.mode == "up" then
+    bar:SetOrientation("VERTICAL")
+  end
+  bar:SetMinMaxValues(0, 1)
+  bar:SetValue(0)
+  return bar
+end
+
+--- Whether a resolved band string carries a mark big enough to be about the WHOLE ICON rather
+--- than about a corner — L6's hatch is a 56x56 escape in the same FontString as its badge.
+---
+--- This decides where the string is anchored, and it matters because there is exactly ONE count
+--- FontString per button: a band that hatches the icon and hangs a badge on the corner does both
+--- from one string, and the badge gets there through the escape's own `:xoff:yoff` rather than
+--- through a second anchor. Anchoring such a string in the corner would hang its hatch off the
+--- side of the button.
+function Paint.BandIsFullIcon(text, icon_px)
+  if type(text) ~= "string" then return false end
+  local limit = (icon_px or ns.Style.surfaces.icon_px) * 0.75
+  for h in text:gmatch("|[AT]:?[^|:]+:(%d+):%d+") do
+    if tonumber(h) >= limit then return true end
+  end
+  return false
+end

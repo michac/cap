@@ -116,6 +116,50 @@ describe("engine / lab", function()
     assert.equal(4, ns.Paint.FatRing(3, 1.4))
   end)
 
+  -- Part 7 · the sealed displays. The gallery draws them by hand from a cell's stated value,
+  -- and the arithmetic it uses to pick a band is the client's own — so it is pinned here even
+  -- though the taste around it is not. A band picked wrongly makes every cell an argument about
+  -- this file rather than about the client.
+  it("picks the band a value falls in the way ApplyApplicationCount does", function()
+    local bands = { { threshold = 0, format = "" }, { threshold = 4, format = "%d" } }
+    assert.equal(0, ns.Paint.BandFor(bands, 0).threshold)
+    assert.equal(0, ns.Paint.BandFor(bands, 3).threshold)
+    -- `threshold` is the MINIMUM input the rule applies to, so the value ON it takes the UPPER
+    -- band. This is the off-by-one that is invisible until it is wrong in a pull.
+    assert.equal(4, ns.Paint.BandFor(bands, 4).threshold)
+    assert.equal(4, ns.Paint.BandFor(bands, 99).threshold)
+    -- Authored order is not sorted order, and a table with no reachable band is not a crash.
+    local loose = { { threshold = 6, format = "x" }, { threshold = 0, format = "y" } }
+    assert.equal(6, ns.Paint.BandFor(loose, 7).threshold)
+    assert.is_nil(ns.Paint.BandFor({ { threshold = 2 } }, 1))
+    assert.is_nil(ns.Paint.BandFor(nil, 5))
+  end)
+
+  it("resolves the specifier and leaves a texture escape alone", function()
+    local bands = { { threshold = 0, format = "" }, { threshold = 4, format = "%d" } }
+    assert.equal("", ns.Paint.BandText(bands, 2))
+    assert.equal("7", ns.Paint.BandText(bands, 7))
+    -- ⚠ Untouched. `|T…|t` and `|A:…|a` inside a band RENDER as art in the client, so anything
+    -- stripped here would be the gallery showing something the client does not.
+    local art = { { threshold = 0, format = "%d|A:pawns:15:15|a" } }
+    assert.equal("3|A:pawns:15:15|a", ns.Paint.BandText(art, 3))
+    assert.equal("", ns.Paint.BandText({ { threshold = 0, format = "" } }, 9))
+  end)
+
+  it("tells a whole-icon escape from a corner one, which is where the string is anchored",
+    function()
+      local icon = ns.Style.surfaces.icon_px
+      assert.is_true(ns.Paint.BandIsFullIcon(
+        "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t", icon))
+      assert.is_false(ns.Paint.BandIsFullIcon("|A:pawn:15:15:20:-18|a", icon))
+      -- Both in one band is the case that matters: there is exactly ONE count FontString per
+      -- button, so a hatch and a corner badge come from one string and it must centre.
+      assert.is_true(ns.Paint.BandIsFullIcon(
+        "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t|A:pawn:15:15:20:-18|a", icon))
+      assert.is_false(ns.Paint.BandIsFullIcon("4", icon))
+      assert.is_false(ns.Paint.BandIsFullIcon(nil, icon))
+    end)
+
   it("rate limits a hand-replayed one-shot to its own duration", function()
     -- An exactly representable duration, so the boundary case is the rule and not a rounding.
     local d = 0.5

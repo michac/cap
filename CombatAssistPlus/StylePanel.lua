@@ -690,6 +690,293 @@ local function drawHotkey(key, entry)
   end)
 end
 
+-- ---------------------------------------------------------------------------
+-- Part 7 · the sealed displays
+--
+-- Six treatments in which a SECRET value — an aura's application count, or a DoT's remaining
+-- duration — reaches a pixel without cap ever learning it. In the client the platform owns the
+-- widget: `SetApplicationCount` seals a FontString's `Text` and `Shown`, `SetApplicationBar`
+-- seals a StatusBar's value, `AddPandemicRegion` seals a Region's `Shown`.
+--
+-- ⚠ THE GALLERY DRIVES THEM BY HAND, from the value the CELL states, and that is the one thing
+-- to keep straight while reading a cell. A caption saying "at 4 stacks" is a reader's
+-- convenience; cap can never know that, and no live row will ever be drawn this way. What the
+-- gallery is for is the half a browser cannot show: how the client renders a band's inline
+-- texture escape, what `SetVertexColor` does over Blizzard's own icon art, whether a radial
+-- render mode reads as a count or as a timer.
+
+--- The band input: a count sink bands on the aura's applications, `SetDurationText` bands on a
+--- DurationTextBindingProperty. One renderer, because it is one formatter object — what changes
+--- is which sealed number the client feeds it.
+local function bandValue(cell)
+  if cell.remaining_pct ~= nil then return cell.remaining_pct end
+  return cell.stacks or 0
+end
+
+--- A lab cell captioned with the value it STATES rather than with its ability name, because the
+--- value is what the cell is an argument about.
+local function labSwatch(cell, x, caption)
+  local host = swatch(x, y, spellOf(cell.ability), caption)
+  if cell.verdict and (ns.Style.verdicts[cell.verdict] or {}).swipe then swipe(host) end
+  return host
+end
+
+local function valueCaption(cell)
+  if cell.remaining_pct ~= nil then return cell.remaining_pct .. "%" end
+  if cell.stacks ~= nil then return cell.stacks .. (cell.max and ("/" .. cell.max) or "") end
+  return cell.state or cell.ability
+end
+
+--- One banded FontString, driven to the cell's value. Shared by `count`, `count-glyph` and
+--- `duration`, which are three questions about ONE mechanism and differ only in what the band's
+--- `format` carries: a numeral, a texture escape, or both.
+---
+--- ⚠ The format string is passed to `SetText` UNTOUCHED. `|T…|t` and `|A:…|a` inside a band
+--- render as art `[client 2026-08-21]`, so anything this function stripped would be the gallery
+--- showing something the client does not.
+local function bandedString(host, key, entry, cell, rgb)
+  local drawn = ns.Paint.BandText(cell.bands, bandValue(cell))
+  -- A band carrying a full-icon escape is about the WHOLE icon, so its string is centred; the
+  -- corner marks in the same band get there through the escape's own `:xoff:yoff`.
+  local place = cell.place
+  if ns.Paint.BandIsFullIcon(drawn, icon()) then place = nil end
+
+  local band = ns.Paint.CountString(host, {
+    font = entry.font, size = cell.size_px or entry.size_px or entry.size,
+    outline = entry.outline, rgb = rgb, place = place, y_px = entry.y,
+  })
+  band:SetBand(drawn)
+  band.text = drawn
+  return band
+end
+
+--- L1/L2 · the banded numeral. `place = "badge"` hangs it in the badge stack's own disc.
+---
+--- ⚠ The plate is drawn UNCONDITIONALLY for a badge-placed cell, and that is the finding rather
+--- than an oversight: only the FontString carries a sink, so a plate cap draws stays on the row
+--- at every value the band blanks. The cells at a resting value exist to show the empty disc.
+local function drawCount(key, entry)
+  local x = PAD
+  for _, cell in ipairs(entry.cells or {}) do
+    local host = labSwatch(cell, x, valueCaption(cell))
+    if cell.place == "badge" then ns.Paint.CountPlate(host, 0) end
+    bandedString(host, key, entry, cell, cell.static_rgb or entry.rgb)
+    x = x + icon() + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+end
+
+--- L5/L6 · the same formatter with a TEXTURE ESCAPE in the band.
+---
+--- The difference from `drawCount` is one line and it is the whole entry: a `composited` cell's
+--- plate is baked INTO the art the escape names, so it rides the band. The gallery has no
+--- pre-composited crop on disk, so it draws cap's own plate and gates it on the band being
+--- non-empty — which is exactly the visibility the baked plate would have, and it makes the
+--- empty corner at rest visible for what it is.
+local function drawCountGlyph(key, entry)
+  local x = PAD
+  for _, cell in ipairs(entry.cells or {}) do
+    local host = labSwatch(cell, x, valueCaption(cell))
+    local rgb = cell.alt_hue and entry.alt_rgb or entry.rgb
+    local band = bandedString(host, key, entry, cell, rgb)
+    if cell.composited and band.text ~= "" and cell.place == "badge"
+      and not ns.Paint.BandIsFullIcon(band.text, icon()) then
+      local plate = ns.Paint.CountPlate(host, 0)
+      plate:SetFrameLevel(band.frame:GetFrameLevel() - 1)
+    end
+    -- One motion per region, on the frame the band gates, so everything it draws breathes
+    -- together. While the band is blank there is nothing to animate, which is why the mark
+    -- arrives already breathing and cap branched on nothing to get it.
+    if cell.motion == "pulse" and entry.pulse then
+      ns.Paint.Breathe(band.frame, entry.pulse):Play()
+    end
+    x = x + icon() + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+end
+
+--- L4 · `SetApplicationBar`. The count as a SHAPE. Four geometries for one sealed value, and
+--- the question they share is whether a fill in the corner reads as a count or as a timer.
+local function drawCountBar(key, entry)
+  local x = PAD
+  for _, cell in ipairs(entry.cells or {}) do
+    local host = labSwatch(cell, x, valueCaption(cell))
+    local g = ns.Paint.Geometry()
+    local shape = cell.shape or "bar"
+    local o = {
+      rgb = entry.rgb, track_rgb = entry.track_rgb, track_alpha = entry.track_alpha,
+      w = icon(), h = entry.height_px, mode = "bar",
+    }
+    if shape == "disc" then
+      o.w, o.h, o.mode = g.diameter, g.diameter, "up"
+    elseif shape == "radial" then
+      o.w, o.h, o.mode = g.diameter, g.diameter, "radial"
+    elseif shape == "ring" then
+      o.w, o.h, o.mode = icon(), icon(), "radial"
+    end
+    local bar = ns.Paint.CountBar(host, o)
+    if shape == "bar" then
+      bar:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, 0)
+    elseif shape == "ring" then
+      bar:SetPoint("CENTER", host, "CENTER", 0, 0)
+    else
+      bar:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(0))
+    end
+    -- ⚠ The client sets the range from cap's authored `maxApplications` and CLAMPS, so 7 of 6
+    -- reads full. Full IS the decision, and it is also the reason nothing here can be blank.
+    local max = cell.max or 1
+    bar:SetValue(math.min((cell.stacks or 0) / max, 1))
+    x = x + icon() + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+end
+
+--- L3 · `AddPandemicRegion`. The only sink where the CLIENT owns visibility outright: it calls
+--- `SetShown` off its own `GetRefreshExtendedDuration - GetAuraBaseDuration`, so cap authors no
+--- threshold at all and every treatment below is cap-owned art with one sealed property.
+---
+--- The region is built as a FRAME so it can have children — which is the whole reason a badge,
+--- plate and sprite together, can appear and vanish as one thing.
+local function drawPandemic(key, entry)
+  local x = PAD
+  for _, cell in ipairs(entry.cells or {}) do
+    local host = labSwatch(cell, x, cell.in_window and "in window" or "control")
+    local region = CreateFrame("Frame", nil, host)
+    region:SetAllPoints(host)
+    region:SetFrameLevel(host:GetFrameLevel() + 3)
+    local shape = cell.shape or "wash"
+    local rgb = entry.rgb
+
+    if shape == "wash" then
+      local t = region:CreateTexture(nil, "OVERLAY")
+      t:SetAllPoints(region)
+      t:SetColorTexture(rgb[1], rgb[2], rgb[3], entry.wash_alpha)
+    elseif shape == "underline" then
+      local t = region:CreateTexture(nil, "OVERLAY")
+      t:SetColorTexture(rgb[1], rgb[2], rgb[3], 1)
+      t:SetPoint("BOTTOMLEFT", region, "BOTTOMLEFT", 0, 0)
+      t:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
+      t:SetHeight(entry.foot_px)
+    elseif shape == "edge" then
+      ns.Paint.Ring(region, { rgb = rgb, thickness_px = entry.edge_px })
+    else
+      local g = ns.Paint.Geometry()
+      local slot = CreateFrame("Frame", nil, region)
+      slot:SetSize(g.diameter, g.diameter)
+      slot:SetPoint("TOPRIGHT", region, "TOPRIGHT", ns.Paint.StackOffset(0))
+      local b = ns.Style.badges
+      local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
+      plate:SetTexture(b.texture_root .. b.plate.texture .. ".tga", nil, nil, "TRILINEAR")
+      plate:SetVertexColor(b.plate.rgb[1], b.plate.rgb[2], b.plate.rgb[3])
+      plate:SetAlpha(b.plate.alpha)
+      plate:SetSize(g.plate, g.plate)
+      plate:SetPoint("CENTER")
+      local sprite = slot:CreateTexture(nil, "OVERLAY", nil, 7)
+      sprite:SetTexture(b.texture_root .. cell.frame .. ".tga", nil, nil, "TRILINEAR")
+      sprite:SetVertexColor(rgb[1], rgb[2], rgb[3])
+      sprite:SetSize(g.sprite, g.sprite)
+      sprite:SetPoint("CENTER")
+    end
+
+    if cell.motion == "pulse" and entry.pulse then
+      ns.Paint.Breathe(region, entry.pulse):Play()
+    end
+    -- The sealed property, and the ONLY one: out of the window the client hides the region, so
+    -- the control cell is an ordinary row with nothing on it rather than a faint one.
+    region:SetShown(cell.in_window and true or false)
+    x = x + icon() + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+end
+
+--- L8 · several sinks on one row, which is the only way to judge a ROW rather than a treatment.
+--- Each layer names the sink that would draw it in the client; the corner is shared on purpose.
+local function drawComposite(key, entry)
+  local x = PAD
+  for _, cell in ipairs(entry.cells or {}) do
+    local host = labSwatch(cell, x, cell.state or cell.ability)
+    local hue = function(name) return entry.hues[name] end
+
+    if cell.hatch then
+      -- ⚠ In group 3's first cell this is NOT a sink: with no aura there is no button, so it
+      -- comes from cap's own frame on the readable `aura` latch. It is drawn identically here
+      -- because the question is what the ROW looks like, not which object owns it.
+      local h = ns.Paint.Hatch(host, 0, {
+        rgb = hue(cell.hatch), alpha = ns.Style.hatch.skip.alpha,
+        phase_pct = ns.Style.hatch.skip.phase_pct,
+      })
+      if h then h:SetShown(true) end
+    end
+    if cell.absent then
+      -- The client hides the whole button, so nothing any sink drives is on the row at all.
+      local out = host:CreateTexture(nil, "OVERLAY")
+      out:SetAllPoints(host)
+      out:SetColorTexture(0, 0, 0, 0.72)
+    else
+      local g = ns.Paint.Geometry()
+      local slot = CreateFrame("Frame", nil, host)
+      slot:SetSize(g.diameter, g.diameter)
+      slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(0))
+      slot:SetFrameLevel(host:GetFrameLevel() + 4)
+      local any = false
+
+      if cell.arc or cell.ring or cell.mark or cell.count ~= nil then
+        local b = ns.Style.badges
+        local plate = slot:CreateTexture(nil, "BACKGROUND")
+        plate:SetTexture(b.texture_root .. b.plate.texture .. ".tga", nil, nil, "TRILINEAR")
+        plate:SetVertexColor(b.plate.rgb[1], b.plate.rgb[2], b.plate.rgb[3])
+        plate:SetAlpha(b.plate.alpha)
+        plate:SetSize(g.plate, g.plate)
+        plate:SetPoint("CENTER")
+        any = true
+      end
+      if cell.arc then
+        local d = g.diameter - 2 * entry.arc_inset_px
+        local bar = ns.Paint.CountBar(slot, {
+          rgb = hue(cell.arc.hue), track_rgb = entry.arc_track_rgb,
+          track_alpha = entry.arc_track_alpha, w = d, h = d, mode = "radial",
+        })
+        bar:SetPoint("CENTER")
+        bar:SetValue(cell.arc.pct / 100)
+      end
+      if cell.ring then
+        -- A FULL static crop, laid over the arc it covers exactly. Because the threshold IS the
+        -- maximum, the fired state is always the complete shape — which is why nothing here
+        -- needs a texture that crops angularly.
+        local d = g.diameter - 2 * entry.arc_inset_px
+        local full = ns.Paint.CountBar(slot, {
+          rgb = hue(cell.ring), track_alpha = 0, w = d, h = d, mode = "radial",
+        })
+        full:SetPoint("CENTER")
+        full:SetValue(1)
+      end
+      if cell.mark then
+        local sprite = slot:CreateTexture(nil, "OVERLAY", nil, 7)
+        sprite:SetTexture(ns.Style.badges.texture_root .. cell.mark.frame .. ".tga",
+          nil, nil, "TRILINEAR")
+        local m = hue(cell.mark.hue)
+        sprite:SetVertexColor(m[1], m[2], m[3])
+        sprite:SetSize(entry.size_px, entry.size_px)
+        sprite:SetPoint("CENTER")
+      end
+      if cell.count ~= nil then
+        local band = ns.Paint.CountString(slot, {
+          size = entry.size_px, place = "centre", y_px = 0,
+          rgb = hue(cell.count_hue or "ink"),
+        })
+        band.fs:ClearAllPoints()
+        band.fs:SetPoint("CENTER", slot, "CENTER", 0, 0)
+        band:SetBand(tostring(cell.count))
+      end
+      -- The pulse rides the SLOT, so everything the band gates breathes on one clock.
+      if cell.pulse and entry.pulse then ns.Paint.Breathe(slot, entry.pulse):Play() end
+      if not any then slot:Hide() end
+    end
+    x = x + icon() + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+end
+
 local DRAWS = {
   ["hotkey"] = drawHotkey,
   ["flipbook"] = drawFlipbook,
@@ -701,6 +988,12 @@ local DRAWS = {
   ["arrival-ghost"] = drawGhost,
   ["ready-glow"] = drawReadyGlow,
   ["ready-line"] = drawReadyLine,
+  ["count"] = drawCount,
+  ["count-glyph"] = drawCountGlyph,
+  ["count-bar"] = drawCountBar,
+  ["duration"] = drawCountGlyph,
+  ["pandemic"] = drawPandemic,
+  ["composite"] = drawComposite,
 }
 
 --- Whether the gallery can actually draw an entry. A Part 7 entry nothing can draw is invisible
@@ -746,6 +1039,95 @@ local function close(pane, badges)
   return y + PAD
 end
 
+--- V16–V19 · the sealed displays, on the STYLE tab.
+---
+--- ⚠ These are the ONE part of the gallery that is not a faithful reproduction, and the reason is
+--- the point of them: in the client the platform owns the widget and drives it from an aura count
+--- cap never sees. There is no aura here and no secret, so each cell is drawn by hand at a value
+--- the CAPTION states — which is a reader's convenience and never a claim cap can know that.
+---
+--- What the gallery is for is the half a browser cannot show: whether a band's inline texture
+--- escape renders at all, what a radial render mode looks like at badge size over Blizzard's own
+--- icon art, whether two sealed displays in one corner read as one statement or as a mess.
+local function buildSealed()
+  section("V16 · banded count  ·  V17 · the complement")
+  local x, C = PAD, ns.Style.count
+  local function countCell(caption, bands, value)
+    local host = swatch(x, y, SAMPLE[4].spell, caption)
+    local rules = ns.Channel.CountRules(bands, C)
+    local band = rules and ns.Paint.BandFor(rules, value)
+    local drawn = band and (band.format:gsub("%%d", tostring(value))) or ""
+    local place = ns.Paint.BandIsFullIcon(drawn, icon()) and nil or "badge"
+    local fs = ns.Paint.CountString(host, {
+      font = C.font, size = C.size, outline = C.outline, place = place,
+    })
+    fs:SetBand(drawn)
+    if C.pulse then ns.Paint.Breathe(fs.frame, C.pulse):Play() end
+    x = x + icon() + SPREAD
+    return host
+  end
+
+  -- The ORDINARY direction: silent while the row is a candidate, marked when it is not.
+  local plain = {
+    { threshold = 0, draw = "none" },
+    { threshold = 2, draw = "mark", polarity = "negative", hatch = true },
+  }
+  countCell("1 · quiet", plain, 1)
+  countCell("2 · ruled out", plain, 2)
+  -- The COMPLEMENT: drawn below the threshold, cleared at it. Four marks out of one string.
+  local complement = {
+    { threshold = 0, draw = "count+mark", polarity = "negative", hatch = true },
+    { threshold = 6, draw = "none" },
+  }
+  countCell("3 · below", complement, 3)
+  countCell("6 · clear", complement, 6)
+  countCell("4 · positive", { { threshold = 0, draw = "count+mark" } }, 4)
+
+  y = y + icon() + CAPTION_H + 6
+  note("One FontString per button carries everything a sealed count says — the hatch, the plate, " ..
+       "the mark and the number — and the band above the threshold clears all of it together. " ..
+       "The VALUES here are the gallery's; in the client cap never learns which band fired.")
+
+  section("V18 · sealed radial  ·  V19 · refresh window")
+  x = PAD
+  local A, g = ns.Style.arc, ns.Paint.Geometry()
+  for _, at in ipairs({ 0, 2, 4 }) do
+    local host = swatch(x, y, SAMPLE[4].spell, at .. " of 4")
+    local d = g.diameter - 2 * A.inset_px
+    local bar = ns.Paint.CountBar(host, {
+      rgb = A.rgb, track_rgb = A.track_rgb, track_alpha = A.track_alpha,
+      w = d, h = d, mode = "radial",
+    })
+    bar:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(0))
+    bar:SetValue(at / 4)
+    x = x + icon() + SPREAD
+  end
+
+  -- The window's own badge, drawn shown — which is the ONE state the client would ever show it in.
+  local P, b = ns.Style.pandemic, ns.Style.badges
+  local host = swatch(x, y, SAMPLE[4].spell, "in window")
+  local slot = CreateFrame("Frame", nil, host)
+  slot:SetSize(g.diameter, g.diameter)
+  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(0))
+  local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
+  plate:SetTexture(b.texture_root .. b.plate.texture .. ".tga", nil, nil, "TRILINEAR")
+  plate:SetVertexColor(b.plate.rgb[1], b.plate.rgb[2], b.plate.rgb[3])
+  plate:SetAlpha(b.plate.alpha)
+  plate:SetSize(g.plate, g.plate)
+  plate:SetPoint("CENTER")
+  local sprite = slot:CreateTexture(nil, "OVERLAY", nil, 7)
+  sprite:SetTexture(P.texture_root .. P.frame .. ".tga", nil, nil, "TRILINEAR")
+  sprite:SetVertexColor(P.rgb[1], P.rgb[2], P.rgb[3])
+  sprite:SetSize(P.size_px, P.size_px)
+  sprite:SetPoint("CENTER")
+  if P.pulse then ns.Paint.Breathe(slot, P.pulse):Play() end
+
+  y = y + icon() + CAPTION_H + 6
+  note("A bar has NO BLANK STATE — the track draws at zero, which is the straight trade against " ..
+       "a band that can be silent and cannot be a shape. The window badge authors no threshold " ..
+       "at all: the client computes its own, per spell, and owns whether the region is shown.")
+end
+
 local function buildStyle(pane)
   open(pane)
   local badges = {}
@@ -756,6 +1138,7 @@ local function buildStyle(pane)
   buildHatch()
   collect(badges, buildCues())
   collect(badges, buildSlots())
+  buildSealed()
   note("Every texture here is cap's own. Numbers come from Style.lua, generated from " ..
        "render-shelf.md Part 6.")
   return close(pane, badges)

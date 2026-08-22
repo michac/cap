@@ -4,6 +4,15 @@
 local ADDON, ns = ...
 
 ns.Style = {
+  arc = {
+    _comment = "V18. The same sealed number as a SHAPE. SetApplicationBar drives a StatusBar from the count and SetDurationBar from the remaining duration; only the VALUE is sealed, so texture, size, orientation and colour stay ordinary setup calls. Radial is a RENDER MODE (Enum.StatusBarRenderMode.Radial), not a masked fill, so the circle needs no MaskTexture. ⚠ A bar has NO BLANK STATE: SetValue clamps into [0, max], so at zero the track still draws. That is the straight trade against V16, which can be silent and cannot be a shape. It ships no art at all — the fill is a flat colour — so it is absent from the tint guard's subject list on purpose.",
+    alpha = 0.85,
+    full_rgb = { 1.00, 0.78, 0.25 },
+    inset_px = 3,
+    rgb = { 1.00, 1.00, 1.00 },
+    track_alpha = 0.55,
+    track_rgb = { 0.00, 0.00, 0.00 },
+  },
   arrival = {
     duration_s = 0.4,
     from_alpha = 0.00,
@@ -39,6 +48,30 @@ ns.Style = {
   },
   budget = {
     max_base64_kb = 300,
+  },
+  count = {
+    _comment = "V16/V17. A SEALED aura application count reaching a pixel. cap hands the Cooldown Manager a FontString and a NumericRuleFormatter it AUTHORED; the client evaluates the bands against the secret and calls SetText, and cap never learns which band fired. The sink seals `Text` and `Shown` and nothing else — which is why the hue below is reachable through a static SetTextColor as well as through a band's own escape, and why the FontString's animation channel is still cap's. `threshold` is the MINIMUM input a band applies to, so a value ON a threshold takes the UPPER band.",
+    font = "FRIZQT__.TTF",
+    hatch = "stripes",
+    hatch_px = 56,
+    hatch_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
+    low_rgb = { 0.95, 0.3, 0.3 },
+    mark = "cards_stack_high",
+    mark_offset_px = { 20, -18 },
+    mark_px = 15,
+    outline = "OUTLINE",
+    plate = "plate",
+    plate_offset_px = { 20, -18 },
+    plate_px = 25,
+    pulse = {
+      alpha = { 0.72, 1.00 },
+      duration_s = 1.9,
+      scale = 1.1,
+    },
+    rgb = { 1.00, 0.78, 0.25 },
+    size = 15,
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\badges\\",
+    tint = "shelf",
   },
   cues = {
     aoe_only = {
@@ -186,6 +219,18 @@ ns.Style = {
   motion = {
     tick_s = 0.025,
   },
+  pandemic = {
+    _comment = "V19. The refresh window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge, plate and sprite together, appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively.",
+    frame = "timer_CW_75",
+    pulse = {
+      alpha = { 0.62, 1.00 },
+      duration_s = 1.6,
+    },
+    rgb = { 1.00, 0.78, 0.25 },
+    size_px = 15,
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\badges\\",
+    tint = "shelf",
+  },
   panel = {
     anchor = "BOTTOM",
     gap_px = 6,
@@ -205,7 +250,7 @@ ns.Style = {
     spread = 2.00,
     texture = "procring",
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
-    tint = "lane",
+    tint = "shelf",
   },
   ready = {
     _comment = "IN THE SCAN. One treatment, no roles, no motion. An icon either participates in the read or it does not; rank comes from row order and elimination, not from a hue ladder. Full brightness on a restrained AREA: additive, so it reads as a hot edge rather than as a wash, and it sits ON the icon rect so it can never bleed into a neighbour at any row gap.",
@@ -290,6 +335,13 @@ ns.Style = {
     },
     ["press-promoted"] = {
       cues = {  },
+      scan = true,
+      swipe = false,
+    },
+    ["ruled-sealed"] = {
+      _comment = "V17. The row is RULED OUT by a sealed count band — the client evaluated cap's own rule against a secret and drew the hatch and the mark itself. It carries no `cues` because there is no cue: the marks come out of one FontString the client writes, and a cue is a badge cap shows. It eliminates anyway, which is the whole novelty — this is the first eliminating signal that is neither Blizzard's swipe nor cap's own badge.",
+      cues = {  },
+      eliminates = true,
       scan = true,
       swipe = false,
     },

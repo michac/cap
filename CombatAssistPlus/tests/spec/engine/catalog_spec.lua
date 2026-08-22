@@ -224,6 +224,83 @@ describe("engine / catalog", function()
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).cue)
   end)
 
+  -- render-shelf.md V16/V17. The `min = 2` guard this replaced was never a platform limit --
+  -- `applications > 1` is what the client does when NO formatter is passed -- so what is checked
+  -- now is the authored band table, and nothing about it is ever read back.
+  it("validates a banded count as a rising table of meanings", function()
+    local destruction = H.catalogBySpec(ns, 267)
+    assert.same({}, ns.Catalog.Check(destruction))
+
+    local function bands(target)
+      return target.entries[1].markers[1].display.bands
+    end
+
+    -- ⚠ The bands must RISE. The client picks the highest threshold a value reaches, so a
+    -- repeated or out-of-order breakpoint makes one band unreachable and the authored table
+    -- stops describing what draws.
+    local broken = H.copy(destruction)
+    bands(broken)[2].threshold = 0
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(destruction)
+    bands(broken)[1].threshold = 4
+    bands(broken)[2].threshold = 2
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    -- The lowest band is the RESTING state and must start at zero; without one the client has
+    -- no rule for a low count and falls back to the default this kind exists to replace.
+    broken = H.copy(destruction)
+    bands(broken)[1].threshold = 1
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    -- A band names WHAT IT MEANS, never a format string: the format is a pixel decision and
+    -- pixels are the shelf's, built by `Channel.CountRules` from `ns.Style.count`.
+    broken = H.copy(destruction)
+    bands(broken)[2].draw = "|A:pawn:15:15|a"
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(destruction)
+    bands(broken)[2].polarity = "gold"
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(destruction)
+    bands(broken)[2].threshold = 2.5
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(destruction)
+    broken.entries[1].markers[1].display.bands = {}
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+  end)
+
+  it("validates the sealed radial and the refresh window against their one field each", function()
+    local demo = H.catalogBySpec(ns, 266)
+    assert.same({}, ns.Catalog.Check(demo))
+
+    local function marker(target, id)
+      for _, e in ipairs(target.entries) do
+        for _, m in ipairs(e.markers or {}) do if m.id == id then return m end end
+      end
+    end
+    assert.equal(4, marker(demo, "db_core_charge").display.max)
+    assert.equal("doom", marker(demo, "db_doom_window").display.ability)
+
+    -- `max` is the number that MATTERS, not the aura's real cap, and the clamp is what turns
+    -- "or more" into "full" -- so a non-positive one has no fired state at all.
+    local broken = H.copy(demo)
+    marker(broken, "db_core_charge").display.max = 0
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    broken = H.copy(demo)
+    marker(broken, "db_core_charge").display.max = nil
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
+
+    -- The refresh window has NO threshold to get wrong -- the client computes the window
+    -- itself, per spell -- so its subject is the whole of what there is to check.
+    broken = H.copy(demo)
+    marker(broken, "db_doom_window").display.ability = "missing"
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).subject)
+  end)
+
   it("binds a sealed dependency to the direct AuraContainer sink only", function()
     local destruction = H.catalogBySpec(ns, 267)
     local resolved = ns.Catalog.Resolve(destruction, H.destructionRows())

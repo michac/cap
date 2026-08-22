@@ -14,7 +14,7 @@ function H.load(ns, relPath)
   return chunk("CombatAssistPlus", ns)
 end
 
---- A namespace with the pure core loaded and the Demonology catalog registered.
+--- A namespace with the pure core loaded and every catalog registered.
 function H.fresh()
   local ns = {}
   H.load(ns, "Catalog.lua")
@@ -28,9 +28,13 @@ function H.fresh()
   H.load(ns, "Treatment.lua")
   H.load(ns, "Paint.lua")
   H.load(ns, "Channel.lua")
+  -- FIRST, so `H.catalog(ns)` — registry entry 1 — is the ENGINE's fixture rather than whichever
+  -- product catalog happens to sort earliest. An engine guarantee that rides a shipped roster
+  -- breaks the day that roster is authored, and the pressure it creates is to keep the roster
+  -- shaped like a fixture. Product examples reach their own catalog through `H.catalogBySpec`.
+  H.load(ns, "tests/fixtures/engine_catalog.lua")
   H.load(ns, "Catalogs/Demonology.lua")
   H.load(ns, "Catalogs/Destruction.lua")
-  -- Last, so `H.catalog(ns)` — registry entry 1 — stays Demonology for every existing spec.
   H.load(ns, "Catalogs/Havoc.lua")
   H.load(ns, "Catalogs/Retribution.lua")
   return ns

@@ -35,7 +35,7 @@ local function acquire(cid)
   f.hotkey = ns.Paint.Hotkey(f)
   f.badges = {}
   for key in pairs(ns.Style.cues) do f.badges[key] = ns.Paint.Badge(f, key) end
-  f.channels, f.channelStatus = {}, {}
+  f.channels, f.channelStatus, f.channelOf = {}, {}, {}
   f.gradedPlans, f.graded, f.gradedStatus = {}, {}, {}
   -- A graded cue gets its OWN badge instance, keyed by marker rather than by cue. Two markers
   -- may name one cue — that union is how the band grammar expresses an OR — and a shared frame
@@ -60,6 +60,11 @@ local function quiet(f)
   if f.hotkey then f.hotkey:Hide() end
   for _, badge in pairs(f.badges or {}) do badge:Hide() end
   for _, badge in pairs(f.gradedBadges or {}) do badge:Hide() end
+  -- ⚠ The sealed displays go down with everything else. Their CONTENT is the client's, but the
+  -- container is cap's own frame parented to this row, so a hidden row that left one showing
+  -- would leave a count or an arc floating over nothing. Added 2026-08-22 with V16–V19; before
+  -- them there was one such display in one catalog and the omission never showed.
+  for _, container in pairs(f.channels or {}) do container:Hide() end
 end
 
 --- Arm every graded cue this row declares and has not armed yet. Separate from the aura
@@ -77,7 +82,7 @@ end
 
 local function configure(f, item, declared)
   for _, container in pairs(f.channels) do container:Hide() end
-  f.channelStatus = {}
+  f.channelStatus, f.channelOf = {}, {}
   f.gradedPlans, f.graded, f.gradedStatus = {}, {}, {}
   -- Frames are kept and reused, but a badge belonging to a marker this catalog no longer
   -- declares would never be reached by `graded()` again and would sit lit forever.
@@ -86,14 +91,21 @@ local function configure(f, item, declared)
     -- A readable marker is still evaluated and still reported; the shelf's cue vocabulary has
     -- no drawn form for the two ad-hoc Warlock ones, so nothing is drawn for it.
     local gradedPlan = ns.Channel.GradedPlan(marker)
+    local containerPlan = not gradedPlan and ns.Channel.ContainerPlan(marker, declared)
     if gradedPlan then
       f.gradedPlans[marker.id] = gradedPlan
       -- One instance per MARKER, so a two-band union stacks rather than overwrites. Built here
       -- because the marker set is not known at acquire time; `configure` runs on the bind path,
       -- which `Bind.resolve` refuses to run in combat.
       f.gradedBadges[marker.id] = f.gradedBadges[marker.id] or ns.Paint.Badge(f, marker.cue)
-    elseif not marker.when then
-      local plan = ns.Channel.Plan(marker, declared)
+    -- ⚠ A CONTAINER DISPLAY MAY CARRY A READABLE GATE, and until 2026-08-22 one silently armed
+    -- nothing: this branch tested `not marker.when`, so a marker with both a `when` and a
+    -- `display` fell through to neither path. `Signal` has always computed `verdict.gates` for
+    -- exactly that shape (one secret, many readable gates) and only the graded branch consumed
+    -- it. Now both do — the gate never contributes a cue, it only decides whether the client is
+    -- allowed to paint the sealed one at all.
+    elseif containerPlan or not marker.when then
+      local plan = containerPlan
       local key = plan and (marker.id .. "/" .. plan.spell) or marker.id
       local container = f.channels[key]
       local status
@@ -107,6 +119,7 @@ local function configure(f, item, declared)
         status = "refused"
       end
       f.channelStatus[marker.id] = status or "refused"
+      f.channelOf[marker.id] = f.channels[key]
     end
   end
   armGraded(f, declared)
@@ -143,6 +156,18 @@ end
 --- even against nil, which is why the evaluator answers `ok, value`.
 local function graded(f, verdict)
   local gates = (verdict or {}).gates or {}
+  -- The same gate, applied to the CONTAINER sinks. A container has no alpha cap may write — the
+  -- client owns what it draws — so the gate lands on the container's own `Shown`, which is
+  -- cap's. `gated` is its own status rather than a refusal: nothing failed, the row simply is
+  -- not in the state that licenses the display.
+  -- ⚠ SetShown on EVERY draw, not just on a change: `quiet()` takes the containers down with the
+  -- rest of the row, so a row that comes back has to put them up again. A one-way gate would
+  -- leave the display dark for the rest of the session after the first hidden frame.
+  for id, container in pairs(f.channelOf or {}) do
+    local allowed = gates[id] ~= false
+    container:SetShown(allowed)
+    f.channelStatus[id] = allowed and "armed" or "gated"
+  end
   -- Where a graded badge sits in the flowing stack. It shares its cue's place with the shared
   -- badge of the same key -- two instances of one cue draw stacked on top of each other, which
   -- is what the old fixed slots did too. A graded cue nobody else is wearing goes on the end.

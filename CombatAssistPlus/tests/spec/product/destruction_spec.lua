@@ -31,8 +31,13 @@ describe("product characterization / Destruction pilot", function()
 
   it("authors Backdraft as an independent sealed display", function()
     local marker = cat.entries[1].markers[1]
-    assert.equal("player-aura-stacks", marker.display.kind)
-    assert.equal(2, marker.display.min)
+    assert.equal("sealed-count-bands", marker.display.kind)
+    -- The shape is UNCHANGED by the 2026-08-22 migration off `player-aura-stacks`: silent below
+    -- two, the number at two and above. What changed is whose rule it is — `min = 2` was
+    -- Blizzard's no-formatter default, and this is cap's own breakpoint table saying the same
+    -- thing, which is why the assertion moved from one number to two bands.
+    assert.same({ threshold = 0, draw = "none" }, marker.display.bands[1])
+    assert.same({ threshold = 2, draw = "count" }, marker.display.bands[2])
     assert.is_nil(marker.when)
     assert.same({}, verdict(0, 5).markers)
   end)

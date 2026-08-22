@@ -7,7 +7,7 @@
 local ADDON, ns = ...
 
 ns.LabStyle = {
-  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ The three entries below are FLIGHT-GATED, not look-gated: they draw no cells because what they ask is whether the CLIENT honours a rule cap authored, and Part 7 rule 2 already says a preview cannot answer that. They graduate on `aura-container-rule-formatter` / `aura-container-pandemic-region`, not on being looked at in a browser.",
+  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ These entries ask about ONE fact shape — a secret aura APPLICATION COUNT — and the question has changed under them. It used to be `will the client honour this at all`, which no browser can answer; the 2026-08-21 flight answered it for the formatter, so what is left for `count_band` and `count_polarity` is a LOOK question and they now draw cells. `count_bar` is still a capability question and draws its cells as a PROPOSAL of what would be seen, clearly labelled: it is a source read, not a flight.",
   _sheet = {
     direction = "down",
     duty = 0.5,
@@ -16,62 +16,145 @@ ns.LabStyle = {
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
   },
-  count_band = {
-    anchor = "TOP",
-    asks = "Does a tainted-created NumericRuleFormatter get honoured on SetApplicationCount, so cap can author WHICH stack values show a number — including the complement and a middle band — rather than inheriting Blizzard's show-above-1 default?",
-    bands = {
+  duration_band = {
+    alt_rgb = { 0.95, 0.3, 0.3 },
+    asks = "`SetDurationText` takes a `textFormatter` of type NumericFormatter — the same object the count sink takes — bound to a DurationTextBindingProperty such as RemainingPercent. If a rule formatter is accepted there, every band shape L5 and L6 draw becomes available on a DoT's remaining time, INCLUDING the inversion `AddPandemicRegion` structurally cannot express. What does that cost, and is it worth authoring the threshold the pandemic sink computes for you?",
+    cells = {
       {
-        format = "",
-        threshold = 0,
+        ability = "Immolation Aura",
+        bands = {
+          {
+            format = "%d",
+            threshold = 0,
+          },
+        },
+        caption = "<b>control — the sink's own job</b>. `SetDurationText` normally draws a countdown, and with no rule it is Blizzard's seconds formatter. Everything to the right replaces that text with a rule cap wrote.",
+        place = "centre",
+        remaining_pct = 80,
+        verdict = "below",
       },
       {
-        format = "%d",
-        threshold = 4,
+        ability = "Immolation Aura",
+        bands = {
+          {
+            format = "|A:timer_CW_75:15:15|a",
+            threshold = 0,
+          },
+          {
+            format = "",
+            threshold = 31,
+          },
+        },
+        caption = "<b>the pandemic mark, re-created</b> — a mark only in the last 30 %. Same picture as L3's badge, and ⚠ NOT the same fact: this threshold is cap's guess, where L3's is the client computing `GetRefreshExtendedDuration − GetAuraBaseDuration` per spell.",
+        composited = true,
+        place = "badge",
+        remaining_pct = 20,
+        verdict = "below",
+      },
+      {
+        ability = "Immolation Aura",
+        bands = {
+          {
+            format = "|A:timer_CW_75:15:15|a",
+            threshold = 0,
+          },
+          {
+            format = "",
+            threshold = 31,
+          },
+        },
+        caption = "<b>the same rule, early in the DoT</b> — clear, because 80 % takes the upper band. The pair to its left is the whole of L3's behaviour reproduced out of two breakpoints.",
+        composited = true,
+        place = "badge",
+        remaining_pct = 80,
+        verdict = "below",
+      },
+      {
+        ability = "Immolation Aura",
+        bands = {
+          {
+            format = "",
+            threshold = 0,
+          },
+          {
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t",
+            threshold = 31,
+          },
+        },
+        caption = "<b>THE INVERSION</b> — hatched while there is plenty left, which is `do not refresh yet`. This is the direction `AddPandemicRegion` cannot express at all: it calls `SetShown(inWindow)` with no rule to flip.",
+        place = "badge",
+        remaining_pct = 80,
+        verdict = "below",
+      },
+      {
+        ability = "Immolation Aura",
+        bands = {
+          {
+            format = "",
+            threshold = 0,
+          },
+          {
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t",
+            threshold = 31,
+          },
+        },
+        caption = "<b>the inversion, refreshable</b> — the hatch clears as the DoT enters the last 30 %, so the row becomes a live candidate exactly when refreshing it stops clipping. Read it against the cell to its left.",
+        place = "badge",
+        remaining_pct = 20,
+        verdict = "press",
+      },
+      {
+        ability = "Immolation Aura",
+        alt_hue = true,
+        bands = {
+          {
+            format = "",
+            threshold = 0,
+          },
+          {
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t|A:timer_CW_75:15:15:20:-18|a",
+            threshold = 31,
+          },
+        },
+        caption = "<b>hatch and badge, inverted</b> — two escapes, one band, the second offset onto the corner. Identical machinery to L6's imp shape; the only difference is which sealed number the client feeds the formatter.",
+        composited = true,
+        place = "badge",
+        remaining_pct = 80,
+        verdict = "below",
+      },
+      {
+        ability = "Immolation Aura",
+        bands = {
+          {
+            format = "|A:timer_CW_75:15:15|a",
+            threshold = 0,
+          },
+          {
+            format = "",
+            threshold = 31,
+          },
+          {
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t",
+            threshold = 61,
+          },
+        },
+        caption = "<b>three bands, mid-DoT</b> — hatched above 60 %, SILENT between 30 and 60, marked below 30. The quiet middle is the shape only a band table can draw: neither `do not` nor `now`, which is most of a DoT's life.",
+        composited = true,
+        place = "badge",
+        remaining_pct = 45,
+        verdict = "below",
       },
     },
-    control_band = {
-      {
-        format = "%d",
-        threshold = 0,
-      },
+    draws = "duration",
+    flown = "2026-08-21",
+    form = "S12",
+    pulse = {
+      alpha = { 0.72, 1.00 },
+      duration_s = 1.9,
+      scale = 1.1,
     },
-    draws = "client-only",
-    font = "FRIZQT__.TTF",
-    form = "S7",
-    outline = "OUTLINE",
-    pending_test = "aura-container-rule-formatter",
-    size = 14,
-    y = 1,
-  },
-  count_polarity = {
-    asks = "Can ONE count FontString carry two meanings — a negative band and a positive band in different hues — and if inline colour escapes are stripped, does a cap-shipped symbol font carry the same distinction as a SHAPE instead?",
-    draws = "client-only",
-    escape_bands = {
-      {
-        format = "|cffff4040%d|r",
-        threshold = 0,
-      },
-      {
-        format = "|cff40ff70%d|r",
-        threshold = 6,
-      },
-    },
-    font = "FRIZQT__.TTF",
-    form = "S8",
-    high_rgb = { 0.25, 1.00, 0.44 },
-    low_rgb = { 1.00, 0.25, 0.25 },
-    outline = "OUTLINE",
-    pending_test = "aura-container-rule-formatter",
-    size = 14,
-    static_fallback = "SetTextColor at setup carries ONE hue for the whole string and needs no markup at all; SetApplicationCount adds only Text and Shown, so VertexColor stays cap's.",
-  },
-  pandemic_mark = {
-    alpha = 0.85,
-    asks = "Does AddPandemicRegion drive a cap-owned texture from Blizzard's own refresh window, giving cap real ART out of a sealed fact with no curve and no ruleset to get wrong?",
-    draws = "client-only",
-    form = "S9",
-    note = "The only Part 2 form that reaches cap-owned art without a font trick, and the only one that costs an OnUpdate.",
-    pending_test = "aura-container-pandemic-region",
-    rgb = { 1.00, 0.72, 0.2 },
+    rgb = { 0.45, 0.86, 0.85 },
+    size_px = 15,
+    title = "L7 · duration_band — the same bands, on the DoT's CLOCK instead of a count",
   },
 }

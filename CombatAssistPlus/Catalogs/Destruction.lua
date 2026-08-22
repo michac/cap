@@ -22,8 +22,17 @@ ns.Catalog.Register{
         { tier = "FALLBACK", when = { { "ready", "conflagrate" } } },
       },
       markers = {
+        -- Migrated from `player-aura-stacks` to V16's bands on 2026-08-22. The shape is
+        -- UNCHANGED — silent below two, the number at two and above — but it is now cap's own
+        -- rule rather than Blizzard's no-formatter default, which is the only difference and the
+        -- whole point: `min = 2` was never a ceiling. Destruction's own catalog is not authored
+        -- yet (`specs/backlog.md`), so this is a mechanical migration and not a design change.
         { id = "backdraft", display = {
-          kind = "player-aura-stacks", ability = "backdraft", min = 2,
+          kind = "sealed-count-bands", ability = "backdraft",
+          bands = {
+            { threshold = 0, draw = "none" },
+            { threshold = 2, draw = "count" },
+          },
         } },
       },
     },

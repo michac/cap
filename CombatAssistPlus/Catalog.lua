@@ -27,12 +27,32 @@ local PREDICATES = {
   aoe = { arity = 0 },
 }
 Catalog.PREDICATES = PREDICATES
+-- ⚠ A KIND LISTED HERE WITH NO MATCHING BRANCH IN `Catalog.Check` IS ACCEPTED WITH ZERO FIELD
+-- CHECKS. The list decides whether a display is *known*; the branch is the only thing that
+-- decides whether it is *shaped right*. Add both or neither.
 local DISPLAYS = {
-  ["player-aura-stacks"] = true,
+  ["sealed-count-bands"] = true,
+  ["sealed-count-bar"] = true,
+  ["sealed-refresh-window"] = true,
   ["sealed-power-percent"] = true,
   ["sealed-cooldown-range"] = true,
 }
 Catalog.DISPLAYS = DISPLAYS
+
+-- What ONE band of a `sealed-count-bands` display draws, as meaning rather than as pixels. The
+-- shelf (render-shelf.md V16/V17) owns the art each of these resolves to; a catalog picks from
+-- this list and never writes a format string.
+--   none        — the resting state. The client draws nothing at all for values in this band.
+--   count       — the number, while `how many more` is still the live question.
+--   mark        — one badge, plate and glyph, once `how many more` has stopped being one.
+--   count+mark  — both, which the client accepts in a single band.
+-- `polarity` says which hue the band spends (V5.1: hue carries polarity and only polarity) and
+-- `hatch` adds V11's stripe sheet across the face, which is the row RULED OUT rather than
+-- decorated — the only thing on this list that changes the elimination walk.
+local COUNT_DRAWS = {
+  ["none"] = true, ["count"] = true, ["mark"] = true, ["count+mark"] = true,
+}
+Catalog.COUNT_DRAWS = COUNT_DRAWS
 
 -- The cue vocabulary is the GENERATED shelf's, read at call time rather than copied here:
 -- a second list would let the addon invent a fifth cue that renders nowhere.
@@ -183,13 +203,86 @@ function Catalog.Check(cat)
         if type(display) ~= "table" or not DISPLAYS[display.kind] then
           fail("display", entry.id, "marker " .. tostring(marker.id) .. " names unsupported display "
             .. tostring(type(display) == "table" and display.kind or nil))
-        elseif display.kind == "player-aura-stacks" then
+        elseif display.kind == "sealed-count-bands" then
+          -- render-shelf.md V16/V17. cap authors a piecewise function over the SEALED aura
+          -- application count and hands it to the client, which evaluates it and calls SetText.
+          -- Nothing here is ever read back, so every check is about the AUTHORED table.
+          --
+          -- ⚠ This replaced `player-aura-stacks` and its `min = 2` guard on 2026-08-22. That
+          -- guard was never a platform limit: `applications > 1` is Blizzard's behaviour when no
+          -- formatter is passed, and passing one replaces it outright `[client 2026-08-21]`.
           if not abilities[display.ability] then
             fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
               .. tostring(display.ability))
           end
-          if display.min ~= 2 then
-            fail("display", entry.id, "player-aura-stacks currently supports min = 2")
+          local bands = display.bands
+          if type(bands) ~= "table" or #bands == 0 then
+            fail("display", entry.id, "sealed-count-bands needs a bands list")
+          else
+            local floor
+            for i, band in ipairs(bands) do
+              if type(band) ~= "table" then
+                fail("display", entry.id, "band " .. i .. " is not a table")
+              else
+                if type(band.threshold) ~= "number" or band.threshold < 0
+                  or band.threshold % 1 ~= 0 then
+                  fail("display", entry.id, "band " .. i .. " needs a non-negative whole threshold")
+                elseif floor and band.threshold <= floor then
+                  -- Monotone, because the client picks the HIGHEST threshold a value reaches: an
+                  -- out-of-order or repeated breakpoint makes one band unreachable and the
+                  -- authored table stops describing what draws.
+                  fail("display", entry.id, "bands must rise: threshold " .. band.threshold
+                    .. " does not exceed " .. floor)
+                else
+                  floor = band.threshold
+                end
+                -- ⚠ A BAND NAMES WHAT IT MEANS, NEVER A FORMAT STRING. The client's breakpoint
+                -- takes a `format`, but a format carrying a texture escape is a pixel decision,
+                -- and pixels are render-shelf.md's. `Channel.CountRules` builds the string from
+                -- `ns.Style.count`; a catalog that wrote one directly would put the style in the
+                -- gameplay file where nothing regenerates it.
+                if not COUNT_DRAWS[band.draw] then
+                  fail("display", entry.id, "band " .. i .. " names unsupported draw "
+                    .. tostring(band.draw))
+                end
+                if band.polarity ~= nil and band.polarity ~= "positive"
+                  and band.polarity ~= "negative" then
+                  fail("display", entry.id, "band " .. i .. " polarity must be positive or negative")
+                end
+                if band.hatch ~= nil and type(band.hatch) ~= "boolean" then
+                  fail("display", entry.id, "band " .. i .. " hatch must be boolean")
+                end
+              end
+            end
+            -- The lowest band is the RESTING state and every value below the next threshold
+            -- lands in it. Without one starting at zero the client has no rule for a low count
+            -- and falls back to its own default, which is the behaviour this kind replaced.
+            if type(bands[1]) == "table" and bands[1].threshold ~= 0 then
+              fail("display", entry.id, "the first band must start at threshold 0")
+            end
+          end
+        elseif display.kind == "sealed-count-bar" then
+          -- render-shelf.md V18. The same sealed count as a FILL. `max` is the client's
+          -- `maxApplications`, and it is authored as "the number that matters" rather than as the
+          -- aura's real cap: SetValue clamps, so the threshold becomes `full` and the fired state
+          -- is always the complete shape.
+          if not abilities[display.ability] then
+            fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
+              .. tostring(display.ability))
+          end
+          if type(display.max) ~= "number" or display.max <= 0 or display.max % 1 ~= 0 then
+            fail("display", entry.id, "sealed-count-bar needs a positive whole max")
+          end
+          if display.full ~= nil and type(display.full) ~= "boolean" then
+            fail("display", entry.id, "sealed-count-bar full must be boolean")
+          end
+        elseif display.kind == "sealed-refresh-window" then
+          -- render-shelf.md V19. The one sealed display cap authors NO threshold for: the client
+          -- computes the window itself, per spell. So there is nothing here to validate but the
+          -- subject — which is exactly the property that makes it good.
+          if not abilities[display.ability] then
+            fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
+              .. tostring(display.ability))
           end
         elseif display.kind == "sealed-power-percent" then
           -- The break point is NEVER authored as a percentage: the percentage depends on the
