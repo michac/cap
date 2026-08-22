@@ -56,27 +56,45 @@ describe("engine / channel bands", function()
       { threshold = 6, draw = "none" },
     }
     local fired = out[1].format
-    assert.is_truthy(fired:find("MEDIA\\stripes:56:56", 1, true), fired)
+    assert.is_truthy(fired:find("MEDIA\\stripes_neg:56:56", 1, true), fired)
     -- Placed by `:xoff:yoff` rather than flowed, which is what lets one string say two things.
     assert.is_truthy(fired:find("BADGES\\plate:25:25:20:-18", 1, true), fired)
-    assert.is_truthy(fired:find("BADGES\\glyph:15:15:20:-18", 1, true), fired)
+    assert.is_truthy(fired:find("BADGES\\glyph_neg:15:15:20:-18", 1, true), fired)
     assert.is_truthy(fired:find("%%d"))
     -- And the band above clears ALL of it. A plate cap drew as an ordinary texture could not do
     -- this: only the FontString carries a sink, so the plate has to be named BY the band.
     assert.equal("", out[2].format)
   end)
 
-  it("spends hue on polarity and gives the plate its own, because contrast is not polarity",
+  -- ⚠ THE HUE IS IN THE FILE, and this is a client fact rather than a preference. Measured
+  -- 2026-08-22: a `|cAARRGGBB…|r` escape tints a band's TEXT and leaves an inline `|T…|t` at full
+  -- white. There is no `SetVertexColor` either — the sink owns a FontString and the art inside it
+  -- is named by a path, so there is no texture object to recolour. `capart export count` bakes
+  -- the pair.
+  it("names a pre-tinted crop per polarity, and wraps only the numeral in a colour escape",
     function()
-      local negative = rules{ { threshold = 0, draw = "mark", polarity = "negative" } }[1].format
-      local positive = rules{ { threshold = 0, draw = "mark" } }[1].format
-      assert.is_truthy(negative:find("|cffff0000", 1, true), negative)
-      assert.is_truthy(positive:find("|cffff8000", 1, true), positive)
-      -- The plate is the badge stack's own dark disc in BOTH, at the shelf's own alpha.
-      local plate = ("|c%02x000000"):format(
-        math.floor(ns.Style.badges.plate.alpha * 255 + 0.5))
-      assert.is_truthy(negative:find(plate, 1, true), negative)
-      assert.is_truthy(positive:find(plate, 1, true), positive)
+      local negative = rules{ { threshold = 0, draw = "count+mark", polarity = "negative" } }[1]
+        .format
+      local positive = rules{ { threshold = 0, draw = "count+mark" } }[1].format
+
+      assert.is_truthy(negative:find("glyph_neg", 1, true), negative)
+      assert.is_truthy(positive:find("glyph_pos", 1, true), positive)
+
+      -- The numeral is the one thing a colour escape still reaches, because it is text.
+      assert.is_truthy(negative:find("|cffff0000%d", 1, true), negative)
+      assert.is_truthy(positive:find("|cffff8000%d", 1, true), positive)
+
+      -- ⚠ NO colour escape may wrap an escape. One that did would draw white in the client while
+      -- every preview and every test said otherwise, which is exactly the failure this replaced.
+      for run in negative:gmatch("|c%x%x%x%x%x%x%x%x(.-)|r") do
+        assert.is_falsy(run:find("|T", 1, true), "a colour escape wraps art: " .. run)
+      end
+
+      -- The plate carries no polarity — its job is contrast, and hue carries polarity and only
+      -- polarity (V5.1) — so it is ONE file in both bands rather than a pair.
+      assert.is_truthy(negative:find("BADGES\\plate:", 1, true), negative)
+      assert.is_truthy(positive:find("BADGES\\plate:", 1, true), positive)
+      assert.is_falsy(negative:find("plate_neg", 1, true))
     end)
 
   it("treats the hatch as orthogonal to the mark, so a band can rule a row out silently",

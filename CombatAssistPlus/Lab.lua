@@ -16,6 +16,95 @@ ns.LabStyle = {
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
   },
+  band_budget = {
+    alt_rgb = { 1.00, 0.78, 0.25 },
+    asks = "A band's escapes cost their ADVANCE WIDTH even when offsets displace them [client 2026-08-22], so a 56px hatch plus a corner badge plus a numeral lays out ~96px on a 56px button — it overhangs the neighbour and the numeral slides as the count changes. Something in Implosion's low band has to give. WHICH?",
+    cells = {
+      {
+        ability = "Demon's Bite",
+        bands = {
+          {
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes_neg:56:56|t|A:pawn:15:15:20:-18|a",
+            threshold = 0,
+          },
+          {
+            format = "",
+            threshold = 6,
+          },
+        },
+        caption = "<b>A · one baked 56px crop</b> — hatch and corner badge composited into a SINGLE file, so the run is exactly the icon. No overhang, no motion, and the hue is baked because a colour escape cannot reach art. ⚠ It costs the numeral outright: <em>how many more</em> is unanswerable, and below the threshold that is the live question.",
+        composited = true,
+        place = "badge",
+        stacks = 2,
+        verdict = "below",
+      },
+      {
+        ability = "Demon's Bite",
+        bands = {
+          {
+            format = "|A:pawn:15:15|a%d",
+            threshold = 0,
+          },
+          {
+            format = "",
+            threshold = 6,
+          },
+        },
+        caption = "<b>B · corner badge and numeral, no hatch</b> — a ~40px run, so it still overhangs but far less. The count is back. ⚠ It costs the ELIMINATION: with no hatch the row stops speaking V11's vocabulary, and V17's whole claim was that a sealed fact joins it.",
+        composited = true,
+        place = "badge",
+        stacks = 2,
+        verdict = "below",
+      },
+      {
+        ability = "Demon's Bite",
+        bands = {
+          {
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes_neg:36:36|t%d",
+            threshold = 0,
+          },
+          {
+            format = "",
+            threshold = 6,
+          },
+        },
+        caption = "<b>C · a smaller hatch, plus the numeral</b> — 36px of stripes and a digit fits inside the button. Keeps both statements. ⚠ It costs COVERAGE: the hatch no longer crosses the icon face, so it reads as a mark ON the row rather than a verdict ABOUT it, which is the difference V11 rests on.",
+        place = "badge",
+        stacks = 2,
+        verdict = "below",
+      },
+      {
+        ability = "Demon's Bite",
+        alt_hue = true,
+        bands = {
+          {
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes_neg:56:56|t|A:pawn:15:15:20:-18|a%d",
+            threshold = 0,
+          },
+          {
+            format = "",
+            threshold = 6,
+          },
+        },
+        caption = "<b>D · keep all of it and accept the spill</b> — this is what shipped in v0.12.0 and what the flight photographed: the run overhangs onto the next icon and the numeral slides as the count changes. Drawn here so the thing being rejected is visible rather than described.",
+        composited = true,
+        place = "badge",
+        stacks = 3,
+        verdict = "below",
+      },
+    },
+    draws = "count-glyph",
+    flown = "2026-08-22",
+    form = "S7+S8+S11",
+    pulse = {
+      alpha = { 0.72, 1.00 },
+      duration_s = 1.9,
+      scale = 1.1,
+    },
+    rgb = { 0.95, 0.3, 0.3 },
+    size_px = 15,
+    title = "L9 · band_budget — what a band spends its 56px on, now that the width is real",
+  },
   duration_band = {
     alt_rgb = { 0.95, 0.3, 0.3 },
     asks = "`SetDurationText` takes a `textFormatter` of type NumericFormatter — the same object the count sink takes — bound to a DurationTextBindingProperty such as RemainingPercent. If a rule formatter is accepted there, every band shape L5 and L6 draw becomes available on a DoT's remaining time, INCLUDING the inversion `AddPandemicRegion` structurally cannot express. What does that cost, and is it worth authoring the threshold the pandemic sink computes for you?",

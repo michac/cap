@@ -91,21 +91,43 @@ function Talents.Reader()
   end
 end
 
-local cache
+local cache, deferred
 
 --- Every event on this list is a HINT, never a fact. `cooldown-manager.md` §4 measured
 -- `TRAIT_CONFIG_UPDATED` landing ~4.7 s BEFORE the dependent state settled, so no single event
 -- may be trusted to mean "the answer is now correct". Dropping the cache on all of them, and
 -- re-reading on the next evaluation, is the mitigation that file prescribes.
+---
+--- ⚠ **NOT IN COMBAT, and this is the fix for a measured strobe** `[client 2026-08-22]`. This
+--- module's own premise is that talents cannot change in combat — so a drop taken there can only
+--- force a re-read under restriction, where `C_Traits.GetNodeInfo` may refuse and the answer
+--- becomes UNKNOWN. `SPELLS_CHANGED` fires constantly mid-fight, so the cache was being dropped
+--- and re-read every few frames, and a talent-gated display flipped between shown and hidden at
+--- tick rate. Held through combat and applied on the way out, which is the only window in which
+--- the answer could actually have changed.
 function Talents.Invalidate()
+  if InCombatLockdown and InCombatLockdown() then
+    deferred = true
+    return
+  end
+  deferred = nil
   cache = nil
 end
 
 --- The cached fold. Cheap on a hit, one config read on a miss, and re-derived rather than
 --- patched — there is no partial invalidation because there is no partial change.
+---
+--- ⚠ **A FOLD CARRYING A REFUSAL IS NOT CACHED.** `nil` means the read refused, not "not taken",
+--- and caching one would pin an UNKNOWN for the rest of the fight — every rule the talent gates
+--- withheld, with nothing to say why. An unresolved read costs a few `pcall`s per evaluation and
+--- resolves itself the moment the client will answer.
 function Talents.Get(declared)
   if cache then return cache end
-  cache = Talents.Reduce(declared, Talents.Reader())
+  local fold = Talents.Reduce(declared, Talents.Reader())
+  for _, talent in ipairs(declared or {}) do
+    if fold[talent.id] == nil then return fold end
+  end
+  cache = fold
   return cache
 end
 
@@ -123,7 +145,18 @@ if CreateFrame then
     events:RegisterEvent(event)
   end
   events:RegisterUnitEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
-  events:SetScript("OnEvent", function()
+  -- The one event that is not a hint: leaving combat is when a deferred drop becomes safe to
+  -- take, because it is the first moment the read can succeed AND the first moment the answer
+  -- could have changed.
+  events:RegisterEvent("PLAYER_REGEN_ENABLED")
+  events:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+      if deferred then
+        deferred = nil
+        cache = nil
+      end
+      return
+    end
     Talents.Invalidate()
   end)
 end

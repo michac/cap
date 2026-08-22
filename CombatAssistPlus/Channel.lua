@@ -35,20 +35,27 @@ local function escape(root, name, size, dx, dy)
   return ("|T%s%s:%d:%d%s|t"):format(root, name, size, size, where)
 end
 
---- `|cAARRGGBB…|r` from a shelf triple and an alpha. The hue lives INSIDE the band's format
---- string because that is the only place it can: `SetApplicationCount` seals `Text` and `Shown`
---- and never `VertexColor`, so a per-band colour has nowhere else to go.
+--- `|cAARRGGBB…|r` from a shelf triple. Used for TEXT ONLY.
 ---
---- @verify-ingame whether a colour escape tints an INLINE TEXTURE as well as the text after it.
---- It does for text; the plate below is emitted in its own escape either way, so if it turns out
---- not to, the plate draws white and the fix is one token rather than a redesign.
-local function tint(rgb, body, alpha)
+--- ⚠ **It does not reach art** `[client 2026-08-22]`. A colour escape tints the band's text and
+--- leaves an inline `|T…|t` at full white — measured as an A/B against `SetVertexColor` on the
+--- same stripe sheet, which came out correctly red two icons away. So every mark below names a
+--- **pre-tinted** file and only the numeral is wrapped.
+local function tint(rgb, body)
   if body == "" or not rgb then return body end
-  return ("|c%02x%02x%02x%02x%s|r"):format(
-    math.floor((alpha or 1) * 255 + 0.5),
+  return ("|cff%02x%02x%02x%s|r"):format(
     math.floor(rgb[1] * 255 + 0.5), math.floor(rgb[2] * 255 + 0.5),
     math.floor(rgb[3] * 255 + 0.5), body)
 end
+
+--- The pre-tinted crop for one art and one polarity. The hue is IN THE FILE because there is no
+--- draw-time channel that reaches it: the sink owns a FontString and the art inside it is named
+--- by a path, so there is no texture object to `SetVertexColor` and no escape that recolours one.
+--- `capart export count` generates the pair.
+local function hued(name, polarity)
+  return name .. (polarity == "negative" and "_neg" or "_pos")
+end
+
 
 --- The authored bands as the list `NumericRuleFormatter:SetBreakpoints` wants: one
 --- `{ threshold, format }` per breakpoint, in rising order. Pure — it turns what a catalog MEANT
@@ -96,21 +103,24 @@ function Channel.CountRules(bands, style)
       -- ⚠ A DIFFERENT ROOT. The hatch is V11's own sheet under `Media/`, where the plate and the
       -- mark are badge art under `Media/badges/`. Both names are injected by `capart export lua`
       -- rather than written in the shelf, so a rename cannot leave a band pointing at nothing.
-      body = body .. tint(rgb,
-        escape(style.hatch_root or root, style.hatch, style.hatch_px))
+      body = body .. escape(style.hatch_root or root,
+        hued(style.hatch, band.polarity), style.hatch_px)
     end
     if wantsMark then
       -- The plate goes down first and the glyph over it, both named by THIS band — which is what
       -- makes the whole badge ride the band. A plate cap drew as an ordinary texture would stay
       -- on the row at every value the band blanks (render-shelf.md V16).
+      --
+      -- ⚠ The plate carries NO polarity and is one file rather than a pair: its job is contrast,
+      -- and hue carries polarity and only polarity (V5.1).
       if plate then
-        body = body .. tint(plate.rgb,
-          escape(root, style.plate, style.plate_px,
-            style.plate_offset_px[1], style.plate_offset_px[2]), plate.alpha)
+        body = body .. escape(root, style.plate, style.plate_px,
+          style.plate_offset_px[1], style.plate_offset_px[2])
       end
-      body = body .. tint(rgb, escape(root, style.mark, style.mark_px,
-        style.mark_offset_px[1], style.mark_offset_px[2]))
+      body = body .. escape(root, hued(style.mark, band.polarity), style.mark_px,
+        style.mark_offset_px[1], style.mark_offset_px[2])
     end
+    -- The numeral is the ONE thing a colour escape still reaches, because it is text.
     if wantsCount then body = body .. tint(rgb, "%d") end
 
     out[#out + 1] = { threshold = band.threshold, format = body }
