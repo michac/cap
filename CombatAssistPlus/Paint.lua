@@ -429,6 +429,23 @@ function Paint.Badge(host, key)
     stepEvery(self, count > 1)
   end
 
+  --- Move the badge to its place in the flowing stack. There are no fixed slots — a cue's
+  --- position is a function of how many lower-ranked cues are showing beside it — so Overlay
+  --- calls this on every update rather than once at creation.
+  ---
+  --- ⚠ IT MUST EXIST. `Paint.Badge` returns a plain TABLE, not a frame, so a method Overlay
+  --- calls and Paint does not define is a nil call that takes the whole `paint()` down — every
+  --- badge, edge, hatch and hotkey on every row, not just this one. That is exactly what shipped
+  --- in v0.12.0: the call arrived 2026-08-19 with the flowing stack and stayed invisible because
+  --- the only catalog anyone ran declared no cues, so the loop never reached this branch.
+  ---
+  --- ⚠ `ClearAllPoints` first. `SetPoint` ADDS an anchor rather than replacing one, so a frame
+  --- re-anchored without clearing keeps both and is stretched between them.
+  function badge:SetPoint(point, relativeTo, relativePoint, x, y)
+    slot:ClearAllPoints()
+    slot:SetPoint(point, relativeTo, relativePoint, x, y)
+  end
+
   function badge:Hide()
     slot:Hide()
     if halo then halo:Stop() end
