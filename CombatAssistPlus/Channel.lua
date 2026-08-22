@@ -24,7 +24,7 @@ function Channel.Plan(marker, abilities)
   local rules = Channel.CountRules(display.bands, Channel.BandStyle())
   if not rules then return nil end
   return {
-    kind = display.kind, spell = ability.spell, rules = rules,
+    kind = display.kind, spell = ability.spell, rules = rules, bands = display.bands,
     unit = ability.unit or "player", sink = "SetApplicationCount",
   }
 end
@@ -410,7 +410,17 @@ local function countSink(button, plan, style)
   local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
     and C_StringUtil.CreateNumericRuleFormatter()
   if not formatter then return false end
-  formatter:SetBreakpoints(plan.rules)
+  -- ⚠ THE ESCAPE IS SIZED FROM THE REAL BUTTON, not from the shelf's nominal icon. An inline
+  -- texture carries a literal size in the format string, so a full-icon mark authored at 56 draws
+  -- at 56 on a Cooldown Manager the player has configured to 42 — which is exactly the overhang
+  -- the first flight photographed. The token is the FALLBACK for a width that reads secret.
+  local w = ns.Paint.Extent(button)
+  -- A live `/cap band` size wins over the measurement: the whole point of the instrument is to
+  -- try a number the measurement would not have produced.
+  local nudge = Channel.BandOverride()
+  formatter:SetBreakpoints(
+    Channel.CountRules(plan.bands, Channel.BandStyle(), (nudge and nudge.size) or w)
+    or plan.rules)
   button:SetApplicationCount(count, { formatter = formatter })
 
   -- ⚠ MOTION FOR FREE, GATED ON NOTHING. The sink owns `Text` and `Shown`; the animation channel

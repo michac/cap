@@ -72,6 +72,16 @@ function Paint.StackOffset(index)
   return g.overhang, g.overhang - g.step * (index or 0)
 end
 
+--- The drawn extent of a host, guarded against a secret or unset width. See `extent` below.
+function Paint.Extent(host)
+  local w, h = host:GetWidth(), host:GetHeight()
+  if type(w) ~= "number" or type(h) ~= "number" or issecretvalue(w) or issecretvalue(h)
+    or w <= 0 or h <= 0 then
+    return ns.Style.surfaces.icon_px, ns.Style.surfaces.icon_px
+  end
+  return w, h
+end
+
 --- Which frame of a cue's list is showing, 1-based. REPEAT wraps; BOUNCE plays forward then
 --- back, which is what the animation system's own loop type does.
 function Paint.FrameIndex(count, loop, elapsed, stepSeconds)
@@ -141,6 +151,11 @@ function Paint.Arrival(edge, a)
 end
 
 --- A host's drawn size, falling back to the nominal icon: a CDM item's width can read secret.
+---
+--- ⚠ PUBLIC as `Paint.Extent` since 2026-08-22, because the sealed band needs it too: an inline
+--- texture escape is sized in the string by a literal, so a band's hatch has to be told the
+--- button's REAL width or it draws at the shelf's nominal 56 on whatever the player configured.
+--- Measured in flight: a 56px escape on a 42px icon is where the overhang came from.
 local function extent(host)
   local w, h = host:GetWidth(), host:GetHeight()
   if type(w) ~= "number" or type(h) ~= "number" or issecretvalue(w) or issecretvalue(h)
