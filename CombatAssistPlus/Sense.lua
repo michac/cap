@@ -409,6 +409,48 @@ end
 
 local lastBody
 
+-- ---------------------------------------------------------------------------
+-- The free-Hammer probe (Retribution, 2026-08-22) — RECORDER ONLY
+-- ---------------------------------------------------------------------------
+--
+-- Retribution's APL holds a FREE Hammer of Light until one of three buff-remaining
+-- clips, and presses an ORDINARY one on sight. cap cannot author that rung because it
+-- cannot tell the two apart: `SpellActivationOverlay` carries a single row for Hammer of
+-- Light, so both states raise the same glow
+-- (`specs/retribution/catalog.md` *Open facts* 3).
+--
+-- Two candidate separators are on the table and BOTH are unmeasured. The first — that a
+-- free Hammer glows without transforming its row — was contradicted by direct player
+-- observation on 2026-08-22: the row lights and asks for a cast outside the Wake of Ashes
+-- window. The second is TIMING: an ordinary Hammer transforms the row at the instant Wake
+-- of Ashes goes on cooldown, a free one arrives with that cooldown already running.
+--
+-- So this records the raw material for both, and for hypotheses neither has produced yet.
+-- It DRAWS NOTHING, gates nothing and feeds no predicate — every line below is a write to
+-- the edge stream. Nothing here may grow a branch until the log has been read.
+--
+-- ⚠ The stack count behind the free cast (Light's Deliverance, 60 stacks) is NOT logged and
+-- cannot be: an aura's application count is sealed in combat, which is the whole premise of
+-- the sealed-display work. The player watches it on a Tracked Buff row instead.
+
+local lastIdent = {}
+
+--- One line per change of a row's resolved identity, carrying what it became and whether the
+--- row's OWN cooldown was already running when it happened. The cooldown term is the point:
+--- it is what a timing separator would be built on.
+local function markIdentity(now, id, kind, live, onCooldown)
+  -- A refused read ABSTAINS rather than logging a flip to nil and back. Otherwise a single
+  -- secret tick would bracket every genuine transform with two false ones, and the timing
+  -- this exists to measure is exactly what that would destroy.
+  if kind == nil then return end
+  local key = kind .. "/" .. ns.Capture.Safe(live)
+  local was = lastIdent[id]
+  if was == key then return end
+  lastIdent[id] = key
+  edgeStream:Line(("t%.1f identity %s %s->%s cd:%s"):format(
+    now, id, was or "-", key, tostring(onCooldown)))
+end
+
 local function buildReads()
   local proc, identity, capped, affordable, onCooldown, flags = {}, {}, {}, {}, {}, {}
   local byAbility = (state.reads or {}).byAbility or {}
@@ -430,7 +472,10 @@ local function buildReads()
     -- be able to stick, and a state read cannot — unlike a latch, it has nothing to hold.
     onCooldown[id] = readRowCooldown(item.row.frame)
     flags[#flags + 1] = id .. ":" .. readRowFlags(item.row.frame)
-    if needs.identity then identity[id] = readIdentity(info) end
+    if needs.identity then
+      identity[id] = readIdentity(info)
+      markIdentity(GetTime(), id, identity[id], live, onCooldown[id])
+    end
     if needs.capped then capped[id] = readCapped(live) end
     if needs.affordable then affordable[id] = readAffordable(live) end
   end
@@ -785,6 +830,11 @@ local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+-- The proc glow is delivered by EVENTS and carries the EMPOWERED spell's id — the button
+-- actually pressed, not the aura behind it (`knowledge/addon-dev/cooldown-manager.md` §6).
+-- Recorded, never consulted: `readProc` still polls, and nothing below feeds a predicate.
+events:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+events:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
 events:SetScript("OnEvent", function(_, event, unit, _, spellID)
   local now = GetTime()
 
@@ -810,6 +860,18 @@ events:SetScript("OnEvent", function(_, event, unit, _, spellID)
     state.dark = false
     if state.track and state.bound then seedBaseline() end
     evaluate(now, event, "combat end")
+    return
+  end
+
+  if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW"
+      or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
+    -- The payload arrives in the `unit` position: this handler's signature is shared with
+    -- the unit events above, and these carry a spellID as their first argument.
+    local glowed = unit
+    if plain(glowed) and type(glowed) == "number" then
+      edgeStream:Line(("t%.1f glow:%s spell:%d"):format(
+        now, event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" and "on" or "off", glowed))
+    end
     return
   end
 
