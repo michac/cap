@@ -578,6 +578,17 @@ function Channel.Arm(host, marker, abilities)
     container = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
     container:SetAllPoints(host)
 
+    -- ⚠ AN ELIMINATING MARK DRAWS OVER AN INCLUDING ONE (`render-shelf.md` Part 1). The scan
+    -- edge and this container are siblings on cap's frame and neither declared a level, so the
+    -- client resolved it by creation order and put the edge on top — the row then read as
+    -- in-scan with a hatch scribbled through it, which is the two signals arguing. The hatch is
+    -- the later word, so it takes the higher level. Declared here rather than left to the
+    -- ordering of two unrelated constructors.
+    local okLevel, level = pcall(host.GetFrameLevel, host)
+    if okLevel and type(level) == "number" and not issecretvalue(level) then
+      pcall(container.SetFrameLevel, container, level + 2)
+    end
+
     -- ⚠ A BANDED COUNT TAKES ONE SLOT PER ELEMENT, and that is the whole reason it can draw more
     -- than one mark correctly. Every slot is offered every aura and filters independently
     -- `[T1 src @12.1.0: Blizzard_AuraContainerSlots.lua — UpdateAura, ShouldIncludeAuraInSlot]`,
