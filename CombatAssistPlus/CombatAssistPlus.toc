@@ -33,4 +33,5 @@ Frame.lua
 Window.lua
 StylePanel.lua
 Mode.lua
+Status.lua
 

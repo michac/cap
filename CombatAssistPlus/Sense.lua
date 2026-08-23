@@ -612,6 +612,25 @@ function Sense.CatalogName()
   return state.catalog and state.catalog.name or nil
 end
 
+--- ⚠ WHY CAP IS OR IS NOT DRAWING, as data rather than as a log line. `/cap status` is the only
+--- caller and it exists because the three reasons cap goes dark — not bound, not settled, dark for
+--- the fight — are indistinguishable on screen, and were readable only from a capture file.
+--- Returns the state; it decides nothing and formats nothing.
+function Sense.Health()
+  return {
+    catalog  = state.catalog and state.catalog.name or nil,
+    entries  = state.catalog and #(state.catalog.entries or {}) or 0,
+    bound    = (state.bound and state.bound.abilities) and #state.bound.abilities or 0,
+    settled  = state.settled and true or false,
+    settledBy = state.settledBy,
+    dark     = state.dark and true or false,
+    combat   = state.combat and true or false,
+    edges    = state.edges,
+    refused  = state.refused,
+    hooks    = state.hooks,
+  }
+end
+
 --- The signal verdicts a surface should draw, or nil when cap must draw nothing. The one
 --- place the settle and the dark-for-the-fight rule are enforced, rather than re-derived
 --- once per surface.

@@ -103,7 +103,14 @@ ns.RegisterCommand{ name = "help", order = 99,
 function ns.Dispatch(msg)
   local cmd, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
   cmd = (cmd or ""):lower()
-  if cmd == "" then cmdHelp(); return end
+  -- ⚠ BARE `/cap` ANSWERS THE QUESTION, it does not list commands. The thing a player types by
+  -- reflex when something looks wrong should say whether it is wrong; a command list is what you
+  -- want when you already know it works. `help` is one word away and named on the status block.
+  if cmd == "" then
+    local status = byName["status"]
+    if status then status.handler("") else cmdHelp() end
+    return
+  end
   local c = byName[cmd]
   if c then c.handler(rest); return end
   for _, cand in ipairs(commandsInOrder()) do
