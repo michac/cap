@@ -32,7 +32,9 @@ local state = {
   viewers = 0,
   viewersShown = 0,
   unreadable = 0,
+  unreadableAt = "",
   complete = false,
+  observed = false,
   pending = false,
   pendingReason = nil,
   -- The only thing separating "quiet because nothing needed rebinding" from
@@ -230,6 +232,15 @@ local function resolve(reason)
   local rows, order = {}, {}
   local frames, viewersSeen, unreadable, complete = 0, 0, 0, true
   local viewersShown = 0
+  -- ⚠ `observed` and `complete` are NOT the same claim, and conflating them disabled the whole
+  -- addon on 2026-08-23. `complete` means every frame was understood; `observed` means the sweep
+  -- FINISHED — every viewer answered and there was something to look at. A frame cap cannot map
+  -- to a spell (a trinket, an item, a row from another addon) makes the first false forever,
+  -- because it is never going to become readable. Gating the settle on `complete` therefore meant
+  -- ONE unrecognised row in the player's Cooldown Manager left cap permanently dark, with no
+  -- message, on a roster it had already bound and evaluated correctly.
+  local observed = true
+  local unreadableAt = {}
 
   for _, v in ipairs(VIEWERS) do
     local viewer = _G[v.global]
@@ -242,6 +253,7 @@ local function resolve(reason)
     end
     if not list then
       complete = false
+      observed = false
     else
       viewersSeen = viewersSeen + 1
       for i = 1, #list do
@@ -257,22 +269,26 @@ local function resolve(reason)
             else
               unreadable = unreadable + 1
               complete = false
+              unreadableAt[#unreadableAt + 1] = v.short .. ":" .. i .. ":norow"
             end
           end
         elseif class ~= "empty" then
           unreadable = unreadable + 1
           complete = false
+          unreadableAt[#unreadableAt + 1] = v.short .. ":" .. i .. ":" .. tostring(class)
         end
       end
     end
   end
 
   -- Nothing observed is not the same as nothing there.
-  if frames == 0 then complete = false end
+  if frames == 0 then complete = false; observed = false end
 
   state.rows, state.order = rows, order
   state.frames, state.viewers, state.viewersShown, state.unreadable, state.complete =
     frames, viewersSeen, viewersShown, unreadable, complete
+  state.observed = observed
+  state.unreadableAt = table.concat(unreadableAt, ",")
   state.lastAt, state.lastReason = GetTime(), reason
   state.pending, state.pendingReason = false, nil
   state.deferredLast, state.deferred = state.deferred, 0
@@ -456,7 +472,9 @@ function Bind.Snapshot()
     viewers = state.viewers,
     generation = state.generation,
     complete = state.complete,
+    observed = state.observed,
     unreadable = state.unreadable,
+    unreadableAt = state.unreadableAt,
     pending = state.pending,
     deferredLast = state.deferredLast,
     lastAt = state.lastAt,

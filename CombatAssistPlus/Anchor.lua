@@ -563,6 +563,15 @@ local function authored(rows)
 end
 
 --- What the four viewers currently hold, as plain numbers `Diagnose` can judge.
+--- ⚠ ONE PHRASE, FOR THE LINE CAP SAYS OUT LOUD. The player asked the reasonable question — did
+--- it order the bars — and until 2026-08-23 the only answer lived in a capture file. Deliberately
+--- coarse: `/cap anchor rows` is the detailed readout and this is not a second copy of it.
+function Anchor.Status()
+  if not Anchor.Enabled() then return "off" end
+  if not P.armed then return "on, not applied" end
+  return ("applied to %d row(s)"):format(#P.planned)
+end
+
 function Anchor.Census()
   local v = viewer()
   if not v then return { exists = false, rows = 0 } end

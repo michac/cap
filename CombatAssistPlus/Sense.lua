@@ -708,6 +708,7 @@ local function rebind(generation)
     state.settled = false
     state.settledBy = nil
     state.unsettledAt = GetTime()
+    state.announcedDark = nil
     state.unsettledGen = generation
     tierStream:Mark(("t%.1f # config spec:%s hero:%s catalog:%s"):format(
       GetTime(), token(specID), token(hero), cat and token(cat.name) or "-"))
@@ -784,7 +785,27 @@ end
 --- row set comes back identical and the generation therefore never moves.
 local function trySettle(snapshot, why)
   if state.settled or state.combat or not state.bound then return end
-  if not snapshot.complete then return end
+  -- ⚠ THE GATE IS `observed`, NOT `complete`, and that distinction is the whole point. This read
+  -- `snapshot.complete` until 2026-08-23, which meant a single frame cap could not map to a spell
+  -- — a trinket, an item, another addon's row — held the settle open FOREVER, because such a
+  -- frame never becomes readable. cap then stayed dark on a roster it had already bound and
+  -- evaluated correctly, and said nothing about it. `observed` asks the question the gate was
+  -- always trying to ask: did the sweep FINISH. Rows cap does not understand are reported, and
+  -- they are not a veto.
+  if not snapshot.observed then
+    -- ⚠ AND SILENCE IS NOT AN ACCEPTABLE ANSWER HERE EITHER. If the sweep still has not finished
+    -- once the quiet window has run out, cap is going to stay dark, and the player has no way to
+    -- know that from the screen — a dark overlay and a working one look identical on a row with
+    -- no cue. Said once per session, not per tick.
+    if state.unsettledAt and (GetTime() - state.unsettledAt) >= QUIET_SETTLE
+      and not state.announcedDark and ns.Emit then
+      state.announcedDark = true
+      ns.Emit(("drawing nothing: the Cooldown Manager sweep has not finished "
+        .. "(%s viewer(s) answered, %s frame(s) seen). /cap for detail."):format(
+        num(snapshot.viewers), num(snapshot.frames)))
+    end
+    return
+  end
 
   if why == "SPELLS_CHANGED" and state.unsettledGen and snapshot.generation > state.unsettledGen then
     state.settled, state.settledBy = true, "spells-changed"
@@ -793,8 +814,29 @@ local function trySettle(snapshot, why)
   else
     return
   end
-  tierStream:Mark(("t%.1f # settle by:%s gen:%s"):format(
-    GetTime(), state.settledBy, num(snapshot.generation)))
+  tierStream:Mark(("t%.1f # settle by:%s gen:%s unreadable:%s at:%s"):format(
+    GetTime(), state.settledBy, num(snapshot.generation),
+    num(snapshot.unreadable), snapshot.unreadableAt ~= "" and snapshot.unreadableAt or "-"))
+  Sense.Announce(snapshot)
+end
+
+--- ⚠ THE ONE THING CAP SAYS OUT LOUD, and it exists because a player could not tell a working
+--- overlay from a broken one without reading a capture file. One line, once per settle: what it
+--- bound, whether the authored order was applied, and — named, not counted — any Cooldown Manager
+--- frame it could not read. A row it does not understand is now a REPORT rather than a silent
+--- veto, so the line has to carry it or the degradation is invisible again.
+function Sense.Announce(snapshot)
+  if not ns.Emit then return end
+  local n = (state.bound and state.bound.abilities) and #state.bound.abilities or 0
+  local name = (state.catalog and state.catalog.name) or "no catalog"
+  local order = ns.Anchor and ns.Anchor.Status and ns.Anchor.Status() or nil
+  local parts = { ("%s — %d row(s) augmented"):format(name, n) }
+  if order then parts[#parts + 1] = "order " .. order end
+  if (snapshot.unreadable or 0) > 0 then
+    parts[#parts + 1] = ("%d CDM row(s) cap cannot read (%s) — ignored, not a fault")
+      :format(snapshot.unreadable, snapshot.unreadableAt ~= "" and snapshot.unreadableAt or "?")
+  end
+  ns.Emit(table.concat(parts, " · "))
 end
 
 -- ---------------------------------------------------------------------------
