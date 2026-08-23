@@ -125,11 +125,48 @@ local function configure(f, item, declared)
   armGraded(f, declared)
 end
 
-local function layer(f)
-  if f.layered or InCombatLockdown() then return end
-  f:SetFrameStrata("HIGH")
-  f:SetFrameLevel(4)
-  f.layered = true
+--- How far above its Cooldown Manager item cap's overlay sits. The item's own sub-frames run to
+--- level 520 on some templates *[T1 src @12.1.0: Blizzard_CooldownViewer/CooldownViewer.xml —
+--- CooldownViewerBuffBarItemTemplate, DebuffBorder]*, so the lift is taken from the item's
+--- HIGHEST child rather than from the item, and this is the clearance above that.
+local LIFT = 10
+
+--- Put the overlay in the right BUCKET and the right place inside it.
+---
+--- ⚠ **STRATA IS THE OUTER BUCKET AND FRAME LEVEL NEVER CROSSES IT.** cap used to sit at `HIGH`,
+--- which is one bucket above `MEDIUM` — and `MEDIUM` is where UIParent, the action bars, the
+--- Cooldown Manager and every opened panel live: `PlayerSpellsFrame` (talents) and
+--- `CharacterFrame` both declare `parent="UIParent" toplevel="true"` and **no `frameStrata` at
+--- all** *[T1 src @12.1.0: Blizzard_PlayerSpells/Blizzard_PlayerSpellsFrame.xml,
+--- Blizzard_UIPanels_Game/Mainline/CharacterFrame.xml]*, and the Cooldown Manager's own viewers
+--- set none either *[T1 src @12.1.0: Blizzard_CooldownViewer/CooldownViewer.xml —
+--- CooldownViewerTemplate]*. A panel gets above the bars by calling `Raise()` **within** MEDIUM
+--- *[T1 src @12.1.0: Blizzard_UIParentPanelManager/Shared/UIParentPanelManager.lua —
+--- FramePositionDelegate:UpdateUIPanelPositions]*, never by changing bucket. So an overlay at
+--- HIGH covers the talent window at every frame level, which is the defect.
+---
+--- The precedent is Blizzard's own overlay on a CDM item, which sets **no strata and no level**
+--- and simply parents to the item *[T1 src @12.1.0:
+--- Blizzard_CooldownViewer/CooldownViewerVisualAlertTarget.lua —
+--- CooldownViewerVisualAlertTargetMixin:CheckCreateAlertOverlay]*. cap stays parented to
+--- `UIParent` instead — it must survive the item frame POOL and drive its own visibility — so it
+--- names MEDIUM explicitly and lifts off the item's measured level.
+---
+--- ⚠ `GetFrameLevel` and `GetHighestFrameLevel` can both come back SECRET, so every read is
+--- guarded and an unreadable one falls back to the item's own level, then to zero. Too low is a
+--- visible defect; a crash is not an option.
+local function lift(f, item)
+  f:SetFrameStrata("MEDIUM")
+
+  local base
+  local ok, high = pcall(item.GetHighestFrameLevel, item, true)
+  if ok and type(high) == "number" and not issecretvalue(high) then base = high end
+  if not base then
+    local okLevel, own = pcall(item.GetFrameLevel, item)
+    if okLevel and type(own) == "number" and not issecretvalue(own) then base = own end
+  end
+  f:SetFrameLevel((base or 0) + LIFT)
+  return base
 end
 
 local function anchor(f, cid)
@@ -140,6 +177,19 @@ local function anchor(f, cid)
     f:SetPoint("TOPLEFT", item, "TOPLEFT", 0, 0)
     f:SetPoint("BOTTOMRIGHT", item, "BOTTOMRIGHT", 0, 0)
     f.anchoredTo = item
+    -- Re-lifted on every re-binding, not latched once: the Cooldown Manager pools its item
+    -- frames *[T1 src @12.1.0: Blizzard_CooldownViewer/CooldownViewer.lua — itemFramePool]*, so
+    -- the frame under this overlay can be a different one after a layout pass.
+    local base = lift(f, item)
+    if not Overlay.layerReported then
+      Overlay.layerReported = true
+      -- ⚠ ONE LINE PER SESSION, because the numbers behind this are inferences until a client
+      -- prints them. `strata` is what cap asked for, `base` is what the item measured, and a
+      -- `base` of `-` means both reads came back secret and the lift is resting on the fallback.
+      stream:Mark(("t%.1f # layer strata:%s level:%s base:%s"):format(
+        GetTime(), tostring(f:GetFrameStrata()), tostring(f:GetFrameLevel()),
+        base and tostring(base) or "-"))
+    end
   end
   return item, confirmed
 end
@@ -358,7 +408,6 @@ local function draw(out, bound, edge)
     for marker, status in pairs(f.gradedStatus) do
       channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
     end
-    layer(f)
     local item, ok = anchor(f, cid)
     rows = rows + 1
     if not item then
