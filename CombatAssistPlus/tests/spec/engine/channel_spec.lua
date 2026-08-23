@@ -19,15 +19,18 @@ describe("engine / channel bands", function()
   local ns
   before_each(function() ns = H.fresh() end)
 
-  local function rules(bands)
-    return ns.Channel.CountRules(bands, STYLE)
+  --- One element's breakpoints. Since 2026-08-22 a banded count takes ONE SLOT PER ELEMENT —
+  --- every slot is offered every aura and filters independently — so each mark has its own
+  --- FontString, its own placement and its own band table. `element` is which one.
+  local function rules(bands, element)
+    return ns.Channel.CountRules(bands, STYLE, nil, element or "mark")
   end
 
   it("emits one breakpoint per band, in the order they were authored", function()
-    local out = rules{
+    local out = rules({
       { threshold = 0, draw = "none" },
       { threshold = 2, draw = "count" },
-    }
+    }, "count")
     assert.equal(2, #out)
     assert.equal(0, out[1].threshold)
     assert.equal("", out[1].format)
@@ -47,23 +50,52 @@ describe("engine / channel bands", function()
     assert.is_nil(rules(nil))
   end)
 
-  -- ⚠ THE POINT OF THE WHOLE PRIMITIVE. There is exactly one count FontString per button, so a
-  -- hatch across the face, a plate, a mark on the corner and a numeral all have to come out of
-  -- ONE format string -- and the band above the threshold clears every one of them together.
-  it("puts several placed escapes in one band, and the plate inside it", function()
-    local out = rules{
+  -- ⚠ THE POINT OF THE WHOLE PRIMITIVE, and it CHANGED on 2026-08-22.
+  --
+  -- It used to be "there is one count FontString per button, so everything the count says has to
+  -- come out of one string" — which is true of a BUTTON and false of a SLOT. Every slot is
+  -- offered every aura and filters independently, so a banded count takes one slot per element:
+  -- the hatch, the badge and the numeral each get their own button, their own string and their
+  -- own band table. The ~96px run that overhung the neighbouring icon, and the offset arithmetic
+  -- under it, were consequences of the old reading rather than of the sink.
+  it("splits the marks across one element each, and each carries only its own", function()
+    local bands = {
       { threshold = 0, draw = "count+mark", polarity = "negative", hatch = true },
       { threshold = 6, draw = "none" },
     }
-    local fired = out[1].format
-    assert.is_truthy(fired:find("MEDIA\\stripes_neg:56:56", 1, true), fired)
-    -- Placed by `:xoff:yoff` rather than flowed, which is what lets one string say two things.
-    assert.is_truthy(fired:find("BADGES\\plate:25:25:20:-18", 1, true), fired)
-    assert.is_truthy(fired:find("BADGES\\glyph_neg:15:15:20:-18", 1, true), fired)
-    assert.is_truthy(fired:find("%%d"))
-    -- And the band above clears ALL of it. A plate cap drew as an ordinary texture could not do
-    -- this: only the FontString carries a sink, so the plate has to be named BY the band.
-    assert.equal("", out[2].format)
+    assert.same({ "hatch", "mark", "count" }, ns.Channel.CountElements(bands))
+
+    local hatch = rules(bands, "hatch")[1].format
+    assert.is_truthy(hatch:find("MEDIA\\stripes_neg:", 1, true), hatch)
+    assert.is_falsy(hatch:find("glyph", 1, true), "the hatch element carries the mark")
+    assert.is_falsy(hatch:find("%%d"), "the hatch element carries the numeral")
+
+    local mark = rules(bands, "mark")[1].format
+    assert.is_truthy(mark:find("BADGES\\plate:", 1, true), mark)
+    assert.is_truthy(mark:find("BADGES\\glyph_neg:", 1, true), mark)
+    assert.is_falsy(mark:find("stripes", 1, true), "the mark element carries the hatch")
+
+    local count = rules(bands, "count")[1].format
+    assert.is_truthy(count:find("%%d"))
+    assert.is_falsy(count:find("|T", 1, true), "the numeral element carries art")
+
+    -- ⚠ AND THE UPPER BAND CLEARS EVERY ELEMENT. They are separate strings now, so "they all go
+    -- together" stops being automatic and becomes something to hold: each element's own table
+    -- has to emit nothing above the threshold, or one mark outlives the decision.
+    for _, element in ipairs({ "hatch", "mark", "count" }) do
+      assert.equal("", rules(bands, element)[2].format, element .. " survives its threshold")
+    end
+  end)
+
+  it("asks for a slot only for the elements a table actually draws", function()
+    assert.same({ "hatch" },
+      ns.Channel.CountElements{ { threshold = 0, draw = "none", hatch = true } })
+    assert.same({ "count" }, ns.Channel.CountElements{ { threshold = 0, draw = "count" } })
+    assert.same({ "mark", "count" }, ns.Channel.CountElements{
+      { threshold = 0, draw = "count" }, { threshold = 4, draw = "mark" } })
+    -- A table that draws nothing anywhere needs no slot at all, and `Plan` refuses it: a display
+    -- that arms and renders nothing is `spec.md` §3.2's defect.
+    assert.same({}, ns.Channel.CountElements{ { threshold = 0, draw = "none" } })
   end)
 
   -- ⚠ THE HUE IS IN THE FILE, and this is a client fact rather than a preference. Measured
@@ -80,9 +112,12 @@ describe("engine / channel bands", function()
       assert.is_truthy(negative:find("glyph_neg", 1, true), negative)
       assert.is_truthy(positive:find("glyph_pos", 1, true), positive)
 
-      -- The numeral is the one thing a colour escape still reaches, because it is text.
-      assert.is_truthy(negative:find("|cffff0000%d", 1, true), negative)
-      assert.is_truthy(positive:find("|cffff8000%d", 1, true), positive)
+      -- The numeral is the one thing a colour escape still reaches, because it is text — and it
+      -- lives on its OWN element now, so it is asked for by name rather than expected here.
+      local band = { { threshold = 0, draw = "count+mark", polarity = "negative" } }
+      assert.is_truthy(rules(band, "count")[1].format:find("|cffff0000%d", 1, true))
+      assert.is_truthy(rules({ { threshold = 0, draw = "count" } }, "count")[1].format
+        :find("|cffff8000%d", 1, true))
 
       -- ⚠ NO colour escape may wrap an escape. One that did would draw white in the client while
       -- every preview and every test said otherwise, which is exactly the failure this replaced.
@@ -102,13 +137,14 @@ describe("engine / channel bands", function()
       -- `hatch` says the row is RULED OUT and `draw` says what else the count has to add. They
       -- are separate because a row can be ruled out with nothing to say about the number --
       -- which is the shape Power Siphon wants at two Cores and Implosion does not.
-      local out = rules{ { threshold = 0, draw = "none", polarity = "negative", hatch = true } }
+      local out = rules({ { threshold = 0, draw = "none", polarity = "negative", hatch = true } },
+        "hatch")
       assert.is_truthy(out[1].format:find("stripes", 1, true))
       assert.is_falsy(out[1].format:find("%%d"))
       assert.is_falsy(out[1].format:find("glyph", 1, true))
       -- And an empty format string is the ONLY way this object can say "draw nothing here",
       -- which is what a band with neither says.
-      assert.equal("", rules{ { threshold = 0, draw = "none" } }[1].format)
+      assert.equal("", rules({ { threshold = 0, draw = "none" } }, "hatch")[1].format)
     end)
 
   it("plans the three container sinks apart, and each names its own client object", function()
@@ -124,7 +160,7 @@ describe("engine / channel bands", function()
     assert.equal("SetApplicationCount", count.sink)
     assert.equal(296553, count.spell)
     assert.equal("player", count.unit)
-    assert.equal(2, #count.rules)
+    assert.same({ "hatch", "mark", "count" }, count.elements)
 
     local bar = ns.Channel.ContainerPlan(marker("db_core_charge"), declared)
     assert.equal("SetApplicationBar", bar.sink)

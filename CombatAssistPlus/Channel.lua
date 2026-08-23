@@ -20,11 +20,17 @@ function Channel.Plan(marker, abilities)
       and ability and type(ability.spell) == "number") then
     return nil
   end
-  -- `BandStyle` is the shelf's own table unless `/cap band` is nudging it mid-flight.
-  local rules = Channel.CountRules(display.bands, Channel.BandStyle())
-  if not rules then return nil end
+  -- ⚠ NO RULES ARE BUILT HERE ANY MORE. A banded count takes one slot per element and each
+  -- element's breakpoints are built at arm time, when the button's real width is measurable. What
+  -- the plan does instead is PROVE the table can produce every element it claims — a shape error
+  -- has to refuse the plan, not survive to the point where one slot silently draws nothing.
+  local elements = Channel.CountElements(display.bands)
+  if #elements == 0 then return nil end
+  for _, element in ipairs(elements) do
+    if not Channel.CountRules(display.bands, Channel.BandStyle(), nil, element) then return nil end
+  end
   return {
-    kind = display.kind, spell = ability.spell, rules = rules, bands = display.bands,
+    kind = display.kind, spell = ability.spell, bands = display.bands, elements = elements,
     unit = ability.unit or "player", sink = "SetApplicationCount",
   }
 end
@@ -78,7 +84,7 @@ end
 --- count FontString per button, so a hatch across the face, a plate, a mark on the corner and a
 --- numeral all have to come out of one string — and the band above the threshold clears every
 --- one of them together.
-function Channel.CountRules(bands, style, size)
+function Channel.CountRules(bands, style, size, element)
   style = style or (ns.Style or {}).count
   if not style or type(bands) ~= "table" or #bands == 0 then return nil end
   local root = style.texture_root or ""
@@ -93,49 +99,64 @@ function Channel.CountRules(bands, style, size)
 
     local wantsMark = band.draw == "mark" or band.draw == "count+mark"
     local wantsCount = band.draw == "count" or band.draw == "count+mark"
-    -- Hue carries POLARITY and only polarity (render-shelf.md V5.1), so one band spends one
-    -- colour on everything it says — except the plate, whose job is contrast and which is
-    -- therefore the badge stack's own dark disc in both polarities.
+    -- Hue carries POLARITY and only polarity (render-shelf.md V5.1).
     local rgb = (band.polarity == "negative") and style.low_rgb or style.rgb
     local plate = ns.Style and ns.Style.badges and ns.Style.badges.plate
 
     local body = ""
-    if band.hatch then
-      -- ⚠ A DIFFERENT ROOT. The hatch is V11's own sheet under `Media/`, where the plate and the
-      -- mark are badge art under `Media/badges/`. Both names are injected by `capart export lua`
-      -- rather than written in the shelf, so a rename cannot leave a band pointing at nothing.
-      --
-      -- ⚠ AND AN OFFSET, because an inline texture sits on the TEXT BASELINE rather than in the
-      -- middle of the string's box `[client 2026-08-22]`. A mark as tall as the icon therefore
-      -- rises far above the line it is nominally centred on. `hatch_offset_px` pulls it back down
-      -- onto the button; it is one number and `/cap band` tunes it live.
-      local ox, oy = 0, 0
-      if style.hatch_offset_px then
-        ox, oy = style.hatch_offset_px[1], style.hatch_offset_px[2]
+    if element == "hatch" then
+      if band.hatch then
+        -- ⚠ A DIFFERENT ROOT: V11's sheet lives under `Media/`, the badge art under
+        -- `Media/badges/`. Both names are injected by `capart export lua`.
+        body = escape(style.hatch_root or root, hued(style.hatch, band.polarity),
+          size or style.hatch_px)
       end
-      body = body .. escape(style.hatch_root or root,
-        hued(style.hatch, band.polarity), size or style.hatch_px, ox, oy)
-    end
-    if wantsMark then
-      -- The plate goes down first and the glyph over it, both named by THIS band — which is what
-      -- makes the whole badge ride the band. A plate cap drew as an ordinary texture would stay
-      -- on the row at every value the band blanks (render-shelf.md V16).
-      --
-      -- ⚠ The plate carries NO polarity and is one file rather than a pair: its job is contrast,
-      -- and hue carries polarity and only polarity (V5.1).
-      if plate then
-        body = body .. escape(root, style.plate, style.plate_px,
-          style.plate_offset_px[1], style.plate_offset_px[2])
+    elseif element == "mark" then
+      if wantsMark then
+        -- The plate carries no polarity — its job is contrast, not polarity — so it is one
+        -- pre-tinted file rather than a pair.
+        if plate then body = body .. escape(root, style.plate, style.plate_px) end
+        body = body .. escape(root, hued(style.mark, band.polarity), style.mark_px)
       end
-      body = body .. escape(root, hued(style.mark, band.polarity), style.mark_px,
-        style.mark_offset_px[1], style.mark_offset_px[2])
+    elseif element == "count" then
+      -- The numeral is the ONE thing a colour escape still reaches, because it is text.
+      if wantsCount then body = tint(rgb, "%d") end
+    else
+      return nil
     end
-    -- The numeral is the ONE thing a colour escape still reaches, because it is text.
-    if wantsCount then body = body .. tint(rgb, "%d") end
 
     out[#out + 1] = { threshold = band.threshold, format = body }
   end
   if out[1].threshold ~= 0 then return nil end
+  return out
+end
+
+--- Which elements a band table actually draws, in back-to-front order. One SLOT each.
+---
+--- ⚠ THIS IS THE FIX FOR THE WIDTH PROBLEM, and it is a platform property rather than a trick.
+--- `AuraContainerAuraSlotManagerMixin:UpdateAura` offers **every aura to every slot** — it loops
+--- the whole slot list with no consume, and `hasMatchedFilterString` is never flipped inside the
+--- loop — while `ShouldIncludeAuraInSlot` evaluates each slot's OWN `filterString` and
+--- `candidateFilters` `[T1 src @12.1.0: Blizzard_AuraContainer/Blizzard_AuraContainerSlots.lua —
+--- UpdateAura, ShouldIncludeAuraInSlot]`. So several slots filtered to the same spell each take
+--- it independently, each gets its own button, and each button takes its own count sink.
+---
+--- That means a mark no longer has to share a FontString with the marks beside it: one string
+--- per element, each anchored where that element belongs, each with its own band table. The
+--- ~96px run, the advance-width stacking and the offset arithmetic all go away — they were
+--- consequences of forcing four statements through one string, not of the sink.
+function Channel.CountElements(bands)
+  local wants = {}
+  for _, band in ipairs(bands or {}) do
+    if band.hatch then wants.hatch = true end
+    if band.draw == "mark" or band.draw == "count+mark" then wants.mark = true end
+    if band.draw == "count" or band.draw == "count+mark" then wants.count = true end
+  end
+  local out = {}
+  -- Back to front: the hatch is a statement about the whole icon and the marks sit over it.
+  for _, name in ipairs({ "hatch", "mark", "count" }) do
+    if wants[name] then out[#out + 1] = name end
+  end
   return out
 end
 
@@ -393,40 +414,54 @@ function Channel.GradedAlpha(armed)
   return Channel.PowerAlpha(armed)
 end
 
---- The banded count's FontString (render-shelf.md V16/V17). ⚠ EVERY number is `ns.Style.count`'s
---- — the font, the size, the outline — because `surfaces.count_tile` declares all three and a
---- hardcoded `"Fonts\\FRIZQT__.TTF", 14, "OUTLINE"` here was the style saying one thing and the
---- client drawing another.
-local function countSink(button, plan, style)
+--- ONE element of a banded count: the FontString the sink is handed, placed by cap.
+---
+--- ⚠ EVERY number is `ns.Style.count`'s — font, size, outline — because `surfaces.count_tile`
+--- declares all three and a hardcoded face here was the style saying one thing and the client
+--- drawing another.
+---
+--- ⚠ THE STRING IS ANCHORED TO THE HOST, NOT THE BUTTON. The sink seals `Text` and `Shown` and
+--- nothing else, so placement stays cap's — and anchoring to cap's own row frame means the mark
+--- lands correctly however the container chose to lay its button out. `host` is the row, so a
+--- full-icon mark is sized from it and a corner mark hangs off its corner.
+local function countSink(button, host, plan, style, element)
   local count = button:CreateFontString(nil, "OVERLAY")
   if not count:SetFont("Fonts\\" .. style.font, style.size, style.outline) then
     count:SetFontObject("NumberFontNormal")
   end
-  count:SetPoint("CENTER", button, "CENTER", 0, 0)
   -- The static floor, and it needs no markup: the sink adds `Text` and `Shown` and never
   -- `VertexColor`, so this survives even if a later build starts sanitising escapes.
   count:SetTextColor(style.rgb[1], style.rgb[2], style.rgb[3])
 
+  -- ⚠ Sized in the FONTSTRING'S coordinate space, which is the host's — not screen pixels, and
+  -- not the shelf's nominal icon. `hatch_px` is the fallback for a width that reads secret.
+  local w = ns.Paint.Extent(host)
+  local nudge = Channel.BandOverride()
+  local size = (nudge and nudge.size) or w
+
+  if element == "hatch" then
+    local ox, oy = 0, 0
+    if style.hatch_offset_px then ox, oy = style.hatch_offset_px[1], style.hatch_offset_px[2] end
+    count:SetPoint("CENTER", host, "CENTER", ox, oy)
+  else
+    -- The corner the badge stack owns. `count` sits over `mark` because the plate is the mark's
+    -- and the numeral belongs on it.
+    count:SetPoint("CENTER", host, "TOPRIGHT", ns.Paint.BadgeCentre())
+  end
+
   local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
     and C_StringUtil.CreateNumericRuleFormatter()
   if not formatter then return false end
-  -- ⚠ THE ESCAPE IS SIZED FROM THE REAL BUTTON, not from the shelf's nominal icon. An inline
-  -- texture carries a literal size in the format string, so a full-icon mark authored at 56 draws
-  -- at 56 on a Cooldown Manager the player has configured to 42 — which is exactly the overhang
-  -- the first flight photographed. The token is the FALLBACK for a width that reads secret.
-  local w = ns.Paint.Extent(button)
-  -- A live `/cap band` size wins over the measurement: the whole point of the instrument is to
-  -- try a number the measurement would not have produced.
-  local nudge = Channel.BandOverride()
-  formatter:SetBreakpoints(
-    Channel.CountRules(plan.bands, Channel.BandStyle(), (nudge and nudge.size) or w)
-    or plan.rules)
+  local rules = Channel.CountRules(plan.bands, style, size, element)
+  if not rules then return false end
+  formatter:SetBreakpoints(rules)
   button:SetApplicationCount(count, { formatter = formatter })
 
   -- ⚠ MOTION FOR FREE, GATED ON NOTHING. The sink owns `Text` and `Shown`; the animation channel
   -- is still cap's, so a loop created here and never stopped is INVISIBLE while the band draws
-  -- nothing and the mark arrives already breathing. One motion per region (render-shelf V16).
-  if style.pulse then
+  -- nothing and the mark arrives already breathing. One motion per region — so only the mark
+  -- breathes, never the hatch and never the numeral.
+  if style.pulse and element == "mark" then
     local group = ns.Paint.Breathe(count, style.pulse)
     if group then group:Play() end
   end
@@ -505,25 +540,45 @@ function Channel.Arm(host, marker, abilities)
   if not okLoad then return nil, "refused" end
 
   local container, built
+  local filter = plan.unit == "player" and "HELPFUL" or "HARMFUL"
+  local candidates = {
+    includeSpellIDs = { [plan.spell] = true },
+    isFromPlayerOrPlayerPet = true,
+  }
   local ok = pcall(function()
     container = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
     container:SetAllPoints(host)
-    container:AddAuraSlot(marker.id, plan.unit == "player" and "HELPFUL" or "HARMFUL", {
-      candidateFilters = {
-        includeSpellIDs = { [plan.spell] = true },
-        isFromPlayerOrPlayerPet = true,
-      },
+
+    -- ⚠ A BANDED COUNT TAKES ONE SLOT PER ELEMENT, and that is the whole reason it can draw more
+    -- than one mark correctly. Every slot is offered every aura and filters independently
+    -- `[T1 src @12.1.0: Blizzard_AuraContainerSlots.lua — UpdateAura, ShouldIncludeAuraInSlot]`,
+    -- so the hatch, the badge and the numeral each get their own button, their own FontString and
+    -- their own band table — placed where each belongs instead of flowing out of one string.
+    if plan.kind == "sealed-count-bands" then
+      built = true
+      for _, element in ipairs(Channel.CountElements(plan.bands)) do
+        container:AddAuraSlot(marker.id .. ":" .. element, filter, {
+          candidateFilters = candidates,
+          initializeFrame = function(button)
+            if not countSink(button, host, plan, Channel.BandStyle(), element) then
+              built = false
+            end
+          end,
+        })
+      end
+    else
+    container:AddAuraSlot(marker.id, filter, {
+      candidateFilters = candidates,
       initializeFrame = function(button)
         button:SetAllPoints(container)
-        if plan.kind == "sealed-count-bands" then
-          built = countSink(button, plan, ns.Style.count)
-        elseif plan.kind == "sealed-count-bar" then
+        if plan.kind == "sealed-count-bar" then
           built = barSink(button, plan, ns.Style.arc, ns.Style.badges)
         elseif plan.kind == "sealed-refresh-window" then
           built = windowSink(button, ns.Style.pandemic, ns.Style.badges)
         end
       end,
     })
+    end
     container:SetUnit(plan.unit)
     container:UpdateAllAuras()
   end)

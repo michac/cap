@@ -82,6 +82,14 @@ function Paint.Extent(host)
   return w, h
 end
 
+--- The offset from a host's TOPRIGHT to the CENTRE of the first badge in the stack. `StackOffset`
+--- gives a badge frame's own TOPRIGHT; a FontString centres on a point, so it needs the middle.
+function Paint.BadgeCentre(index)
+  local x, y = Paint.StackOffset(index or 0)
+  local d = Paint.Geometry().diameter
+  return x - d / 2, y - d / 2
+end
+
 --- Which frame of a cue's list is showing, 1-based. REPEAT wraps; BOUNCE plays forward then
 --- back, which is what the animation system's own loop type does.
 function Paint.FrameIndex(count, loop, elapsed, stepSeconds)

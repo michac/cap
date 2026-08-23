@@ -113,15 +113,16 @@ ns.Catalog.Register{
           when = { { "aura", "wild_imp", negate = true } } },
         { id = "implosion_imps_short", display = {
           kind = "sealed-count-bands", ability = "wild_imp",
-          -- ⚠ FLIGHT CONFIGURATION 2026-08-22, deliberately narrowed to ONE variable. The
-          -- declared style (render-shelf.md V16/V17) is `count+mark` here; this draws the HATCH
-          -- ALONE so its geometry can be judged without a badge and a numeral moving beside it.
-          -- Four separate constraints were measured on the multi-escape route in one flight —
-          -- no draw-time tint, advance width, no tiling, baseline anchoring — and tuning three
-          -- marks at once converges on nothing. Part 7's `band_budget` holds the candidate
-          -- resolutions; NONE is adopted, and this is not one of them.
           bands = {
-            { threshold = 0, draw = "none", polarity = "negative", hatch = true },
+            -- The numeral is here and not on the upper band on purpose: `how many more` is a
+            -- live question below six and stops being one at six, so the display stops moving
+            -- the moment the decision has arrived.
+            --
+            -- ⚠ This was narrowed to the hatch alone for one flight on 2026-08-22, while all
+            -- three marks were sharing a single FontString and fighting for its width. They no
+            -- longer are — one slot per element — so the declared style is back and the
+            -- narrowing is history rather than a configuration to remember.
+            { threshold = 0, draw = "count+mark", polarity = "negative", hatch = true },
             { threshold = 6, draw = "none" },
           },
         } },
