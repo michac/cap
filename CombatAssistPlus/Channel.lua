@@ -445,6 +445,11 @@ local function countSink(button, host, plan, style, element)
   -- space, so `host` and `button` disagreeing about size or scale silently rescales every mark —
   -- and that disagreement is invisible in a screenshot and invisible in every other stream.
   -- One line per armed element, at arm time. Nothing reads it.
+  -- ⚠ IN ITS OWN pcall, AND THAT IS NOT BELT-AND-BRACES. This runs inside `initializeFrame`,
+  -- which the caller wraps in ONE pcall around the whole container build — so an error raised
+  -- here does not fail the readout, it fails the ARM, and every banded display on the roster
+  -- silently refuses. A recorder that can break the thing it observes is worse than no recorder.
+  pcall(function()
   if ns.Log and ns.Log.Mark then
     local function n(v)
       if v == nil or issecretvalue(v) or type(v) ~= "number" then return "?" end
@@ -461,6 +466,7 @@ local function countSink(button, host, plan, style, element)
       n(okH and hostW), n(okHh and hostH), n(okHs and hostS),
       n(okBw and btnW), n(okBh and btnH), n(okBs and btnS), n(size)))
   end
+  end)
 
   if element == "hatch" then
     local ox, oy = 0, 0
