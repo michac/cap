@@ -7,7 +7,7 @@
 local ADDON, ns = ...
 
 ns.LabStyle = {
-  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ These entries ask about ONE fact shape — a secret aura APPLICATION COUNT — and the question has changed under them. It used to be `will the client honour this at all`, which no browser can answer; the 2026-08-21 flight answered it for the formatter, so what is left for `count_band` and `count_polarity` is a LOOK question and they now draw cells. `count_bar` is still a capability question and draws its cells as a PROPOSAL of what would be seen, clearly labelled: it is a source read, not a flight.",
+  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ ONE entry since 2026-08-22, and it is the leftover of an eight-entry intake whose other seven were promoted (V16-V19) or deleted. `duration_band` bands a CLOCK rather than a count, which is why no composite needed it and why it did not go with them. Its cells draw the `RemainingPercent` route, which is a SOURCE READ and has never been flown — the flown route (a bare `textFormatter`) gives thresholds in seconds. So every percentage in it is a proposal about a mechanism, clearly labelled, exactly as `count_bar` was before its flight settled it.",
   _sheet = {
     direction = "down",
     duty = 0.5,
