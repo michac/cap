@@ -439,6 +439,29 @@ local function countSink(button, host, plan, style, element)
   local nudge = Channel.BandOverride()
   local size = (nudge and nudge.size) or w
 
+  -- ⚠ GEOMETRY IS RECORDED, NOT ASSUMED. Two flights were spent nudging an offset that no log
+  -- could describe, because nothing wrote down what any of these numbers actually were at the
+  -- moment the sink was built. The escape size literal is read in the FONTSTRING'S coordinate
+  -- space, so `host` and `button` disagreeing about size or scale silently rescales every mark —
+  -- and that disagreement is invisible in a screenshot and invisible in every other stream.
+  -- One line per armed element, at arm time. Nothing reads it.
+  if ns.Log and ns.Log.Mark then
+    local function n(v)
+      if v == nil or issecretvalue(v) or type(v) ~= "number" then return "?" end
+      return ("%.1f"):format(v)
+    end
+    local okH, hostW = pcall(host.GetWidth, host)
+    local okHh, hostH = pcall(host.GetHeight, host)
+    local okHs, hostS = pcall(host.GetEffectiveScale, host)
+    local okBw, btnW = pcall(button.GetWidth, button)
+    local okBh, btnH = pcall(button.GetHeight, button)
+    local okBs, btnS = pcall(button.GetEffectiveScale, button)
+    ns.Log.Mark(("geom %s/%s host:%sx%s hs:%s btn:%sx%s bs:%s size:%s"):format(
+      tostring(plan.spell), tostring(element),
+      n(okH and hostW), n(okHh and hostH), n(okHs and hostS),
+      n(okBw and btnW), n(okBh and btnH), n(okBs and btnS), n(size)))
+  end
+
   if element == "hatch" then
     local ox, oy = 0, 0
     if style.hatch_offset_px then ox, oy = style.hatch_offset_px[1], style.hatch_offset_px[2] end
@@ -560,6 +583,13 @@ function Channel.Arm(host, marker, abilities)
         container:AddAuraSlot(marker.id .. ":" .. element, filter, {
           candidateFilters = candidates,
           initializeFrame = function(button)
+            -- ⚠ THE BUTTON MUST BE THE HOST RECT, and this line was missing until 2026-08-23
+            -- while the single-slot branch below had it. A FontString's escape size literal is
+            -- read in ITS OWN frame's coordinate space, and the size handed to the band table
+            -- is measured off `host` — so a button left at the template's default size read
+            -- that number in a different space and drew the hatch at the wrong scale, which is
+            -- exactly the residual misalignment two flights could not tune away.
+            button:SetAllPoints(container)
             if not countSink(button, host, plan, Channel.BandStyle(), element) then
               built = false
             end

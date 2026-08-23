@@ -76,6 +76,14 @@ function Log.Note(text)
   stream:Mark(("t%.1f # %s"):format(GetTime(), token(text)))
 end
 
+--- A verbatim mark, for a line whose FIELDS are the content. `Note` collapses whitespace so a
+--- caption cannot forge a field boundary; a geometry readout is nothing but field boundaries, so
+--- it needs the other rule. Still flattened by `Capture.Safe`, so it cannot break a line.
+function Log.Mark(text)
+  if not ns.db then return end
+  stream:Mark(("t%.1f # %s"):format(GetTime(), ns.Capture.Safe(text)))
+end
+
 -- ---------------------------------------------------------------------------
 -- The stateful wrapper
 -- ---------------------------------------------------------------------------

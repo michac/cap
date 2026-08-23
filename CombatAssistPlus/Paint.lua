@@ -212,9 +212,11 @@ end
 --- Nothing scales and nothing steps, so the edge cannot draw outside its own rect and cannot
 --- reach a neighbouring row at any row gap.
 ---
---- ⚠ ADD blend, cap's first use: an additive edge reads as a hot line lit over the icon rather
---- than as a painted frame, which is what lets full brightness sit on so restrained an area
---- (`tokens.ready`). SetBlendMode's five values are Tier-1 — frames-textures-animation.md §5.2.
+--- ⚠ The blend mode is a TOKEN (`tokens.ready.blend`), not a constant, and it reads `BLEND`.
+--- It was `ADD` until 2026-08-23, when the edge was observed drawing WHITE on Demonology's
+--- purple roster: additive is destination + source, so this hue saturates red on every pixel and
+--- green and blue on any icon that is not near-black. The declared colour could not reach a pixel
+--- under it. SetBlendMode's five values are Tier-1 — frames-textures-animation.md §5.2.
 function Paint.Border(host)
   local edge = CreateFrame("Frame", nil, host)
   edge:SetPoint("CENTER", host, "CENTER", 0, 0)
@@ -225,7 +227,7 @@ function Paint.Border(host)
   local parts = buildRing(edge, ready.line_px)
   for _, t in ipairs(parts) do
     t:SetColorTexture(ready.rgb[1], ready.rgb[2], ready.rgb[3], ready.alpha)
-    t:SetBlendMode("ADD")
+    t:SetBlendMode(ready.blend or "BLEND")
     t:Show()
   end
 

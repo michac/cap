@@ -254,8 +254,9 @@ ns.Style = {
     tint = "shelf",
   },
   ready = {
-    _comment = "IN THE SCAN. One treatment, no roles, no motion. An icon either participates in the read or it does not; rank comes from row order and elimination, not from a hue ladder. Full brightness on a restrained AREA: additive, so it reads as a hot edge rather than as a wash, and it sits ON the icon rect so it can never bleed into a neighbour at any row gap.",
+    _comment = "IN THE SCAN. One treatment, no roles, no motion. An icon either participates in the read or it does not; rank comes from row order and elimination, not from a hue ladder. Full brightness on a restrained AREA, drawn ON the icon rect so it can never bleed into a neighbour at any row gap. `blend` is NORMAL and that is a correction: under additive the edge could not carry the hue declared right here. Adding rgb(1.00, 0.86, 0.45) to a destination saturates red unconditionally, green above 0.14 and blue above 0.55, so on any icon that is not near-black the line clipped to WHITE — measured on Demonology's purple roster [client 2026-08-23]. The declared colour was not reaching a pixel, so the blend mode gave way rather than the colour.",
     alpha = 1.00,
+    blend = "BLEND",
     line_px = 2,
     rgb = { 1.00, 0.86, 0.45 },
   },
