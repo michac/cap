@@ -2,7 +2,7 @@
 ## Title: Combat Assist Plus
 ## Notes: Combat assistance overlay for Blizzard's Cooldown Manager.
 ## Author: Michael Christiansen
-## Version: 0.12.11
+## Version: 0.12.12
 ## SavedVariables: CombatAssistPlusDB
 ## IconTexture: Interface\ICONS\Ability_Warrior_BattleShout
 
