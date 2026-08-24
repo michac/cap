@@ -36,6 +36,7 @@ function H.fresh()
   H.load(ns, "Catalogs/Demonology.lua")
   H.load(ns, "Catalogs/Destruction.lua")
   H.load(ns, "Catalogs/Havoc.lua")
+  H.load(ns, "Catalogs/Protection.lua")
   H.load(ns, "Catalogs/Retribution.lua")
   return ns
 end

@@ -15,6 +15,7 @@ Catalog.lua
 Catalogs\Demonology.lua
 Catalogs\Destruction.lua
 Catalogs\Havoc.lua
+Catalogs\Protection.lua
 Catalogs\Retribution.lua
 Log.lua
 Signal.lua
