@@ -53,6 +53,7 @@ ns.Style = {
     _comment = "V16/V17. A SEALED aura application count reaching a pixel. cap hands the Cooldown Manager a FontString and a NumericRuleFormatter it AUTHORED; the client evaluates the bands against the secret and calls SetText, and cap never learns which band fired. The sink seals `Text` and `Shown` and nothing else — which is why the hue below is reachable through a static SetTextColor as well as through a band's own escape, and why the FontString's animation channel is still cap's. `threshold` is the MINIMUM input a band applies to, so a value ON a threshold takes the UPPER band.",
     font = "FRIZQT__.TTF",
     hatch = "stripes",
+    hatch_alpha = 0.55,
     hatch_offset_px = { 2, 0 },
     hatch_px = 56,
     hatch_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
@@ -215,7 +216,7 @@ ns.Style = {
     tick_s = 0.025,
   },
   pandemic = {
-    _comment = "V19. The refresh window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge, plate and sprite together, appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively.",
+    _comment = "V19. The pandemic window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge, plate and sprite together, appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively.",
     frame = "timer_CW_75",
     pulse = {
       alpha = { 0.62, 1.00 },

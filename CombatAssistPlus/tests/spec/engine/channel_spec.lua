@@ -60,20 +60,35 @@ describe("engine / channel bands", function()
   -- under it, were consequences of the old reading rather than of the sink.
   it("splits the marks across one element each, and each carries only its own", function()
     local bands = {
-      { threshold = 0, draw = "count+mark", polarity = "negative", hatch = true },
+      { threshold = 0, draw = "count", polarity = "negative", hatch = true },
       { threshold = 6, draw = "none" },
     }
-    assert.same({ "hatch", "mark", "count" }, ns.Channel.CountElements(bands))
+    assert.same({ "hatch", "count" }, ns.Channel.CountElements(bands))
+
+    -- `count` and `mark` are EXCLUSIVE, so a band asking for one never yields the other's slot.
+    assert.same({ "hatch", "mark" }, ns.Channel.CountElements({
+      { threshold = 0, draw = "mark", polarity = "negative", hatch = true },
+      { threshold = 6, draw = "none" },
+    }))
 
     local hatch = rules(bands, "hatch")[1].format
     assert.is_truthy(hatch:find("MEDIA\\stripes_neg:", 1, true), hatch)
     assert.is_falsy(hatch:find("glyph", 1, true), "the hatch element carries the mark")
     assert.is_falsy(hatch:find("%%d"), "the hatch element carries the numeral")
 
-    local mark = rules(bands, "mark")[1].format
+    -- `bands` asks for the numeral, so the MARK element emits nothing at all: the two are
+    -- exclusive and this is the shape of that. The mark's own art is covered by the polarity
+    -- case below, which asks for a mark band.
+    assert.equal("", rules(bands, "mark")[1].format)
+
+    local markBands = { { threshold = 0, draw = "mark", polarity = "negative", hatch = true },
+                        { threshold = 6, draw = "none" } }
+    local mark = rules(markBands, "mark")[1].format
     assert.is_truthy(mark:find("BADGES\\plate:", 1, true), mark)
     assert.is_truthy(mark:find("BADGES\\glyph_neg:", 1, true), mark)
     assert.is_falsy(mark:find("stripes", 1, true), "the mark element carries the hatch")
+    assert.equal("", rules(markBands, "count")[1].format,
+      "a mark band emits a numeral as well")
 
     local count = rules(bands, "count")[1].format
     assert.is_truthy(count:find("%%d"))
@@ -82,7 +97,7 @@ describe("engine / channel bands", function()
     -- ⚠ AND THE UPPER BAND CLEARS EVERY ELEMENT. They are separate strings now, so "they all go
     -- together" stops being automatic and becomes something to hold: each element's own table
     -- has to emit nothing above the threshold, or one mark outlives the decision.
-    for _, element in ipairs({ "hatch", "mark", "count" }) do
+    for _, element in ipairs({ "hatch", "count" }) do
       assert.equal("", rules(bands, element)[2].format, element .. " survives its threshold")
     end
   end)
@@ -105,16 +120,17 @@ describe("engine / channel bands", function()
   -- the pair.
   it("names a pre-tinted crop per polarity, and wraps only the numeral in a colour escape",
     function()
-      local negative = rules{ { threshold = 0, draw = "count+mark", polarity = "negative" } }[1]
-        .format
-      local positive = rules{ { threshold = 0, draw = "count+mark" } }[1].format
+      -- The MARK is the element that names a crop, so both polarities are asked for as marks.
+      local negative = rules({ { threshold = 0, draw = "mark", polarity = "negative" } },
+        "mark")[1].format
+      local positive = rules({ { threshold = 0, draw = "mark" } }, "mark")[1].format
 
       assert.is_truthy(negative:find("glyph_neg", 1, true), negative)
       assert.is_truthy(positive:find("glyph_pos", 1, true), positive)
 
       -- The numeral is the one thing a colour escape still reaches, because it is text — and it
       -- lives on its OWN element now, so it is asked for by name rather than expected here.
-      local band = { { threshold = 0, draw = "count+mark", polarity = "negative" } }
+      local band = { { threshold = 0, draw = "count", polarity = "negative" } }
       assert.is_truthy(rules(band, "count")[1].format:find("|cffff0000%d", 1, true))
       assert.is_truthy(rules({ { threshold = 0, draw = "count" } }, "count")[1].format
         :find("|cffff8000%d", 1, true))
@@ -160,13 +176,13 @@ describe("engine / channel bands", function()
     assert.equal("SetApplicationCount", count.sink)
     assert.equal(296553, count.spell)
     assert.equal("player", count.unit)
-    assert.same({ "hatch", "mark", "count" }, count.elements)
+    assert.same({ "hatch", "count" }, count.elements)
 
     local bar = ns.Channel.ContainerPlan(marker("db_core_charge"), declared)
     assert.equal("SetApplicationBar", bar.sink)
     assert.equal(4, bar.max)
 
-    -- The refresh window is the one sink whose PREDICATE is the client's, so its plan carries no
+    -- The pandemic window is the one sink whose PREDICATE is the client's, so its plan carries no
     -- threshold of any kind -- and the unit comes from the ability, because Doom is a debuff.
     local window = ns.Channel.ContainerPlan(marker("db_doom_window"), declared)
     assert.equal("AddPandemicRegion", window.sink)

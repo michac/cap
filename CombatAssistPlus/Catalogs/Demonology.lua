@@ -118,11 +118,10 @@ ns.Catalog.Register{
             -- live question below six and stops being one at six, so the display stops moving
             -- the moment the decision has arrived.
             --
-            -- ⚠ This was narrowed to the hatch alone for one flight on 2026-08-22, while all
-            -- three marks were sharing a single FontString and fighting for its width. They no
-            -- longer are — one slot per element — so the declared style is back and the
-            -- narrowing is history rather than a configuration to remember.
-            { threshold = 0, draw = "count+mark", polarity = "negative", hatch = true },
+            -- The NUMERAL, not the mark: `how many more` is exactly the live question below
+            -- six, and the hatch beside it already carries `ruled out`. A mark here would say
+            -- the hatch's thing twice and the count's thing not at all.
+            { threshold = 0, draw = "count", polarity = "negative", hatch = true },
             { threshold = 6, draw = "none" },
           },
         } },
@@ -170,14 +169,14 @@ ns.Catalog.Register{
         { id = "db_core_charge", display = {
           kind = "sealed-count-bar", ability = "demonic_core", max = 4, full = true,
         } },
-        -- V19 · Doom's refresh window, on the button that applies it. cap authors NO threshold:
+        -- V19 · Doom's pandemic window, on the button that applies it. cap authors NO threshold:
         -- the client computes `GetRefreshExtendedDuration - GetAuraBaseDuration` per spell.
         --
         -- ⚠ GATED on the talent, and this is the readable-gate seam: without Doom talented the
         -- fact does not exist, and a display armed for it would sit dark forever with no way to
         -- tell that from a client refusal.
         { id = "db_doom_window", when = { { "talent", "doom" } },
-          display = { kind = "sealed-refresh-window", ability = "doom" } },
+          display = { kind = "sealed-pandemic", ability = "doom" } },
       } },
     -- 9 · Shadow Bolt / Infernal Bolt. TWO BANDS, identity first, because the first band whose
     -- condition holds wins: while row 9 is displaying Infernal Bolt it is the best builder in

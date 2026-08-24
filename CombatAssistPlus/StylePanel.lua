@@ -1074,21 +1074,23 @@ local function buildSealed()
   }
   countCell("1 · quiet", plain, 1)
   countCell("2 · ruled out", plain, 2)
-  -- The COMPLEMENT: drawn below the threshold, cleared at it. Four marks out of one string.
+  -- The COMPLEMENT: drawn below the threshold, cleared at it. The hatch says ruled out and the
+  -- numeral says how far below — one element each, on their own slots.
   local complement = {
-    { threshold = 0, draw = "count+mark", polarity = "negative", hatch = true },
+    { threshold = 0, draw = "count", polarity = "negative", hatch = true },
     { threshold = 6, draw = "none" },
   }
   countCell("3 · below", complement, 3)
   countCell("6 · clear", complement, 6)
-  countCell("4 · positive", { { threshold = 0, draw = "count+mark" } }, 4)
+  countCell("4 · positive", { { threshold = 0, draw = "mark" } }, 4)
 
   y = y + icon() + CAPTION_H + 6
-  note("One FontString per button carries everything a sealed count says — the hatch, the plate, " ..
-       "the mark and the number — and the band above the threshold clears all of it together. " ..
+  note("One SLOT per element — the hatch across the face, the mark or the numeral on the corner " ..
+       "— each its own FontString with its own band table, and the band above the threshold " ..
+       "clears them together. A band draws the mark or the number, never both. " ..
        "The VALUES here are the gallery's; in the client cap never learns which band fired.")
 
-  section("V18 · sealed radial  ·  V19 · refresh window")
+  section("V18 · sealed radial  ·  V19 · pandemic window")
   x = PAD
   local A, g = ns.Style.arc, ns.Paint.Geometry()
   for _, at in ipairs({ 0, 2, 4 }) do

@@ -134,9 +134,9 @@ describe("product characterization / Demonology", function()
     assert.is_true(cores.bands[2].hatch)
   end)
 
-  it("gates the refresh window on the talent that makes its fact exist", function()
+  it("gates the pandemic window on the talent that makes its fact exist", function()
     local doom = marker("db_doom_window")
-    assert.equal("sealed-refresh-window", doom.display.kind)
+    assert.equal("sealed-pandemic", doom.display.kind)
     assert.same({ { "talent", "doom" } }, doom.when)
     -- A gate never contributes a cue: it only decides whether the client may paint the sealed
     -- display at all, which is why it lands in `gates` and not in `markers`.

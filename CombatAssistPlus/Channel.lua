@@ -97,8 +97,8 @@ function Channel.CountRules(bands, style, size, element)
     if floor and band.threshold <= floor then return nil end
     floor = band.threshold
 
-    local wantsMark = band.draw == "mark" or band.draw == "count+mark"
-    local wantsCount = band.draw == "count" or band.draw == "count+mark"
+    local wantsMark = band.draw == "mark"
+    local wantsCount = band.draw == "count"
     -- Hue carries POLARITY and only polarity (render-shelf.md V5.1).
     local rgb = (band.polarity == "negative") and style.low_rgb or style.rgb
     local plate = ns.Style and ns.Style.badges and ns.Style.badges.plate
@@ -149,8 +149,8 @@ function Channel.CountElements(bands)
   local wants = {}
   for _, band in ipairs(bands or {}) do
     if band.hatch then wants.hatch = true end
-    if band.draw == "mark" or band.draw == "count+mark" then wants.mark = true end
-    if band.draw == "count" or band.draw == "count+mark" then wants.count = true end
+    if band.draw == "mark" then wants.mark = true end
+    if band.draw == "count" then wants.count = true end
   end
   local out = {}
   -- Back to front: the hatch is a statement about the whole icon and the marks sit over it.
@@ -183,7 +183,7 @@ end
 function Channel.WindowPlan(marker, abilities)
   local display = marker and marker.display
   local ability = display and abilities and abilities[display.ability]
-  if not (display and display.kind == "sealed-refresh-window"
+  if not (display and display.kind == "sealed-pandemic"
       and ability and type(ability.spell) == "number") then
     return nil
   end
@@ -522,7 +522,7 @@ local function barSink(button, plan, style, badges)
   return true
 end
 
---- The refresh window (render-shelf.md V19). A FRAME, not a texture, because the client seals its
+--- The pandemic window (render-shelf.md V19). A FRAME, not a texture, because the client seals its
 --- `Shown` and nothing else — so plate and glyph parented under it appear and vanish together on
 --- Blizzard's own window, with cap authoring no threshold at all.
 local function windowSink(button, style, badges)
@@ -620,7 +620,7 @@ function Channel.Arm(host, marker, abilities)
         button:SetAllPoints(container)
         if plan.kind == "sealed-count-bar" then
           built = barSink(button, plan, ns.Style.arc, ns.Style.badges)
-        elseif plan.kind == "sealed-refresh-window" then
+        elseif plan.kind == "sealed-pandemic" then
           built = windowSink(button, ns.Style.pandemic, ns.Style.badges)
         end
       end,

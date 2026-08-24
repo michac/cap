@@ -272,7 +272,7 @@ describe("engine / catalog", function()
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
   end)
 
-  it("validates the sealed radial and the refresh window against their one field each", function()
+  it("validates the sealed radial and the pandemic window against their one field each", function()
     local demo = H.catalogBySpec(ns, 266)
     assert.same({}, ns.Catalog.Check(demo))
 
@@ -294,7 +294,7 @@ describe("engine / catalog", function()
     marker(broken, "db_core_charge").display.max = nil
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
 
-    -- The refresh window has NO threshold to get wrong -- the client computes the window
+    -- The pandemic window has NO threshold to get wrong -- the client computes the window
     -- itself, per spell -- so its subject is the whole of what there is to check.
     broken = H.copy(demo)
     marker(broken, "db_doom_window").display.ability = "missing"
@@ -312,5 +312,19 @@ describe("engine / catalog", function()
     assert.is_nil(resolved.byAbility.backdraft)
     assert.is_not_nil(resolved.declared.backdraft)
     assert.same({}, resolved.dropped)
+  end)
+
+  -- ⚠ Until 2026-08-23 NOTHING iterated the registry: a malformed catalog could be registered,
+  -- ship, and never fail a test, because every existing check ran against a fixture or against
+  -- one hand-named roster. `Check` is the schema, so running it over what is actually registered
+  -- is the gate — and it covers the next catalog the day it is added, not the day someone
+  -- remembers to write it a product spec.
+  it("validates every catalog the addon actually registers", function()
+    local all = ns.Catalog.All()
+    assert.is_true(#all > 1, "the registry did not load")
+    for _, registered in ipairs(all) do
+      assert.same({}, ns.Catalog.Check(registered),
+        ("catalog spec %s is malformed"):format(tostring(registered.spec)))
+    end
   end)
 end)

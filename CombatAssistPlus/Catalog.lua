@@ -33,7 +33,7 @@ Catalog.PREDICATES = PREDICATES
 local DISPLAYS = {
   ["sealed-count-bands"] = true,
   ["sealed-count-bar"] = true,
-  ["sealed-refresh-window"] = true,
+  ["sealed-pandemic"] = true,
   ["sealed-power-percent"] = true,
   ["sealed-cooldown-range"] = true,
 }
@@ -45,12 +45,15 @@ Catalog.DISPLAYS = DISPLAYS
 --   none        — the resting state. The client draws nothing at all for values in this band.
 --   count       — the number, while `how many more` is still the live question.
 --   mark        — one badge, plate and glyph, once `how many more` has stopped being one.
---   count+mark  — both, which the client accepts in a single band.
+-- `count` and `mark` are EXCLUSIVE. The client accepts both from one band and draws the numeral
+-- on top of the glyph, in the same hue, on the same corner — a digit over a symbol, which reads
+-- as a fault rather than as a statement. There is no offset that separates them without spending
+-- a second corner the badge stack already wants.
 -- `polarity` says which hue the band spends (V5.1: hue carries polarity and only polarity) and
 -- `hatch` adds V11's stripe sheet across the face, which is the row RULED OUT rather than
 -- decorated — the only thing on this list that changes the elimination walk.
 local COUNT_DRAWS = {
-  ["none"] = true, ["count"] = true, ["mark"] = true, ["count+mark"] = true,
+  ["none"] = true, ["count"] = true, ["mark"] = true,
 }
 Catalog.COUNT_DRAWS = COUNT_DRAWS
 
@@ -276,7 +279,7 @@ function Catalog.Check(cat)
           if display.full ~= nil and type(display.full) ~= "boolean" then
             fail("display", entry.id, "sealed-count-bar full must be boolean")
           end
-        elseif display.kind == "sealed-refresh-window" then
+        elseif display.kind == "sealed-pandemic" then
           -- render-shelf.md V19. The one sealed display cap authors NO threshold for: the client
           -- computes the window itself, per spell. So there is nothing here to validate but the
           -- subject — which is exactly the property that makes it good.
