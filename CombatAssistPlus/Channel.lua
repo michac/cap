@@ -103,6 +103,11 @@ function Channel.CountRules(bands, style, size, element)
     local rgb = (band.polarity == "negative") and style.low_rgb or style.rgb
     local plate = ns.Style and ns.Style.badges and ns.Style.badges.plate
 
+    -- A hatch means RULED OUT, so it is legal on a NEGATIVE band only (render-shelf.md V16):
+    -- a positive band hatching the face is a contradiction wearing pixels, refused rather
+    -- than drawn.
+    if band.hatch and band.polarity ~= "negative" then return nil end
+
     local body = ""
     if element == "hatch" then
       if band.hatch then
@@ -118,6 +123,11 @@ function Channel.CountRules(bands, style, size, element)
         if plate then body = body .. escape(root, style.plate, style.plate_px) end
         body = body .. escape(root, hued(style.mark, band.polarity), style.mark_px)
       end
+    elseif element == "plate" then
+      -- The numeral's plate, as its OWN element with the numeral's thresholds: a plate escape
+      -- cannot sit under text within one string (the first escape flows, a later one paints
+      -- over), so it rides its own slot, built before the numeral's (render-shelf.md V16).
+      if wantsCount and plate then body = escape(root, style.plate, style.plate_px) end
     elseif element == "count" then
       -- The numeral is the ONE thing a colour escape still reaches, because it is text.
       if wantsCount then body = tint(rgb, "%d") end
@@ -129,6 +139,19 @@ function Channel.CountRules(bands, style, size, element)
   end
   if out[1].threshold ~= 0 then return nil end
   return out
+end
+
+--- V18's whole-bar flip as a band table: blank below max, the full-width pre-tinted red crop
+--- at and above it. Pure, like `CountRules`, and for the same reason — a test hands it a table.
+--- ⚠ The escape's two size literals are HEIGHT then WIDTH; every other escape in this file is
+--- square so the order never showed. `w` is the host extent, `style.height_px` the bar's.
+function Channel.BarFlipRules(max, style, w)
+  if type(max) ~= "number" or max <= 0 then return nil end
+  style = style or (ns.Style or {}).bar
+  if not (style and style.full_texture and type(w) == "number" and w > 0) then return nil end
+  local crop = ("|T%s%s:%d:%d|t"):format(style.texture_root or "", style.full_texture,
+    style.height_px, w)
+  return { { threshold = 0, format = "" }, { threshold = max, format = crop } }
 end
 
 --- Which elements a band table actually draws, in back-to-front order. One SLOT each.
@@ -150,11 +173,12 @@ function Channel.CountElements(bands)
   for _, band in ipairs(bands or {}) do
     if band.hatch then wants.hatch = true end
     if band.draw == "mark" then wants.mark = true end
-    if band.draw == "count" then wants.count = true end
+    if band.draw == "count" then wants.count, wants.plate = true, true end
   end
   local out = {}
-  -- Back to front: the hatch is a statement about the whole icon and the marks sit over it.
-  for _, name in ipairs({ "hatch", "mark", "count" }) do
+  -- Back to front: the hatch is a statement about the whole icon, the numeral's plate sits
+  -- over it, and the marks sit over both — the digit lands ON its plate (render-shelf.md V16).
+  for _, name in ipairs({ "hatch", "plate", "mark", "count" }) do
     if wants[name] then out[#out + 1] = name end
   end
   return out
@@ -187,8 +211,16 @@ function Channel.WindowPlan(marker, abilities)
       and ability and type(ability.spell) == "number") then
     return nil
   end
+  -- `outside_s` is the OPTIONAL other half of the pair (render-shelf.md V19): remaining
+  -- seconds at or above it wear the gold do-not-refresh hatch. It is the catalog's own number
+  -- — the window itself stays the client's — and a malformed one refuses the plan rather than
+  -- arming half a display.
+  if display.outside_s ~= nil
+    and (type(display.outside_s) ~= "number" or display.outside_s <= 0) then
+    return nil
+  end
   return {
-    kind = display.kind, spell = ability.spell,
+    kind = display.kind, spell = ability.spell, outside_s = display.outside_s,
     unit = ability.unit or "player", sink = "AddPandemicRegion",
   }
 end
@@ -497,14 +529,16 @@ local function countSink(button, host, plan, style, element)
   return true
 end
 
---- The sealed radial (render-shelf.md V18). Only `BarValue` is sealed — the aspect goes on the
---- value, not the widget — so the texture, the size, the render mode and the colour below are
---- ordinary setup calls the client never touches.
-local function barSink(button, plan, style, badges)
+--- The segmented bar (render-shelf.md V18). Only `BarValue` is sealed — the aspect goes on the
+--- value, not the widget — so the size, the colours and the segment ticks below are ordinary
+--- setup calls the client never touches. It sits on the HOST's bottom edge, the one surface
+--- nothing else on a cap row claims; the whole-bar red flip at full is `flipSink`'s, on a slot
+--- of its own.
+local function barSink(button, host, plan, style)
   local bar = CreateFrame("StatusBar", nil, button)
-  local d = (badges.diameter_pct / 100) * ns.Style.surfaces.icon_px - 2 * style.inset_px
-  bar:SetSize(d, d)
-  bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(0))
+  bar:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, 0)
+  bar:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+  bar:SetHeight(style.height_px)
 
   local track = bar:CreateTexture(nil, "BACKGROUND")
   track:SetAllPoints(bar)
@@ -513,12 +547,73 @@ local function barSink(button, plan, style, badges)
   local fill = bar:CreateTexture(nil, "ARTWORK")
   fill:SetColorTexture(style.rgb[1], style.rgb[2], style.rgb[3], style.alpha)
   bar:SetStatusBarTexture(fill)
-  -- A client without the render mode gets the linear fill rather than nothing at all: the value
-  -- is the fact, and the circle is how it is drawn.
-  if bar.SetRenderMode and Enum and Enum.StatusBarRenderMode then
-    pcall(bar.SetRenderMode, bar, Enum.StatusBarRenderMode.Radial)
+  -- The segment grid: one tick per application boundary, cap's own track art over the fill,
+  -- so a half bar reads as 2 of 4 rather than as "some".
+  local w = ns.Paint.Extent(host)
+  for i = 1, plan.max - 1 do
+    local seg = bar:CreateTexture(nil, "OVERLAY")
+    seg:SetColorTexture(style.track_rgb[1], style.track_rgb[2], style.track_rgb[3],
+      style.track_alpha)
+    seg:SetSize(style.seg_px or 1, style.height_px)
+    seg:SetPoint("LEFT", bar, "LEFT", w * i / plan.max, 0)
   end
   button:SetApplicationBar(bar, { maxApplications = plan.max })
+  return true
+end
+
+--- The whole-bar flip: at full stacks the bar turns the negative red as a warning that procs
+--- are about to be wasted. Not the fill recolouring — the value is sealed — but a count band
+--- (V16's machinery) drawing the full-width pre-tinted crop at threshold = max, on a slot of
+--- its own, anchored over the bar.
+local function flipSink(button, host, plan, style)
+  local fs = button:CreateFontString(nil, "OVERLAY")
+  local face = ns.Style.count
+  if not fs:SetFont("Fonts\\" .. face.font, face.size, face.outline) then
+    fs:SetFontObject("NumberFontNormal")
+  end
+  fs:SetPoint("BOTTOM", host, "BOTTOM", 0, 0)
+
+  local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+    and C_StringUtil.CreateNumericRuleFormatter()
+  if not formatter then return false end
+  local rules = Channel.BarFlipRules(plan.max, style, ns.Paint.Extent(host))
+  if not rules then return false end
+  formatter:SetBreakpoints(rules)
+  button:SetApplicationCount(fs, { formatter = formatter })
+  return true
+end
+
+--- The pandemic pair's OTHER state (render-shelf.md V19): a gold hatch across the face while
+--- the DoT is OUTSIDE its refresh window — "do not refresh yet". The pandemic sink cannot be
+--- inverted (`ApplyPandemicRegions` calls `SetShown(inWindow)` with no flip), so this rides
+--- `SetDurationText` band tables on the aura's remaining SECONDS instead.
+--- ⚠ The threshold is therefore the CATALOG's number, not Blizzard's window: the client
+--- computes the badge's edge and cap authors this one, and the two can disagree near the
+--- boundary. The shelf carries that caveat; this just draws it.
+local function outsideSink(button, host, plan)
+  local style = ns.Style.count
+  local fs = button:CreateFontString(nil, "OVERLAY")
+  if not fs:SetFont("Fonts\\" .. style.font, style.size, style.outline) then
+    fs:SetFontObject("NumberFontNormal")
+  end
+  local w = ns.Paint.Extent(host)
+  local ox, oy = 0, 0
+  if style.hatch_offset_px then ox, oy = style.hatch_offset_px[1], style.hatch_offset_px[2] end
+  fs:SetPoint("CENTER", host, "CENTER", ox, oy)
+
+  local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+    and C_StringUtil.CreateNumericRuleFormatter()
+  if not formatter then return false end
+  -- Remaining seconds AT or ABOVE the threshold wear the hatch; below it the band clears and
+  -- the window badge's own slot takes over. The gold crop is the count vocabulary's positive
+  -- hatch, pre-tinted because an escape cannot be recoloured.
+  formatter:SetBreakpoints({
+    { threshold = 0, format = "" },
+    { threshold = plan.outside_s,
+      format = escape(style.hatch_root or style.texture_root or "",
+        hued(style.hatch, "positive"), w) },
+  })
+  button:SetDurationText(fs, { textFormatter = formatter })
   return true
 end
 
@@ -530,6 +625,31 @@ local function windowSink(button, style, badges)
   local d = (badges.diameter_pct / 100) * ns.Style.surfaces.icon_px
   region:SetSize(d, d)
   region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(0))
+
+  -- The FULL positive-cue treatment: V14's promotion ring around the badge, and the halo
+  -- under the plate. This badge is a client-decided promotion and must read as bright as one.
+  -- Both motions are AnimationGroups armed BEFORE the handover — the one kind that survives on
+  -- a handed-over region: in combat the armed subtree is a forbidden object and the seal
+  -- covers writes (§3.5.3).
+  local ring = ns.Paint.PromotionRing(region)
+  if ring then ring:SetShown(true) end
+  local glow = style.glow
+  if glow then
+    local halo = region:CreateTexture(nil, "OVERLAY", nil, 5)
+    halo:SetTexture(badges.texture_root .. badges.halo_texture .. ".tga", nil, nil, "TRILINEAR")
+    halo:SetVertexColor(style.rgb[1], style.rgb[2], style.rgb[3])
+    halo:SetSize(d * glow.scale, d * glow.scale)
+    halo:SetPoint("CENTER")
+    halo:SetAlpha(glow.alpha_min)
+    local breathe = halo:CreateAnimationGroup()
+    breathe:SetLooping("BOUNCE")
+    local a = breathe:CreateAnimation("Alpha")
+    a:SetFromAlpha(glow.alpha_min)
+    a:SetToAlpha(glow.alpha_max)
+    a:SetDuration(1 / glow.hz)
+    a:SetSmoothing("IN_OUT")
+    breathe:Play()
+  end
 
   local plate = region:CreateTexture(nil, "OVERLAY", nil, 6)
   plate:SetTexture(badges.texture_root .. badges.plate.texture .. ".tga", nil, nil, "TRILINEAR")
@@ -544,12 +664,9 @@ local function windowSink(button, style, badges)
   sprite:SetSize(style.size_px, style.size_px)
   sprite:SetPoint("CENTER")
 
-  -- Gated for free, the same way V16's is: the client hides the region, so a loop running
-  -- forever on it is invisible until the window opens.
-  if style.pulse then
-    local group = ns.Paint.Breathe(region, style.pulse)
-    if group then group:Play() end
-  end
+  -- No countdown and no region pulse: the badge holds cue-badge brightness exactly — plate at
+  -- badges alpha, sprite at full alpha — and the halo's breath is its only motion, which is
+  -- `capped`'s look wearing the window's glyph (render-shelf.md V19).
   button:AddPandemicRegion(region)
   return true
 end
@@ -619,12 +736,34 @@ function Channel.Arm(host, marker, abilities)
       initializeFrame = function(button)
         button:SetAllPoints(container)
         if plan.kind == "sealed-count-bar" then
-          built = barSink(button, plan, ns.Style.arc, ns.Style.badges)
+          built = barSink(button, host, plan, ns.Style.bar)
         elseif plan.kind == "sealed-pandemic" then
           built = windowSink(button, ns.Style.pandemic, ns.Style.badges)
         end
       end,
     })
+    -- V18's red flip rides its OWN slot, exactly as a banded count's elements do.
+    if plan.kind == "sealed-count-bar" then
+      container:AddAuraSlot(marker.id .. ":flip", filter, {
+        candidateFilters = candidates,
+        initializeFrame = function(button)
+          button:SetAllPoints(container)
+          if not flipSink(button, host, plan, ns.Style.bar) then built = false end
+        end,
+      })
+    end
+    -- The pair's other state rides its OWN slot, exactly as a banded count's elements do: the
+    -- badge lives in a handed-over region only the window shows, so the outside hatch cannot
+    -- share its widget — it needs a button of its own to hang a duration sink on.
+    if plan.kind == "sealed-pandemic" and plan.outside_s then
+      container:AddAuraSlot(marker.id .. ":outside", filter, {
+        candidateFilters = candidates,
+        initializeFrame = function(button)
+          button:SetAllPoints(container)
+          if not outsideSink(button, host, plan) then built = false end
+        end,
+      })
+    end
     end
     container:SetUnit(plan.unit)
     container:UpdateAllAuras()

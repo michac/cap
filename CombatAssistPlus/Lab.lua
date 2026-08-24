@@ -7,7 +7,7 @@
 local ADDON, ns = ...
 
 ns.LabStyle = {
-  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ ONE entry since 2026-08-22, and it is the leftover of an eight-entry intake whose other seven were promoted (V16-V19) or deleted. `duration_band` bands a CLOCK rather than a count, which is why no composite needed it and why it did not go with them. Its cells draw the `RemainingPercent` route, which is a SOURCE READ and has never been flown — the flown route (a bare `textFormatter`) gives thresholds in seconds. So every percentage in it is a proposal about a mechanism, clearly labelled, exactly as `count_bar` was before its flight settled it.",
+  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ ONE entry. `duration_band` is the leftover of the eight-entry intake whose other seven were promoted (V16-V19) or deleted — it bands a CLOCK rather than a count, which is why no composite needed it; its SECONDS form has since been promoted as V19's outside-window hatch, leaving the RemainingPercent route as its open half. `segment_bar` (L8) left same-day for V18 — the ledger has the row. Its cells draw the `RemainingPercent` route, which is a SOURCE READ and has never been flown — the flown route (a bare `textFormatter`) gives thresholds in seconds. So every percentage in it is a proposal about a mechanism, clearly labelled, exactly as `count_bar` was before its flight settled it.",
   _sheet = {
     direction = "down",
     duty = 0.5,
@@ -37,7 +37,7 @@ ns.LabStyle = {
         ability = "Immolation Aura",
         bands = {
           {
-            format = "|A:timer_CW_75:15:15|a",
+            format = "|A:fire:15:15|a",
             threshold = 0,
           },
           {
@@ -55,7 +55,7 @@ ns.LabStyle = {
         ability = "Immolation Aura",
         bands = {
           {
-            format = "|A:timer_CW_75:15:15|a",
+            format = "|A:fire:15:15|a",
             threshold = 0,
           },
           {
@@ -112,7 +112,7 @@ ns.LabStyle = {
             threshold = 0,
           },
           {
-            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t|A:timer_CW_75:15:15:20:-18|a",
+            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t|A:fire:15:15:20:-18|a",
             threshold = 31,
           },
         },
@@ -126,7 +126,7 @@ ns.LabStyle = {
         ability = "Immolation Aura",
         bands = {
           {
-            format = "|A:timer_CW_75:15:15|a",
+            format = "|A:fire:15:15|a",
             threshold = 0,
           },
           {

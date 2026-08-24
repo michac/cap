@@ -63,7 +63,9 @@ describe("engine / channel bands", function()
       { threshold = 0, draw = "count", polarity = "negative", hatch = true },
       { threshold = 6, draw = "none" },
     }
-    assert.same({ "hatch", "count" }, ns.Channel.CountElements(bands))
+    -- The numeral rides ON a plate, which is its own slot with the numeral's thresholds
+    -- (render-shelf.md V16): a plate escape cannot sit under text within one string.
+    assert.same({ "hatch", "plate", "count" }, ns.Channel.CountElements(bands))
 
     -- `count` and `mark` are EXCLUSIVE, so a band asking for one never yields the other's slot.
     assert.same({ "hatch", "mark" }, ns.Channel.CountElements({
@@ -105,8 +107,9 @@ describe("engine / channel bands", function()
   it("asks for a slot only for the elements a table actually draws", function()
     assert.same({ "hatch" },
       ns.Channel.CountElements{ { threshold = 0, draw = "none", hatch = true } })
-    assert.same({ "count" }, ns.Channel.CountElements{ { threshold = 0, draw = "count" } })
-    assert.same({ "mark", "count" }, ns.Channel.CountElements{
+    assert.same({ "plate", "count" },
+      ns.Channel.CountElements{ { threshold = 0, draw = "count" } })
+    assert.same({ "plate", "mark", "count" }, ns.Channel.CountElements{
       { threshold = 0, draw = "count" }, { threshold = 4, draw = "mark" } })
     -- A table that draws nothing anywhere needs no slot at all, and `Plan` refuses it: a display
     -- that arms and renders nothing is `spec.md` §3.2's defect.
@@ -176,7 +179,7 @@ describe("engine / channel bands", function()
     assert.equal("SetApplicationCount", count.sink)
     assert.equal(296553, count.spell)
     assert.equal("player", count.unit)
-    assert.same({ "hatch", "count" }, count.elements)
+    assert.same({ "hatch", "plate", "count" }, count.elements)
 
     local bar = ns.Channel.ContainerPlan(marker("db_core_charge"), declared)
     assert.equal("SetApplicationBar", bar.sink)
@@ -189,6 +192,21 @@ describe("engine / channel bands", function()
     assert.equal("target", window.unit)
     assert.is_nil(window.max)
     assert.is_nil(window.rules)
+
+    -- The pair's OTHER state (render-shelf.md V19): `outside_s` is the catalog's own number and
+    -- optional; a malformed one refuses the plan rather than arming half a display.
+    assert.is_nil(window.outside_s, "Doom declares no outside_s yet")
+    local dotAbil = { dot = { spell = 603, unit = "target" } }
+    local withOutside = ns.Channel.WindowPlan(
+      { id = "m", display = { kind = "sealed-pandemic", ability = "dot", outside_s = 18 } },
+      dotAbil)
+    assert.equal(18, withOutside.outside_s)
+    assert.is_nil(ns.Channel.WindowPlan(
+      { id = "m", display = { kind = "sealed-pandemic", ability = "dot", outside_s = -1 } },
+      dotAbil))
+    assert.is_nil(ns.Channel.WindowPlan(
+      { id = "m", display = { kind = "sealed-pandemic", ability = "dot", outside_s = "18" } },
+      dotAbil))
 
     -- A graded marker is not a container one, and vice versa: a marker is at most one of them.
     assert.is_nil(ns.Channel.ContainerPlan(marker("hog_awaits_tyrant"), declared))

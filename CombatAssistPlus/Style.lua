@@ -4,15 +4,6 @@
 local ADDON, ns = ...
 
 ns.Style = {
-  arc = {
-    _comment = "V18. The same sealed number as a SHAPE. SetApplicationBar drives a StatusBar from the count and SetDurationBar from the remaining duration; only the VALUE is sealed, so texture, size, orientation and colour stay ordinary setup calls. Radial is a RENDER MODE (Enum.StatusBarRenderMode.Radial), not a masked fill, so the circle needs no MaskTexture. ⚠ A bar has NO BLANK STATE: SetValue clamps into [0, max], so at zero the track still draws. That is the straight trade against V16, which can be silent and cannot be a shape. It ships no art at all — the fill is a flat colour — so it is absent from the tint guard's subject list on purpose.",
-    alpha = 0.85,
-    full_rgb = { 1.00, 0.78, 0.25 },
-    inset_px = 3,
-    rgb = { 1.00, 1.00, 1.00 },
-    track_alpha = 0.55,
-    track_rgb = { 0.00, 0.00, 0.00 },
-  },
   arrival = {
     duration_s = 0.4,
     from_alpha = 0.00,
@@ -46,11 +37,25 @@ ns.Style = {
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\badges\\",
     tint = "shelf",
   },
+  bar = {
+    _comment = "V18. The sealed count as a SEGMENTED left-to-right bar on the row's bottom edge. SetApplicationBar drives the fill; only BarValue is sealed, so track, ticks, size and colour are ordinary setup calls, and the segment grid (one tick per application boundary) is cap's own track art. The FULL state flips the WHOLE bar to the negative red as a warning — full stacks = waste imminent — not by recolouring the fill (the value is sealed; SetStatusBarTexture is a setup call, not a curve sink) but by a second slot's count band (V16's machinery) drawing the full-width pre-tinted red crop `bar_full` at threshold = max. The radial render mode is retired with this form. ⚠ A bar has NO BLANK STATE: the track draws at zero, which is the straight trade against V16.",
+    alpha = 0.85,
+    full_alpha = 0.9,
+    full_rgb = { 0.95, 0.3, 0.3 },
+    full_texture = "bar_full",
+    height_px = 6,
+    rgb = { 1.00, 1.00, 1.00 },
+    seg_px = 1,
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\badges\\",
+    tint = "shelf",
+    track_alpha = 0.55,
+    track_rgb = { 0.00, 0.00, 0.00 },
+  },
   budget = {
     max_base64_kb = 300,
   },
   count = {
-    _comment = "V16/V17. A SEALED aura application count reaching a pixel. cap hands the Cooldown Manager a FontString and a NumericRuleFormatter it AUTHORED; the client evaluates the bands against the secret and calls SetText, and cap never learns which band fired. The sink seals `Text` and `Shown` and nothing else — which is why the hue below is reachable through a static SetTextColor as well as through a band's own escape, and why the FontString's animation channel is still cap's. `threshold` is the MINIMUM input a band applies to, so a value ON a threshold takes the UPPER band.",
+    _comment = "V16/V17. A SEALED aura application count reaching a pixel. cap hands the Cooldown Manager a FontString and a NumericRuleFormatter it AUTHORED; the client evaluates the bands against the secret and calls SetText, and cap never learns which band fired. The sink seals `Text` and `Shown` and nothing else — which is why the hue below is reachable through a static SetTextColor as well as through a band's own escape, and why the FontString's animation channel is still cap's. `threshold` is the MINIMUM input a band applies to, so a value ON a threshold takes the UPPER band. Two rules added 2026-08-24: `hatch` is legal on NEGATIVE bands only (a hatch means ruled out; a positive band hatching the face is a contradiction wearing pixels), and the numeral sits on the badge PLATE — its own element/slot with the same thresholds, because a plate escape cannot sit under text within one string.",
     font = "FRIZQT__.TTF",
     hatch = "stripes",
     hatch_alpha = 0.55,
@@ -216,11 +221,13 @@ ns.Style = {
     tick_s = 0.025,
   },
   pandemic = {
-    _comment = "V19. The pandemic window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge, plate and sprite together, appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively.",
-    frame = "timer_CW_75",
-    pulse = {
-      alpha = { 0.62, 1.00 },
-      duration_s = 1.6,
+    _comment = "V19. The pandemic window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge — halo, plate and sprite together — appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively. The badge holds cue-badge brightness exactly — plate at badges.plate.alpha, sprite at full alpha, NO region pulse and NO countdown — and it wears the `fire` glyph, DELIBERATELY the same glyph as the `priority` cue: both mean 'act now — press this', and the window badge is exactly a client-decided promotion of a DoT row. (Its previous glyph, timer_CW_75, was a static Kenney clock whose baked 75% wedge read as a live radial attached to nothing — retired for lying.) Its motion is the FULL positive-cue treatment: V14's promotion ring (armed before the handover, FlipBook) plus `glow`, the SAME halo the positive cues wear (badges.halo art, radial falloff from badges.halo_falloff), breathing behind the plate, armed before the handover since that is the only motion that survives the in-combat forbidden-object seal (§3.5.3). The OUTSIDE-window state of the pair deliberately has no token group: it reuses the count vocabulary's positive hatch crop and this group's gold, and its threshold (outside_s, seconds) is the CATALOG's number, never the shelf's.",
+    frame = "fire",
+    glow = {
+      alpha_max = 0.55,
+      alpha_min = 0.15,
+      hz = 1.2,
+      scale = 1.55,
     },
     rgb = { 1.00, 0.78, 0.25 },
     size_px = 15,

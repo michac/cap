@@ -1090,18 +1090,30 @@ local function buildSealed()
        "clears them together. A band draws the mark or the number, never both. " ..
        "The VALUES here are the gallery's; in the client cap never learns which band fired.")
 
-  section("V18 · sealed radial  ·  V19 · pandemic window")
+  section("V18 · sealed bar  ·  V19 · pandemic window")
   x = PAD
-  local A, g = ns.Style.arc, ns.Paint.Geometry()
+  local A, g = ns.Style.bar, ns.Paint.Geometry()
   for _, at in ipairs({ 0, 2, 4 }) do
     local host = swatch(x, y, SAMPLE[4].spell, at .. " of 4")
-    local d = g.diameter - 2 * A.inset_px
     local bar = ns.Paint.CountBar(host, {
       rgb = A.rgb, track_rgb = A.track_rgb, track_alpha = A.track_alpha,
-      w = d, h = d, mode = "radial",
+      w = icon(), h = A.height_px,
     })
-    bar:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(0))
+    bar:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, 0)
     bar:SetValue(at / 4)
+    -- The segment grid, and — at full — the whole-bar red flip the flip band draws in the
+    -- client. Gallery-drawn statics; the live path is Channel's barSink/flipSink.
+    for i = 1, 3 do
+      local seg = bar:CreateTexture(nil, "OVERLAY")
+      seg:SetColorTexture(A.track_rgb[1], A.track_rgb[2], A.track_rgb[3], A.track_alpha)
+      seg:SetSize(A.seg_px or 1, A.height_px)
+      seg:SetPoint("LEFT", bar, "LEFT", icon() * i / 4, 0)
+    end
+    if at == 4 then
+      local flip = bar:CreateTexture(nil, "OVERLAY", nil, 7)
+      flip:SetColorTexture(A.full_rgb[1], A.full_rgb[2], A.full_rgb[3], A.full_alpha or 1)
+      flip:SetAllPoints(bar)
+    end
     x = x + icon() + SPREAD
   end
 
@@ -1125,9 +1137,9 @@ local function buildSealed()
   if P.pulse then ns.Paint.Breathe(slot, P.pulse):Play() end
 
   y = y + icon() + CAPTION_H + 6
-  note("A bar has NO BLANK STATE — the track draws at zero, which is the straight trade against " ..
-       "a band that can be silent and cannot be a shape. The window badge authors no threshold " ..
-       "at all: the client computes its own, per spell, and owns whether the region is shown.")
+  note("A bar has NO BLANK STATE — the track draws at zero — and at full the WHOLE bar flips " ..
+       "to the negative red: stop banking. The window badge authors no threshold at all: the " ..
+       "client computes its own, per spell, and owns whether the region is shown.")
 end
 
 local function buildStyle(pane)

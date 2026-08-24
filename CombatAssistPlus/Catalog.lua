@@ -280,12 +280,17 @@ function Catalog.Check(cat)
             fail("display", entry.id, "sealed-count-bar full must be boolean")
           end
         elseif display.kind == "sealed-pandemic" then
-          -- render-shelf.md V19. The one sealed display cap authors NO threshold for: the client
-          -- computes the window itself, per spell. So there is nothing here to validate but the
-          -- subject — which is exactly the property that makes it good.
+          -- render-shelf.md V19. The WINDOW carries no authored threshold — the client computes
+          -- it per spell, which is exactly the property that makes it good. The optional
+          -- `outside_s` is the pair's other state (the gold do-not-refresh hatch) and that one
+          -- IS the catalog's number, drawn off the aura's remaining seconds.
           if not abilities[display.ability] then
             fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
               .. tostring(display.ability))
+          end
+          if display.outside_s ~= nil
+            and (type(display.outside_s) ~= "number" or display.outside_s <= 0) then
+            fail("display", entry.id, "sealed-pandemic outside_s must be a positive number of seconds")
           end
         elseif display.kind == "sealed-power-percent" then
           -- The break point is NEVER authored as a percentage: the percentage depends on the
