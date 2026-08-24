@@ -71,7 +71,9 @@ describe("engine / surface", function()
       -- Named explicitly rather than left to the sweep above: the stack has no fixed slots, so
       -- Overlay re-anchors on EVERY update, and this is the method it re-anchors through.
       assert.is_true(have.badge.SetPoint, "Paint.Badge defines no SetPoint")
-      assert.is_true(have.badge.Show and have.badge.Hide and have.badge.Step)
+      -- Step is gone deliberately: the strip is walked by the client's FlipBook animation,
+      -- not by a ticker calling back into Lua.
+      assert.is_true(have.badge.Show and have.badge.Hide)
     end)
 
   it("gives the gallery the same guarantee, since it draws through the same builders", function()

@@ -9,38 +9,10 @@ local issecretvalue = issecretvalue
 local Paint = {}
 ns.Paint = Paint
 
--- ONE ticker in the addon walks every visible frame-stepper — the badge sprites, and nothing
--- else now the scan edge is still (cdm-rider-patterns.md §14). Period: ns.Style.motion.tick_s.
-local stepping, ticker = {}, nil
-
--- A stepper registers itself, but only its PARENT knows when the row went away: Overlay hides the
--- pooled frame, which leaves it shown-but-invisible and stepping forever. The visibility test is
--- the deregistration, so the ticker can actually reach zero and cancel.
-local function tick()
-  local now = GetTime()
-  local any = false
-  for entry in pairs(stepping) do
-    if entry.frame:IsVisible() then
-      any = true
-      entry:Step(now)
-    else
-      stepping[entry] = nil
-    end
-  end
-  if not any and ticker then
-    ticker:Cancel()
-    ticker = nil
-  end
-end
-
-local function stepEvery(entry, on)
-  if on then
-    stepping[entry] = true
-    if not ticker then ticker = C_Timer.NewTicker(ns.Style.motion.tick_s, tick) end
-  else
-    stepping[entry] = nil
-  end
-end
+-- There is deliberately NO ticker here. Every motion — badge strips, the promotion ring, the
+-- pandemic flame, every pulse — is an AnimationGroup the client steps, so no Lua runs per tick
+-- and a group armed before a handover keeps rendering where a ticker's writes are sealed
+-- (security-taint-and-restricted-data.md §3.5.3).
 
 -- ---------------------------------------------------------------------------
 -- Pure geometry — the same arithmetic the artifact's generated CSS does
@@ -92,17 +64,6 @@ end
 
 --- Which frame of a cue's list is showing, 1-based. REPEAT wraps; BOUNCE plays forward then
 --- back, which is what the animation system's own loop type does.
-function Paint.FrameIndex(count, loop, elapsed, stepSeconds)
-  if count < 2 or stepSeconds <= 0 then return 1 end
-  local k = math.floor(elapsed / stepSeconds)
-  if loop == "BOUNCE" then
-    local period = 2 * (count - 1)
-    local p = k % period
-    return (p < count and p or period - p) + 1
-  end
-  return k % count + 1
-end
-
 --- How far a frame drawn at `scale` reaches past its own edge, per side.
 function Paint.Overhang(size_px, scale)
   return size_px * (scale - 1) / 2
@@ -328,6 +289,28 @@ function Paint.Hatch(host, inset, look)
 end
 
 
+--- A sprite-sheet flipbook as a FlipBook AnimationGroup: the client steps the frames, no Lua
+--- runs per tick, and — decisive for V19 — a group playing before a handover keeps rendering
+--- where a ticker's writes are sealed (security-taint-and-restricted-data.md §3.5.3). `spec`
+--- carries cols/rows/frames and either `fps` or `duration_s`. Looping defaults to REPEAT.
+---
+--- --@unverified: the setter names are the generated docs'; that rows × cols grid the whole
+--- texture and `frames` caps the walk is a source read of the XSD, never watched in the client
+--- (frames-textures-animation.md §7.1). Every consumer is in the next flight's acceptance set.
+---
+--- ⚠ Fits only an unpadded sheet — every cell a frame, no power-of-two slack. The lab's padded
+--- sheets must keep StylePanel's `drawFlipbook`.
+function Paint.FlipBook(texture, spec, looping)
+  local group = texture:CreateAnimationGroup()
+  group:SetLooping(looping or "REPEAT")
+  local book = group:CreateAnimation("FlipBook")
+  book:SetFlipBookColumns(spec.cols)
+  book:SetFlipBookRows(spec.rows)
+  book:SetFlipBookFrames(spec.frames)
+  book:SetDuration(spec.duration_s or (spec.frames / spec.fps))
+  return group
+end
+
 --- V14 · the promotion ring. A glowing ring around the badge of a row wearing a positive cue.
 ---
 --- A measured replica of Blizzard's proc glow (render-shelf.md V14). Three of its properties are
@@ -339,9 +322,9 @@ end
 ---   · it is NEUTRAL art, so `SetVertexColor` reaches the authored hue. Blizzard's is baked gold,
 ---     and this is the one way the replica beats the original.
 ---
---- ⚠ `1 / cols` is correct HERE and only here: `procring` is exactly cols x rows cells with no
---- power-of-two padding (8x64 = 512, 4x64 = 256). The lab's flipbooks are padded and must use
---- the precomputed `cell / sheet` step instead -- see StylePanel's `drawFlipbook`.
+--- ⚠ `procring` is exactly cols x rows cells with no power-of-two padding (8x64 = 512,
+--- 4x64 = 256), which is what lets `Paint.FlipBook` drive it and the `1 / cols` first-frame
+--- texcoord below address it.
 function Paint.PromotionRing(host)
   local p = ns.Style.promotion
   if not p then return nil end
@@ -359,29 +342,20 @@ function Paint.PromotionRing(host)
   t:SetVertexColor(p.rgb[1], p.rgb[2], p.rgb[3])
   t:SetAlpha(p.alpha)
 
-  local i, acc = 0, 0
-  local function frame(k)
-    local c, r = k % p.cols, math.floor(k / p.cols)
-    t:SetTexCoord(c / p.cols, (c + 1) / p.cols, r / p.rows, (r + 1) / p.rows)
-  end
-  frame(0)
+  -- Frame 0 by hand, so the instant between Show() and the group's first step never flashes
+  -- the whole sheet. While the group plays, the FlipBook owns the texcoords.
+  t:SetTexCoord(0, 1 / p.cols, 0, 1 / p.rows)
+  local anim = Paint.FlipBook(t, p)
   layer:Hide()
 
   local ring = { frame = layer, texture = t }
   function ring:SetShown(on)
     if not on then
-      layer:SetScript("OnUpdate", nil)
+      anim:Stop()
       return layer:Hide()
     end
     if layer:IsShown() then return end
-    layer:SetScript("OnUpdate", function(_, elapsed)
-      acc = acc + elapsed
-      while acc >= 1 / p.fps do
-        acc = acc - 1 / p.fps
-        i = (i + 1) % p.frames
-        frame(i)
-      end
-    end)
+    anim:Play()
     layer:Show()
   end
   function ring:Hide() self:SetShown(false) end
@@ -433,25 +407,33 @@ function Paint.Badge(host, key)
   sprite:SetSize(g.sprite, g.sprite)
   sprite:SetPoint("CENTER")
 
+  -- A multi-frame cue draws its baked strip (capart bakes `strip_<cue>` beside the single
+  -- frames) and the client's FlipBook walks it; a single frame is a still and needs neither.
   local count = #cue.frames
-  local badge = {
-    frame = slot, cue = key, sprite = sprite, plate = plate, halo = halo,
-    seconds = count > 0 and cue.duration_s / count or 0,
-  }
+  local anim
+  if count > 1 then
+    sprite:SetTexture(texturePath("strip_" .. key), nil, nil, "TRILINEAR")
+    sprite:SetTexCoord(0, 1 / count, 0, 1)
+    anim = Paint.FlipBook(sprite, { cols = count, rows = 1, frames = count,
+                                    duration_s = cue.duration_s },
+                          cue.loop == "BOUNCE" and "BOUNCE" or "REPEAT")
+  else
+    setArt(sprite, cue.frames[1])
+  end
+
+  local badge = { frame = slot, cue = key, sprite = sprite, plate = plate, halo = halo }
 
   --- Pooled frames outlive their colour: an animation that stopped restores alpha and never
   --- vertex colour, so both are written again on every show.
   ---
-  --- ⚠ IDEMPOTENT. The live path repaints at 10 Hz, so restarting `started` on every call
-  --- would reset the frame clock faster than one frame lasts and freeze the glyph on frame 1.
+  --- ⚠ IDEMPOTENT. The live path repaints at 10 Hz, so an unguarded Play() here would restart
+  --- the strip faster than one frame lasts and freeze the glyph on frame 1.
   function badge:Show()
     sprite:SetVertexColor(tint[1], tint[2], tint[3])
     sprite:SetAlpha(1)
-    if not slot:IsShown() or not self.started then self.started = GetTime() end
-    self:Step(GetTime())
     slot:Show()
     if halo then halo:Play() end
-    stepEvery(self, count > 1)
+    if anim and not anim:IsPlaying() then anim:Play() end
   end
 
   --- Move the badge to its place in the flowing stack. There are no fixed slots — a cue's
@@ -474,16 +456,7 @@ function Paint.Badge(host, key)
   function badge:Hide()
     slot:Hide()
     if halo then halo:Stop() end
-    stepEvery(self, false)
-  end
-
-  function badge:Step(now)
-    local i = Paint.FrameIndex(count, cue.loop, now - (self.started or now), self.seconds)
-    if i ~= self.shown then
-      setArt(sprite, cue.frames[i])
-      sprite:SetVertexColor(tint[1], tint[2], tint[3])
-      self.shown = i
-    end
+    if anim then anim:Stop() end
   end
 
   return badge

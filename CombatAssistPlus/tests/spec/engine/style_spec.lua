@@ -78,17 +78,15 @@ describe("engine / style", function()
     assert.is_true(ns.Style.badges.overhang_px < ns.Style.surfaces.row_gap_px)
   end)
 
-  it("walks a cue's frames the way the artifact does", function()
-    local step = 0.5
-    -- REPEAT wraps; BOUNCE turns around at each end.
-    assert.equal(1, ns.Paint.FrameIndex(3, "REPEAT", 0.0, step))
-    assert.equal(3, ns.Paint.FrameIndex(3, "REPEAT", 1.0, step))
-    assert.equal(1, ns.Paint.FrameIndex(3, "REPEAT", 1.5, step))
-    assert.equal(2, ns.Paint.FrameIndex(3, "BOUNCE", 1.5, step))
-    assert.equal(1, ns.Paint.FrameIndex(3, "BOUNCE", 2.0, step))
-    -- A single-frame cue is a still image, and a zero-length step never divides.
-    assert.equal(1, ns.Paint.FrameIndex(1, "REPEAT", 99, step))
-    assert.equal(1, ns.Paint.FrameIndex(4, "REPEAT", 99, 0))
+  it("steps no frames from Lua — every sheet walk is the client's FlipBook", function()
+    -- The frame walk left with the ticker: motion baked into AnimationGroups is the one kind
+    -- that keeps rendering on a handed-over region (security-taint §3.5.3), so Paint holds no
+    -- per-tick stepper and no clock arithmetic to test.
+    assert.is_nil(ns.Paint.FrameIndex, "Paint.FrameIndex outlived the ticker it stepped for")
+    local f = assert(io.open("CombatAssistPlus/Paint.lua", "rb"))
+    local src = f:read("*a"); f:close()
+    assert.is_nil(src:find("C_Timer.NewTicker", 1, true),
+      "Paint.lua re-acquired a ticker — motion belongs to AnimationGroups")
   end)
 
   it("keeps no arrival machinery in the live path — the scan edge is still", function()
