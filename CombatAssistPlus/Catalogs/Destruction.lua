@@ -11,7 +11,15 @@ ns.Catalog.Register{
   abilities = {
     { id = "conflagrate", spell = 17962, alt = { 91591 }, charged = true },
     -- Aura dependency only: this is not an enhanced CDM entry and never enters Signal.
-    { id = "backdraft", spell = 117828 },
+    --
+    -- ⚠ `family = "auras"` added 2026-08-25, and it is a BINDING FIX rather than a label.
+    -- `Catalog.findRow` defaults a missing family to `"spells"` and matches only rows in that
+    -- family, but Backdraft is a TrackedBuff row (`BuffIconCooldownViewer`, family `auras`) —
+    -- so without this key the ability could never resolve, and the sealed count band that
+    -- names it as its subject had no subject. `Sense`'s seeding branches on the same key and
+    -- would have called `readCooldown` on an aura. Every other aura subject in every other
+    -- catalog already declares it; this was the one that did not.
+    { id = "backdraft", spell = 117828, family = "auras" },
   },
 
   entries = {
