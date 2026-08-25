@@ -225,12 +225,26 @@ function Channel.WindowPlan(marker, abilities)
   }
 end
 
---- The CONTAINER seam, the sibling of `GradedPlan`: three sinks that all need an AuraContainer
+--- V20's plan: the proc bar. The slot filters to the proc aura; while it is up the client
+--- shows the button and drains the bar off the aura's own duration (SetDurationBar,
+--- RemainingTime). cap authors no threshold and reads nothing.
+function Channel.ProcBarPlan(marker, abilities)
+  local display = marker and marker.display
+  local ability = display and abilities and abilities[display.ability]
+  if not (display and display.kind == "sealed-proc-bar"
+      and ability and type(ability.spell) == "number") then
+    return nil
+  end
+  return { kind = display.kind, spell = ability.spell, unit = ability.unit or "player" }
+end
+
+--- The CONTAINER seam, the sibling of `GradedPlan`: four sinks that all need an AuraContainer
 --- slot, against the two graded ones that need only a curve. A marker is at most one of them.
 function Channel.ContainerPlan(marker, abilities)
   return Channel.Plan(marker, abilities)
     or Channel.BarPlan(marker, abilities)
     or Channel.WindowPlan(marker, abilities)
+    or Channel.ProcBarPlan(marker, abilities)
 end
 
 -- ---------------------------------------------------------------------------
@@ -356,7 +370,11 @@ function Channel.HoldPlan(marker)
   end
   local within = type(display.within) == "number" and display.within > LIVE and display.within
   local beyond = type(display.beyond) == "number" and display.beyond > LIVE and display.beyond
-  if (within and beyond) or not (within or beyond) then return nil end
+  if not (within or beyond) then return nil end
+  -- BOTH set is the TWO-SIDED band (catalog.md Defeats item 1, closed 2026-08-24): hold while
+  -- remaining is inside (beyond, within). The reversed pair is an empty band that would arm
+  -- and never draw, so it is refused here exactly as Catalog.Check refuses it.
+  if within and beyond and beyond >= within then return nil end
   return { kind = display.kind, ability = display.ability,
     within = within or nil, beyond = beyond or nil, cue = marker.cue }
 end
@@ -382,6 +400,17 @@ function Channel.BeyondPoints(beyond)
   return { { 0, 0 }, { beyond, 1 } }
 end
 
+--- The TWO-SIDED band: nothing while the dependency is up or nearly up (below `beyond`), the
+--- cue while the clock runs inside (beyond, within), nothing again past it. Three points on the
+--- same Step curve the one-sided senses use — this is `catalog.md` Defeats item 1's named
+--- recipe, built the day a spec needed it (Dreadstalkers rung 6, 2026-08-24). Step holds the
+--- previous point's value, so each x is where the value CHANGES.
+function Channel.BandPoints(beyond, within)
+  if type(beyond) ~= "number" or type(within) ~= "number" then return nil end
+  if beyond <= LIVE or within <= beyond then return nil end
+  return { { 0, 0 }, { beyond, 1 }, { within, 0 } }
+end
+
 --- Arm the range hold. The duration object is fetched per evaluation rather than kept: it
 --- describes one cooldown instance, and the next press starts another.
 function Channel.ArmHold(plan, abilities)
@@ -395,7 +424,9 @@ function Channel.ArmHold(plan, abilities)
     return nil, "refused"
   end
 
-  local points = plan.beyond and Channel.BeyondPoints(plan.beyond)
+  local points = (plan.beyond and plan.within)
+      and Channel.BandPoints(plan.beyond, plan.within)
+    or plan.beyond and Channel.BeyondPoints(plan.beyond)
     or Channel.HoldPoints(plan.within)
   if not points then return nil, "refused" end
 
@@ -456,7 +487,7 @@ end
 --- nothing else, so placement stays cap's — and anchoring to cap's own row frame means the mark
 --- lands correctly however the container chose to lay its button out. `host` is the row, so a
 --- full-icon mark is sized from it and a corner mark hangs off its corner.
-local function countSink(button, host, plan, style, element)
+local function countSink(button, host, plan, style, element, slot)
   local count = button:CreateFontString(nil, "OVERLAY")
   if not count:SetFont("Fonts\\" .. style.font, style.size, style.outline) then
     count:SetFontObject("NumberFontNormal")
@@ -505,9 +536,10 @@ local function countSink(button, host, plan, style, element)
     if style.hatch_offset_px then ox, oy = style.hatch_offset_px[1], style.hatch_offset_px[2] end
     count:SetPoint("CENTER", host, "CENTER", ox, oy)
   else
-    -- The corner the badge stack owns. `count` sits over `mark` because the plate is the mark's
-    -- and the numeral belongs on it.
-    count:SetPoint("CENTER", host, "TOPRIGHT", ns.Paint.BadgeCentre())
+    -- The corner stack slot this marker CLAIMED by declaration (render-shelf.md Part 2.5's
+    -- cession rule). `count` sits over `mark` because the plate is the mark's and the numeral
+    -- belongs on it — all three share the marker's one slot.
+    count:SetPoint("CENTER", host, "TOPRIGHT", ns.Paint.BadgeCentre(slot))
   end
 
   local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
@@ -620,11 +652,74 @@ end
 --- The pandemic window (render-shelf.md V19). A FRAME, not a texture, because the client seals its
 --- `Shown` and nothing else — so plate and glyph parented under it appear and vanish together on
 --- Blizzard's own window, with cap authoring no threshold at all.
-local function windowSink(button, style, badges)
+--- One dial, wherever a dial draws (render-shelf.md V19/V20): a radial StatusBar the CLIENT
+--- drains. ⚠ `SetMinMaxValues(0, 1)` FIRST — `ApplyDurationBar` never calls it (§4.8.1
+--- finding 3) and without a range the bar draws 0 % forever, with nothing downstream to say so.
+local function buildDial(parent, dial, who)
+  local bar = CreateFrame("StatusBar", nil, parent)
+  bar:SetSize(dial.size_px, dial.size_px)
+  bar:SetPoint("CENTER")
+  bar:SetMinMaxValues(0, 1)
+  local track = bar:CreateTexture(nil, "BACKGROUND")
+  track:SetAllPoints(bar)
+  track:SetColorTexture(dial.track_rgb[1], dial.track_rgb[2], dial.track_rgb[3],
+    dial.track_alpha)
+  local fill = bar:CreateTexture(nil, "ARTWORK")
+  fill:SetColorTexture(dial.rgb[1], dial.rgb[2], dial.rgb[3], 1)
+  -- House rule 8: `SetStatusBarTexture` returns a discardable success bool — a dropped failure
+  -- here is a bar that drains invisibly, §4.8.1 finding 3's sibling trap.
+  if not bar:SetStatusBarTexture(fill) and ns.Log and ns.Log.Mark then
+    ns.Log.Mark(who .. ": SetStatusBarTexture refused the dial fill")
+  end
+  -- Radial is measured on a SetTimerDuration-driven bar [client 2026-08-21]; a client that
+  -- refuses it here gets a linear drain rather than no dial.
+  pcall(bar.SetRenderMode, bar,
+    Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial or 1)
+  return bar
+end
+
+--- V20 · the proc bar: the proc's remaining lifetime as a thin client-drained bar directly
+--- above V18's charge bar (`lift` px up from the bottom edge — computed by Overlay from the
+--- row's DECLARATIONS, because whether either bar is currently drawn is sealed). Linear
+--- render mode; edge grammar, not badge grammar — gold here is quantity, never polarity.
+--- Nothing is handed over: the client shows and hides the whole button with the aura
+--- (§3.5.1), which is what scopes the bar to the proc.
+local function procBarSink(button, host, style, lift)
+  local bar = CreateFrame("StatusBar", nil, button)
+  bar:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, lift or 0)
+  bar:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, lift or 0)
+  bar:SetHeight(style.height_px)
+  -- ⚠ FIRST: `ApplyDurationBar` never calls `SetMinMaxValues` (§4.8.1 finding 3) — without a
+  -- range the bar draws 0 % forever, and nothing downstream would ever say so.
+  bar:SetMinMaxValues(0, 1)
+  local track = bar:CreateTexture(nil, "BACKGROUND")
+  track:SetAllPoints(bar)
+  track:SetColorTexture(style.track_rgb[1], style.track_rgb[2], style.track_rgb[3],
+    style.track_alpha)
+  local fill = bar:CreateTexture(nil, "ARTWORK")
+  fill:SetColorTexture(style.rgb[1], style.rgb[2], style.rgb[3], 1)
+  -- House rule 8: `SetStatusBarTexture` returns a discardable success bool — a dropped failure
+  -- here is a bar that drains invisibly, §4.8.1 finding 3's sibling trap.
+  if not bar:SetStatusBarTexture(fill) and ns.Log and ns.Log.Mark then
+    ns.Log.Mark("procBarSink: SetStatusBarTexture refused the fill")
+  end
+  --@unverified a 3 px full-width SetDurationBar has never been watched, nor two client-drained
+  --@unverified bars stacked on one bottom edge; render-shelf.md V20, in the flight acceptance
+  --@unverified set.
+  local okSink, sinkErr = pcall(button.SetDurationBar, button, bar, {
+    direction = Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime or 1,
+  })
+  if not okSink and ns.Log and ns.Log.Mark then
+    ns.Log.Mark("procBarSink: SetDurationBar refused — " .. tostring(sinkErr))
+  end
+  return okSink == true
+end
+
+local function windowSink(button, style, badges, slot)
   local region = CreateFrame("Frame", nil, button)
   local d = (badges.diameter_pct / 100) * ns.Style.surfaces.icon_px
   region:SetSize(d, d)
-  region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(0))
+  region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(slot or 0))
 
   -- The FULL positive-cue treatment: V14's promotion ring around the badge, and the halo
   -- under the plate. This badge is a client-decided promotion and must read as bright as one.
@@ -658,15 +753,25 @@ local function windowSink(button, style, badges)
   plate:SetSize(d * badges.plate.scale, d * badges.plate.scale)
   plate:SetPoint("CENTER")
 
-  local sprite = region:CreateTexture(nil, "OVERLAY", nil, 7)
-  sprite:SetTexture(style.texture_root .. style.frame .. ".tga", nil, nil, "TRILINEAR")
-  sprite:SetVertexColor(style.rgb[1], style.rgb[2], style.rgb[3])
-  sprite:SetSize(style.size_px, style.size_px)
-  sprite:SetPoint("CENTER")
+  -- The dial: a radial StatusBar the CLIENT drains off the aura's own duration.
+  -- `SetDurationBar` seals only `BarValue` and its whole apply path is
+  -- `SetTimerDuration(auraDuration, interpolation, options.direction)` (§3.5.2, T1) — cap
+  -- hands the widget over and reads nothing, ever.
+  --@unverified the AddPandemicRegion + SetDurationBar ONE-BUTTON pair: each half is measured
+  --@unverified alone (§3.5.1's sink fill, §3.5.2's region), never together — render-shelf.md
+  --@unverified Part 5 #11. The dial must live INSIDE the wrapper: that is what makes it
+  --@unverified appear only in the refresh window.
+  local bar = buildDial(region, style.dial, "windowSink")
+  local okSink, sinkErr = pcall(button.SetDurationBar, button, bar, {
+    direction = Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime or 1,
+  })
+  if not okSink and ns.Log and ns.Log.Mark then
+    ns.Log.Mark("windowSink: SetDurationBar refused — " .. tostring(sinkErr))
+  end
 
-  -- No countdown and no region pulse: the badge holds cue-badge brightness exactly — plate at
-  -- badges alpha, sprite at full alpha — and the halo's breath is its only motion, which is
-  -- `capped`'s look wearing the window's glyph (render-shelf.md V19).
+  -- No numeral and no region pulse: the badge holds cue-badge brightness exactly — plate at
+  -- badges alpha, the dial's arc the client's — and the halo's breath is its only cap-authored
+  -- motion (render-shelf.md V19).
   button:AddPandemicRegion(region)
   return true
 end
@@ -677,7 +782,7 @@ end
 --- ⚠ THE SINK IS CHOSEN BY `plan.kind` AND BY NOTHING ELSE. Three kinds, three client objects,
 --- one acquisition path — because what varies between them is which widget the client is handed,
 --- not how the slot is built.
-function Channel.Arm(host, marker, abilities)
+function Channel.Arm(host, marker, abilities, cornerSlot, lift)
   local plan = Channel.ContainerPlan(marker, abilities)
   if not plan or not host or InCombatLockdown() then return nil, "refused" end
   if not (C_AddOns and C_AddOns.LoadAddOn) then return nil, "refused" end
@@ -724,7 +829,7 @@ function Channel.Arm(host, marker, abilities)
             -- that number in a different space and drew the hatch at the wrong scale, which is
             -- exactly the residual misalignment two flights could not tune away.
             button:SetAllPoints(container)
-            if not countSink(button, host, plan, Channel.BandStyle(), element) then
+            if not countSink(button, host, plan, Channel.BandStyle(), element, cornerSlot) then
               built = false
             end
           end,
@@ -738,7 +843,9 @@ function Channel.Arm(host, marker, abilities)
         if plan.kind == "sealed-count-bar" then
           built = barSink(button, host, plan, ns.Style.bar)
         elseif plan.kind == "sealed-pandemic" then
-          built = windowSink(button, ns.Style.pandemic, ns.Style.badges)
+          built = windowSink(button, ns.Style.pandemic, ns.Style.badges, cornerSlot)
+        elseif plan.kind == "sealed-proc-bar" then
+          built = procBarSink(button, host, ns.Style.procbar, lift)
         end
       end,
     })

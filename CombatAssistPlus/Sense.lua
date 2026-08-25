@@ -367,7 +367,7 @@ function Sense.Render(snap)
     local v = (out.byEntry or {})[id]
     if v then
       local marks = (#(v.markers or {}) > 0) and ("+" .. table.concat(v.markers, ",")) or ""
-      entries[#entries + 1] = id .. ":" .. (v.tier or "off") .. marks
+      entries[#entries + 1] = id .. ":" .. (v.member and "scan" or "off") .. marks
     end
   end
 

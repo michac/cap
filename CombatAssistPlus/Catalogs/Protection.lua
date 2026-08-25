@@ -91,7 +91,6 @@ ns.Catalog.Register{
     -- also reads nothing at zero remaining, which is correct here — a READY Divine Toll
     -- satisfies `remains<=10` and must not hold anything.
     { id = "avenging_wrath", ability = "avenging_wrath",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "avenging_wrath" } } } },
       markers = {
         { id = "aw_awaits_toll", cue = "blocked",
           when = { { "ready", "avenging_wrath" } },
@@ -115,7 +114,6 @@ ns.Catalog.Register{
     -- withheld on the build almost everyone plays and Divine Toll wears nothing there. Stated as
     -- a hole rather than papered over with an approximation.
     { id = "divine_toll", ability = "divine_toll",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "divine_toll" } } } },
       markers = {
         { id = "dt_awaits_wrath", cue = "blocked",
           when = { { "ready", "divine_toll" },
@@ -135,8 +133,7 @@ ns.Catalog.Register{
     -- ⚠ R1's warning applies exactly: a spender whose cost is the only thing between it and a
     -- press raises no readiness edge for that cost, so Blizzard's border cannot say this.
     { id = "shield_of_the_righteous", ability = "shield_of_the_righteous",
-      bands = { { tier = "ROTATION",
-                  when = { { "affordable", "shield_of_the_righteous" } } } },
+      scan_when = { { { "affordable", "shield_of_the_righteous" } } },
       markers = {
         { id = "sotr_starved", cue = "starved",
           when = { { "affordable", "shield_of_the_righteous", negate = true } } },
@@ -156,7 +153,6 @@ ns.Catalog.Register{
     -- failure direction is a held press and a possibly-wasted charge, which is why it is a named
     -- defeat rather than a footnote.
     { id = "holy_armaments", ability = "holy_armaments",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "holy_armaments" } } } },
       markers = {
         { id = "ha_banks_bulwark", cue = "blocked",
           when = { { "identity", "holy_armaments", "base" },
@@ -182,7 +178,6 @@ ns.Catalog.Register{
     -- ⚠ The Vanguard term is a READABLE GATE on a sealed display — the `when`-beside-`display`
     -- shape. Without it the hatch would rule out the row in the one state rung 13 puts it first.
     { id = "avengers_shield", ability = "avengers_shield",
-      bands = { { tier = "ROTATION", when = { { "ready", "avengers_shield" } } } },
       markers = {
         { id = "as_awaits_hammer", cue = "blocked",
           when = { { "identity", "judgment", "transformed" }, { "ready", "judgment" },
@@ -220,7 +215,6 @@ ns.Catalog.Register{
     -- ⚠ Rungs 19 and 24 are not modelled: `!consecration.up` reads a Category-3 (TrackedBar)
     -- row, the same unmeasured alert-edge question as Avenging Wrath's buff above.
     { id = "consecration", ability = "consecration",
-      bands = { { tier = "ROTATION", when = { { "ready", "consecration" } } } },
       markers = {
         { id = "cons_awaits_hammer",
           when = { { "identity", "judgment", "transformed" }, { "ready", "judgment" },
@@ -250,7 +244,6 @@ ns.Catalog.Register{
     --
     -- ⚠ Rung 17 is not authored — the second-charge dump, and `charged` is undeclarable.
     { id = "judgment", ability = "judgment",
-      bands = { { tier = "ROTATION", when = { { "ready", "judgment" } } } },
       markers = {
         { id = "judgment_awaits_assurance", cue = "blocked",
           when = { { "aura", "blessed_assurance" }, { "talent", "blessed_assurance" },
@@ -269,7 +262,7 @@ ns.Catalog.Register{
     -- does not change KIND under the buff, and a rank change within one kind is what the
     -- left-to-right scan already carries.
     { id = "crusader_strike", ability = "crusader_strike",
-      bands = { { tier = "FALLBACK", when = { { "ready", "crusader_strike" } } } } },
+       },
 
     -- 9 · Word of Glory (rung 28). A Holy Power heal competing with the active mitigation for
     -- the same three Holy Power, and the priority presses it in exactly one state: free. Without
@@ -280,7 +273,6 @@ ns.Catalog.Register{
     -- affordability could matter, and a second badge on the last entry would say the same thing
     -- twice.
     { id = "word_of_glory", ability = "word_of_glory",
-      bands = { { tier = "FALLBACK", when = { { "ready", "word_of_glory" } } } },
       markers = {
         { id = "wog_awaits_shining_light", cue = "blocked",
           when = { { "aura", "shining_light", negate = true } } },

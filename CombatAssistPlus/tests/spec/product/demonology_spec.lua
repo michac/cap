@@ -102,29 +102,40 @@ describe("product characterization / Demonology", function()
     assert.same({}, db(3, "transformed").markers)
   end)
 
-  it("changes row 9's KIND with the identity band, not its visibility", function()
+  it("keeps row 9 in the scan under either identity — the KIND is the icon's to say", function()
+    -- Accepted behavior change (2026-08-25): the old identity/ready band pair both yielded
+    -- membership, so shadow_bolt dropped to default ready-self. A filler is always a scan
+    -- candidate, and an unknown identity no longer darkens it.
     local function sb(form)
       return ns.Signal.Evaluate(resolved,
         H.world{ ready = H.map(true), identity = H.map("base", { shadow_bolt = form }) })
         .byEntry.shadow_bolt
     end
-    assert.equal("ROTATION", sb("transformed").tier)
-    assert.equal("FALLBACK", sb("base").tier)
+    assert.is_true(sb("transformed").member)
+    assert.is_true(sb("base").member)
+    assert.is_nil((function()
+      for _, e in ipairs(cat.entries) do
+        if e.id == "shadow_bolt" then return e.scan_when end
+      end
+    end)(), "shadow_bolt declares a scan_when it does not need")
   end)
 
   -- render-shelf V16/V17. Both counts are SEALED: cap hands the client a rule and never learns
   -- which band fired, so what is asserted here is the authored table and nothing else.
-  it("puts both stack counts on the client, and puts the complement on Implosion", function()
+  it("puts both stack counts on the client, and both polarities on Implosion's numeral", function()
     local imps = marker("implosion_imps_short").display
     assert.equal("sealed-count-bands", imps.kind)
     assert.equal("wild_imp", imps.ability)
-    -- ⚠ The COMPLEMENT: it draws BELOW six and clears at six, because below six imps Implosion
-    -- is literally a damage loss. This is the first sealed fact in any catalog to enter
-    -- elimination rather than merely be displayed.
+    -- ⚠ TWO POLARITIES, one numeral: below six the count is red with the hatch (Implosion is
+    -- literally a damage loss — the first sealed fact in any catalog to enter elimination),
+    -- and at six it RECOLORS gold instead of clearing (2026-08-25): banked, the press is
+    -- loaded. A positive band may not hatch, and hue alone carries the verdict.
     assert.is_true(imps.bands[1].hatch)
     assert.equal("negative", imps.bands[1].polarity)
     assert.equal(6, imps.bands[2].threshold)
-    assert.equal("none", imps.bands[2].draw)
+    assert.equal("count", imps.bands[2].draw)
+    assert.equal("positive", imps.bands[2].polarity)
+    assert.is_nil(imps.bands[2].hatch)
 
     -- Power Siphon runs the ordinary direction: silent while the row is a candidate, ruled out
     -- at two Cores, which is `buff.demonic_core.stack<=1` read as a hold.

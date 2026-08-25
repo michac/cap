@@ -14,7 +14,7 @@ describe("engine / catalog", function()
   it("rejects unused or sealed vocabulary as a Lua predicate", function()
     for _, name in ipairs({ "elapsed", "casts", "cooldownRemaining", "stacks" }) do
       local broken = H.copy(cat)
-      broken.entries[1].bands[1].when = { { name, "tyrant" } }
+      broken.entries[1].scan_when = { { { name, "tyrant" } } }
       assert.is_truthy(H.checks(ns.Catalog.Check(broken)).predicate, name)
     end
   end)
@@ -24,22 +24,22 @@ describe("engine / catalog", function()
     -- ability there must still fail — a talent has no CDM row and resolving it as one would
     -- silently demand a row that can never bind.
     local broken = H.copy(cat)
-    broken.entries[1].bands[1].when = { { "talent", "tyrant" } }
+    broken.entries[1].scan_when = { { { "talent", "tyrant" } } }
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).subject)
 
     -- …and the reverse: an ability predicate may not name a talent.
     local havoc = H.copy(H.catalogBySpec(ns, 577))
-    havoc.entries[1].bands[1].when = { { "ready", "a_fire_inside" } }
+    havoc.entries[1].scan_when = { { { "ready", "a_fire_inside" } } }
     assert.is_truthy(H.checks(ns.Catalog.Check(havoc)).subject)
   end)
 
   it("takes no subject for aoe, and reports arity when one is given", function()
     local broken = H.copy(cat)
-    broken.entries[1].bands[1].when = { { "aoe" } }
+    broken.entries[1].scan_when = { { { "aoe" } } }
     assert.same({}, ns.Catalog.Check(broken))
 
     broken = H.copy(cat)
-    broken.entries[1].bands[1].when = { { "aoe", "tyrant" } }
+    broken.entries[1].scan_when = { { { "aoe", "tyrant" } } }
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).predicate)
   end)
 
@@ -64,33 +64,40 @@ describe("engine / catalog", function()
     assert.same({}, quiet.talent)
   end)
 
-  it("accepts only discrete bands in descending priority order", function()
+  it("rejects the retired tier bands by name", function()
+    -- A stale catalog must fail loudly rather than silently fall back to default membership.
     local broken = H.copy(cat)
-    broken.entries[1].bands[1].tier = "MEDIUM"
-    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).tier)
-
-    broken = H.copy(cat)
-    broken.entries[2].bands = {
-      { tier = "FALLBACK", when = { { "proc", "demonbolt" } } },
-      { tier = "ROTATION", when = { { "proc", "demonbolt" } } },
-    }
-    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).tier)
+    broken.entries[1].bands = { { tier = "ROTATION", when = { { "ready", "tyrant" } } } }
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
   end)
 
-  it("allows several alternative bands in the same tier", function()
+  it("accepts a well-shaped scan_when and rejects malformed ones", function()
     local expanded = H.copy(cat)
-    expanded.entries[1].bands[#expanded.entries[1].bands + 1] = {
-      tier = "ROTATION", when = { { "ready", "tyrant" } },
+    expanded.entries[1].scan_when = {
+      { { "ready", "tyrant" } },
+      { { "identity", "grimoire", "transformed" } },
     }
     assert.same({}, ns.Catalog.Check(expanded))
+
+    local broken = H.copy(cat)
+    broken.entries[1].scan_when = {}
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
+
+    broken = H.copy(cat)
+    broken.entries[1].scan_when = { {} }
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
+
+    broken = H.copy(cat)
+    broken.entries[1].scan_when = "ready"
+    assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
   end)
 
   it("rejects undeclared subjects and malformed resource comparisons", function()
     local broken = H.copy(cat)
-    broken.entries[1].bands[1].when = { { "ready", "missing" } }
+    broken.entries[1].scan_when = { { { "ready", "missing" } } }
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).subject)
     broken = H.copy(cat)
-    broken.entries[1].bands[1].when = { { "resource", "==", 3 } }
+    broken.entries[1].scan_when = { { { "resource", "==", 3 } } }
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).predicate)
   end)
 
@@ -156,7 +163,7 @@ describe("engine / catalog", function()
     assert.is_truthy(H.checks(ns.Catalog.Check(empty)).shape)
   end)
 
-  it("takes exactly one of within or beyond on a sealed cooldown range", function()
+  it("takes within, beyond, or the ordered pair on a sealed cooldown range", function()
     local havoc = H.catalogBySpec(ns, 577)
     local function band(target, id)
       for _, e in ipairs(target.entries) do
@@ -169,12 +176,19 @@ describe("engine / catalog", function()
     assert.equal(10, band(havoc, "hunt_awaits_eye_beam").display.beyond)
     assert.equal(15, band(havoc, "hunt_awaits_meta").display.within)
 
+    -- BOTH is the two-sided band (Demonology's dogs, 2026-08-24) — legal when beyond < within.
+    local paired = H.copy(havoc)
+    band(paired, "hunt_awaits_meta").display.beyond = 10
+    assert.is_falsy(H.checks(ns.Catalog.Check(paired)).display)
+
+    -- The reversed pair is an empty band that would arm and never draw — refused.
     local broken = H.copy(havoc)
-    band(broken, "hunt_awaits_meta").display.beyond = 10
+    band(broken, "hunt_awaits_meta").display.beyond = 20
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
 
     broken = H.copy(havoc)
     band(broken, "hunt_awaits_meta").display.within = nil
+    band(broken, "hunt_awaits_meta").display.beyond = nil
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)
 
     broken = H.copy(havoc)

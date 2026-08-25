@@ -15,15 +15,16 @@ describe("engine / signal", function()
       proc = H.map(false, { demonbolt = true }), resource = 1,
     }
     local out = ns.Signal.Evaluate(resolved, world)
-    assert.equal("ROTATION", out.byEntry.tyrant.tier)
+    assert.is_true(out.byEntry.tyrant.member)
     assert.same({ "dreadstalkers", "grimoire" }, out.byEntry.tyrant.markers)
-    assert.equal("ROTATION", out.byEntry.demonbolt.tier)
+    assert.is_true(out.byEntry.demonbolt.member)
   end)
 
   it("withholds output when a readable fact refuses", function()
     local out = ns.Signal.Evaluate(resolved, H.blindWorld())
     assert.is_false(out.byEntry.tyrant.emphasized)
-    assert.is_nil(out.byEntry.tyrant.tier)
+    assert.is_false(out.byEntry.tyrant.member)
+    assert.is_true(out.byEntry.tyrant.blind)
     assert.same({}, out.byEntry.tyrant.markers)
     assert.is_true(out.unknowns > 0)
   end)
@@ -33,37 +34,44 @@ describe("engine / signal", function()
       ns.Signal.Term({ "ready", "dreadstalkers", negate = true }, H.blindWorld()))
   end)
 
-  it("selects a discrete lower tier rather than grading strength", function()
+  it("membership follows the declared scan_when alternative", function()
     local low = ns.Signal.Evaluate(resolved, H.world{ proc = H.map(true), resource = 1 })
     local high = ns.Signal.Evaluate(resolved, H.world{ proc = H.map(true), resource = 5 })
-    assert.equal("ROTATION", low.byEntry.demonbolt.tier)
-    assert.equal("FALLBACK", high.byEntry.demonbolt.tier)
+    assert.is_true(low.byEntry.demonbolt.member)
+    assert.is_false(high.byEntry.demonbolt.member)
+    assert.is_false(high.byEntry.demonbolt.blind)
     local blind = ns.Signal.Evaluate(resolved, H.world{ proc = H.map(true), resource = "unknown" })
-    assert.is_nil(blind.byEntry.demonbolt.tier)
+    assert.is_false(blind.byEntry.demonbolt.member)
+    assert.is_true(blind.byEntry.demonbolt.blind)
   end)
 
-  it("allows several entries to occupy one tier", function()
-    local duplicate = H.copy(resolved)
-    duplicate.entries[2].entry.bands = {
-      { tier = "ROTATION", when = { { "proc", "demonbolt" } } },
-    }
-    local out = ns.Signal.Evaluate(duplicate, H.world{ proc = H.map(true) })
-    assert.equal("ROTATION", out.byEntry.tyrant.tier)
-    assert.equal("ROTATION", out.byEntry.demonbolt.tier)
+  it("a default entry is in the scan exactly when the ability reads ready", function()
+    -- The shadow_bolt-shaped pin (2026-08-25): default membership reads ready(self) and
+    -- NOTHING else, so an unknown identity or resource no longer darkens a filler row.
+    local out = ns.Signal.Evaluate(resolved,
+      H.world{ identity = H.map("unknown"), resource = "unknown" })
+    assert.is_true(out.byEntry.tyrant.member)
+    assert.is_false(out.byEntry.tyrant.blind)
+    local down = ns.Signal.Evaluate(resolved, H.world{ ready = H.map(false) })
+    assert.is_false(down.byEntry.tyrant.member)
+    assert.is_false(down.byEntry.tyrant.blind)
   end)
 
-  it("tries same-tier alternatives but never falls below an uncertain higher tier", function()
-    local bands = resolved.entries[2].entry.bands
-    bands[1] = { tier = "ROTATION", when = { { "resource", "<=", 3 } } }
-    table.insert(bands, 2, { tier = "ROTATION", when = { { "proc", "demonbolt" } } })
-    local same = ns.Signal.Evaluate(resolved,
+  it("one ON alternative carries membership even while another is blind", function()
+    -- The uniform blind rule: blindness withholds only when NO alternative reads ON. Under
+    -- the retired tier bands a blind higher band withheld a true lower one.
+    local alts = resolved.entries[2].entry.scan_when
+    alts[#alts + 1] = { { "proc", "demonbolt" } }
+    local out = ns.Signal.Evaluate(resolved,
       H.world{ proc = H.map(true), resource = "unknown" })
-    assert.equal("ROTATION", same.byEntry.demonbolt.tier)
+    assert.is_true(out.byEntry.demonbolt.member)
+    assert.is_false(out.byEntry.demonbolt.blind)
+  end)
 
-    bands[2] = { tier = "FALLBACK", when = { { "proc", "demonbolt" } } }
-    local lower = ns.Signal.Evaluate(resolved,
-      H.world{ proc = H.map(true), resource = "unknown" })
-    assert.is_nil(lower.byEntry.demonbolt.tier)
+  it("allows several entries in the scan at once", function()
+    local out = ns.Signal.Evaluate(resolved, H.world{ proc = H.map(true), resource = 1 })
+    assert.is_true(out.byEntry.tyrant.member)
+    assert.is_true(out.byEntry.demonbolt.member)
   end)
 
 

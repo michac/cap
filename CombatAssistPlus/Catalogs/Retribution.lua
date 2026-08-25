@@ -53,7 +53,6 @@ ns.Catalog.Register{
     -- 1. A PLACED cooldown, not a press-on-cooldown one. Three markers, one cue key, so the
     -- AND-only band grammar unions them into a single badge — and that union IS the OR.
     { id = "execution_sentence", ability = "execution_sentence",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "execution_sentence" } } } },
       markers = {
         -- Avenging Wrath READY. Not redundant with the band below, which reads nothing at zero
         -- remaining: this row sits LEFT of Avenging Wrath, so a quiet row 1 is pressed before
@@ -78,24 +77,22 @@ ns.Catalog.Register{
     -- The `talent` gate is what makes this safe in the other direction: without Holy Flames the
     -- APL term is vacuously true, and this marker must not exist at all.
     { id = "avenging_wrath", ability = "avenging_wrath",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "avenging_wrath" } } } },
       markers = {
         { id = "aw_awaits_expurgation", cue = "blocked",
           when = { { "ready", "avenging_wrath" }, { "talent", "holy_flames" },
                    { "aura", "expurgation", negate = true } } },
       } },
 
-    -- 3. TWO LANES ON ONE ROW, selected by identity: a cooldown while it is Wake of Ashes, a
-    -- spender while Light's Guidance has made it Hammer of Light. `Signal.tier` takes the first
-    -- band whose condition holds, so band ORDER carries meaning here.
+    -- 3. One row, two lives, selected by identity: a cooldown while it is Wake of Ashes, a
+    -- spender while Light's Guidance has made it Hammer of Light. Membership is the OR of the
+    -- scan_when alternatives, so either life keeps the row in the scan.
     { id = "wake_of_ashes", ability = "wake_of_ashes",
-      -- Bands descend in priority (Catalog.Check enforces it), and the two conditions are
-      -- mutually exclusive on `identity`, so the descending order costs nothing: while the row
-      -- is Hammer of Light the COOLDOWN band simply fails and the ROTATION lane is taken.
-      bands = {
-        { tier = "COOLDOWN", when = { { "identity", "wake_of_ashes", "base" },
-                                      { "ready", "wake_of_ashes" } } },
-        { tier = "ROTATION", when = { { "identity", "wake_of_ashes", "transformed" } } },
+      -- Real conditional membership, the rare case: as base Wake of Ashes the row is in the
+      -- scan only when ready; as Hammer of Light (transformed) it is in the scan by identity —
+      -- the granted press has no cooldown of its own to read.
+      scan_when = {
+        { { "identity", "wake_of_ashes", "base" }, { "ready", "wake_of_ashes" } },
+        { { "identity", "wake_of_ashes", "transformed" } },
       },
       markers = {
         -- Affordability of the LIVE id: Hammer of Light's 5 Holy Power on the transformed row,
@@ -113,7 +110,6 @@ ns.Catalog.Register{
 
     -- 4. The one builder that genuinely must not be pressed at cap.
     { id = "divine_toll", ability = "divine_toll",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "divine_toll" } } } },
       markers = {
         { id = "dt_awaits_wrath", cue = "blocked",
           when = { { "ready", "divine_toll" }, { "talent", "radiant_glory", negate = true } },
@@ -126,7 +122,7 @@ ns.Catalog.Register{
 
     -- 5. The default spender, and the wrong one in three states that look identical on the icon.
     { id = "templars_verdict", ability = "templars_verdict",
-      bands = { { tier = "ROTATION", when = { { "affordable", "templars_verdict" } } } },
+      scan_when = { { { "affordable", "templars_verdict" } } },
       markers = {
         { id = "tv_starved", cue = "starved",
           when = { { "affordable", "templars_verdict", negate = true } } },
@@ -159,7 +155,7 @@ ns.Catalog.Register{
     -- 6. Needs no mirror of cue E: it sits RIGHT of Templar's Verdict, so in single target
     -- elimination reaches that row first and never has to be told to.
     { id = "divine_storm", ability = "divine_storm",
-      bands = { { tier = "ROTATION", when = { { "affordable", "divine_storm" } } } },
+      scan_when = { { { "affordable", "divine_storm" } } },
       markers = {
         { id = "ds_starved", cue = "starved",
           when = { { "affordable", "divine_storm", negate = true } } },
@@ -195,7 +191,6 @@ ns.Catalog.Register{
     -- The condition IS the APL rung, minus `time<5`: the aura latch subsumes it, because the only
     -- moment Expurgation is absent on a Holy Flames build is before the first Blade of Justice.
     { id = "blade_of_justice", ability = "blade_of_justice",
-      bands = { { tier = "ROTATION", when = { { "ready", "blade_of_justice" } } } },
       markers = {
         { id = "boj_opener", cue = "priority",
           when = { { "ready", "blade_of_justice" }, { "talent", "holy_flames" },
@@ -205,12 +200,12 @@ ns.Catalog.Register{
     -- 8. Hammer of Wrath's execute condition needs no vocabulary: the row IS Hammer of Wrath
     -- exactly when Hammer of Wrath is castable.
     { id = "judgment", ability = "judgment",
-      bands = { { tier = "ROTATION", when = { { "ready", "judgment" } } } } },
+       },
 
     -- 9. Binds only if the row exists. On a Crusading Strikes build the talent replaces the
     -- button with an auto-attack, so the priority genuinely ends at Judgment and this costs
     -- nothing.
     { id = "crusader_strike", ability = "crusader_strike",
-      bands = { { tier = "FALLBACK", when = { { "ready", "crusader_strike" } } } } },
+       },
   },
 }

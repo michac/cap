@@ -16,17 +16,19 @@ describe("product characterization / Destruction pilot", function()
     }).byEntry.conflagrate
   end
 
-  it("places available Conflagrate in ROTATION through four shards", function()
-    assert.equal("ROTATION", verdict(1, 4).tier)
+  it("keeps available Conflagrate in the scan at any shard count", function()
+    -- Accepted behavior change (2026-08-25): the old two bands — ROTATION at <=4 shards,
+    -- FALLBACK above — both yielded membership, so the entry dropped to default ready-self
+    -- and the shard count no longer touches membership at all.
+    assert.is_true(verdict(1, 4).member)
+    assert.is_true(verdict(1, 5).member)
   end)
 
-  it("places available Conflagrate in FALLBACK above four shards", function()
-    assert.equal("FALLBACK", verdict(1, 5).tier)
-  end)
-
-  it("withholds a tier at zero or unknown charges", function()
-    assert.is_nil(verdict(0, 2).tier)
-    assert.is_nil(verdict(nil, 2).tier)
+  it("leaves the scan at zero charges, and withholds blind at unknown", function()
+    assert.is_false(verdict(0, 2).member)
+    assert.is_false(verdict(0, 2).blind)
+    assert.is_false(verdict(nil, 2).member)
+    assert.is_true(verdict(nil, 2).blind)
   end)
 
   it("authors Backdraft as an independent sealed display", function()

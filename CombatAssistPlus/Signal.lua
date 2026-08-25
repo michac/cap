@@ -70,24 +70,24 @@ function Signal.Explain(terms, world)
   return state, parts
 end
 
--- The truth-only view the tier/marker gates need. Delegated to Explain so the two can never
--- disagree: `shown` iff every term is true, `blind` iff an unknown (and no false) withheld it.
+-- The truth-only view the membership/marker gates need. Delegated to Explain so the two can
+-- never disagree: `shown` iff every term is true, `blind` iff an unknown (and no false) withheld it.
 local function all(terms, world)
   local state = Signal.Explain(terms, world)
   return state == "on", state == "blind"
 end
 
---- The selected tier, plus WHICH tier went blind rather than merely that one did — a reader
---- diagnosing a dark row needs to know which band refused, not just that a band did.
-local function tier(entry, world)
-  local uncertain
-  for _, band in ipairs(entry.bands or {}) do
-    if uncertain and band.tier ~= uncertain then return nil, uncertain end
-    local on, blind = all(band.when, world)
-    if on then return band.tier, nil end
-    if blind then uncertain = band.tier end
+--- Scan membership over the entry's alternatives (OR of ANDs; default ready-self —
+--- Catalog.Alternatives). The blind rule is uniform and conservative: if no alternative reads
+--- ON and any alternative is BLIND, the row is withheld and `blind` carries the diagnostic.
+local function member(entry, world)
+  local blind = false
+  for _, terms in ipairs(ns.Catalog.Alternatives(entry)) do
+    local on, b = all(terms, world)
+    if on then return true, false end
+    if b then blind = true end
   end
-  return nil, uncertain
+  return false, blind
 end
 
 --- Cue keys in shelf-RANK order, deduped. Two markers may name one cue — that is how an OR is
@@ -110,21 +110,21 @@ function Signal.Evaluate(resolved, world)
   local out = { byEntry = {}, emphasized = 0, markers = 0, unknowns = 0 }
   for _, bound in ipairs((resolved or {}).entries or {}) do
     local entry = bound.entry
-    local selected, blindTier = tier(entry, world)
+    local isMember, blind = member(entry, world)
     -- V11's hatch: the CDM's own readiness latch, and ONLY the false case. `nil` and UNKNOWN both
     -- draw bare, because absence of a hatch must never assert that a button is up — cap says a
     -- thing is on cooldown when it has been told so and at no other time.
     local ready = (world.ready or {})[entry.id]
     local verdict = {
-      entry = entry.id, row = bound.row, tier = selected, charged = bound.charged,
+      entry = entry.id, row = bound.row, member = isMember, charged = bound.charged,
       oncd = ready == false,
-      emphasized = selected ~= nil, blindTier = blindTier, markers = {}, cues = {},
+      emphasized = isMember, blind = blind, markers = {}, cues = {},
       reasons = {}, gates = {},
     }
-    if selected then
+    if isMember then
       out.emphasized = out.emphasized + 1
     end
-    if blindTier then out.unknowns = out.unknowns + 1 end
+    if blind then out.unknowns = out.unknowns + 1 end
     local cues = {}
     for _, marker in ipairs(entry.markers or {}) do
       -- Sealed displays are acquired by Channel and never become Lua predicates.

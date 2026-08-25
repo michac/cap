@@ -185,15 +185,15 @@ describe("engine / composition", function()
   -- swiped row does. This is Part 0.5's pass 2 drawn, and it must key on POLARITY rather than on
   -- a list of cue names, or a cue added later is silently exempt.
   it("hatches a row for a negative cue, and never for a positive one", function()
-    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "blocked" } }.skip)
-    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "starved" } }.skip)
-    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "overcap" } }.skip)
-    assert.is_false(ns.Treatment.For{ tier = "ROTATION", cues = { "priority" } }.skip)
-    assert.is_false(ns.Treatment.For{ tier = "ROTATION", cues = { "capped" } }.skip)
+    assert.is_true(ns.Treatment.For{ member = true, cues = { "blocked" } }.skip)
+    assert.is_true(ns.Treatment.For{ member = true, cues = { "starved" } }.skip)
+    assert.is_true(ns.Treatment.For{ member = true, cues = { "overcap" } }.skip)
+    assert.is_false(ns.Treatment.For{ member = true, cues = { "priority" } }.skip)
+    assert.is_false(ns.Treatment.For{ member = true, cues = { "capped" } }.skip)
     -- A mixed row is still ruled out: the negative is what elimination reads.
-    assert.is_true(ns.Treatment.For{ tier = "ROTATION", cues = { "priority", "blocked" } }.skip)
+    assert.is_true(ns.Treatment.For{ member = true, cues = { "priority", "blocked" } }.skip)
     -- Blizzard's cause is independent of cap's, and both can be true at once.
-    local both = ns.Treatment.For{ tier = "ROTATION", cues = { "blocked" }, oncd = true }
+    local both = ns.Treatment.For{ member = true, cues = { "blocked" }, oncd = true }
     assert.is_true(both.hatch)
     assert.is_true(both.skip)
   end)
@@ -224,7 +224,7 @@ describe("engine / composition", function()
 
   it("carries a mixed cue set through whole, so the negative badge is still there to read",
     function()
-      local d = ns.Treatment.For{ tier = "ROTATION", cues = { "capped", "blocked" } }
+      local d = ns.Treatment.For{ member = true, cues = { "capped", "blocked" } }
       assert.same({ "capped", "blocked" }, d.cues)
       assert.is_true(d.scan)
     end)
@@ -238,11 +238,11 @@ describe("engine / composition", function()
     assert.same({}, ns.Treatment.For(v).cues)
   end)
 
-  it("names which tier went blind rather than only that one did", function()
+  it("reports blindness as a boolean beside the withheld membership", function()
     local cat = H.catalogBySpec(ns, 267)
     local resolved = ns.Catalog.Resolve(cat, H.destructionRows())
     local v = ns.Signal.Evaluate(resolved, H.blindWorld()).byEntry.conflagrate
-    assert.is_nil(v.tier)
-    assert.equal(cat.entries[1].bands[1].tier, v.blindTier)
+    assert.is_false(v.member)
+    assert.is_true(v.blind)
   end)
 end)

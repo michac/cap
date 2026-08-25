@@ -105,6 +105,18 @@ ns.Style = {
       polarity = "negative",
       rank = 3,
     },
+    building = {
+      budgeted = false,
+      duration_s = 1.2,
+      frames = {
+        "card_outline_lift",
+      },
+      loop = "HOLD",
+      means = "hold this for the Tyrant-style ramp and build resource — pressing it now spends the window on a half-built board",
+      open = false,
+      polarity = "negative",
+      rank = 8,
+    },
     capped = {
       budgeted = false,
       duration_s = 1.2,
@@ -124,6 +136,18 @@ ns.Style = {
       polarity = "positive",
       rank = 2,
       rgb = { 1.00, 0.78, 0.25 },
+    },
+    noproc = {
+      budgeted = false,
+      duration_s = 1.2,
+      frames = {
+        "card_outline",
+      },
+      loop = "HOLD",
+      means = "the proc that makes this button worth pressing is not up",
+      open = false,
+      polarity = "negative",
+      rank = 9,
     },
     overcap = {
       budgeted = false,
@@ -221,8 +245,13 @@ ns.Style = {
     tick_s = 0.025,
   },
   pandemic = {
-    _comment = "V19. The pandemic window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge — halo, plate and sprite together — appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively. The badge holds cue-badge brightness exactly — plate at badges.plate.alpha, sprite at full alpha, NO region pulse and NO countdown — and it wears the `fire` glyph, DELIBERATELY the same glyph as the `priority` cue: both mean 'act now — press this', and the window badge is exactly a client-decided promotion of a DoT row. (Its previous glyph, timer_CW_75, was a static Kenney clock whose baked 75% wedge read as a live radial attached to nothing — retired for lying.) Its motion is the FULL positive-cue treatment: V14's promotion ring (armed before the handover, FlipBook) plus `glow`, the SAME halo the positive cues wear (badges.halo art, radial falloff from badges.halo_falloff), breathing behind the plate, armed before the handover since that is the only motion that survives the in-combat forbidden-object seal (§3.5.3). The OUTSIDE-window state of the pair deliberately has no token group: it reuses the count vocabulary's positive hatch crop and this group's gold, and its threshold (outside_s, seconds) is the CATALOG's number, never the shelf's.",
-    frame = "fire",
+    _comment = "V19. The pandemic window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge — halo, plate and dial together — appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively. The badge holds cue-badge brightness exactly — plate at badges.plate.alpha, NO region pulse and NO numeral — and its centre is the DIAL: a radial StatusBar the CLIENT drains off the aura's own duration object (SetDurationBar -> SetTimerDuration, direction = RemainingTime; §3.5.2, T1), gold arc (`dial.rgb`) over a dark track (`dial.track_rgb`/`track_alpha`) on the plate. Cap reads nothing — the bar's value is sealed (`BarValue`) and the drain is the client's. ⚠ ApplyDurationBar never calls SetMinMaxValues, so the addon calls SetMinMaxValues(0, 1) at setup or the bar draws 0 % forever (§4.8.1 finding 3); Radial render mode is pcall'd with linear fallback. (Its predecessor glyphs are both retired: timer_CW_75, a static Kenney clock whose baked 75% wedge read as a live radial attached to nothing, and briefly `fire` — the dial is the wedge's claim made TRUE, an arc that actually is the DoT draining.) ⚠ The AddPandemicRegion + SetDurationBar one-button pair is UNFLOWN — each half measured alone (Part 5). Its motion is the FULL positive-cue treatment: V14's promotion ring (armed before the handover, FlipBook) plus `glow`, the SAME halo the positive cues wear (badges.halo art, radial falloff from badges.halo_falloff), breathing behind the plate, armed before the handover since that is the only motion that survives the in-combat forbidden-object seal (§3.5.3). The OUTSIDE-window state of the pair deliberately has no token group: it reuses the count vocabulary's positive hatch crop and this group's gold, and its threshold (outside_s, seconds) is the CATALOG's number, never the shelf's.",
+    dial = {
+      rgb = { 1.00, 0.78, 0.25 },
+      size_px = 15,
+      track_alpha = 0.6,
+      track_rgb = { 0.22, 0.17, 0.08 },
+    },
     glow = {
       alpha_max = 0.55,
       alpha_min = 0.15,
@@ -230,8 +259,6 @@ ns.Style = {
       scale = 1.55,
     },
     rgb = { 1.00, 0.78, 0.25 },
-    size_px = 15,
-    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\badges\\",
     tint = "shelf",
   },
   panel = {
@@ -241,6 +268,14 @@ ns.Style = {
     icon_px = 50,
     x = 0,
     y = 190,
+  },
+  procbar = {
+    _comment = "V20. The proc's remaining lifetime as a thin client-drained bar above V18's charge bar (or on the bottom edge when no charge bar is declared). SetDurationBar -> SetTimerDuration(RemainingTime); SetMinMaxValues(0,1) FIRST (§4.8.1 finding 3); linear render mode. Gold over a dark track — the edge carries quantity, not polarity, which is why this lives here and not in the badge column (the corner-dial form it replaces lasted one day; V19's badge dial stays). gap_px separates it from the charge bar below. No art, so no tint key.",
+    gap_px = 1,
+    height_px = 3,
+    rgb = { 1.00, 0.78, 0.25 },
+    track_alpha = 0.6,
+    track_rgb = { 0.22, 0.17, 0.08 },
   },
   promotion = {
     alpha = 1.00,
@@ -295,40 +330,14 @@ ns.Style = {
     max_hz = 2.00,
   },
   verdicts = {
-    below = {
-      cues = {  },
-      scan = true,
-      swipe = false,
-    },
     cd = {
       cues = {  },
       hatch = true,
       scan = false,
       swipe = true,
     },
-    ["hold-readable"] = {
-      cues = {
-        "blocked",
-      },
-      scan = true,
-      swipe = false,
-    },
-    ["hold-sealed"] = {
-      cues = {
-        "blocked",
-      },
-      scan = true,
-      swipe = false,
-    },
-    ["off-mode"] = {
+    open = {
       cues = {  },
-      scan = true,
-      swipe = false,
-    },
-    overcap = {
-      cues = {
-        "overcap",
-      },
       scan = true,
       swipe = false,
     },
@@ -337,22 +346,10 @@ ns.Style = {
       scan = true,
       swipe = false,
     },
-    ["press-promoted"] = {
-      cues = {  },
-      scan = true,
-      swipe = false,
-    },
     ["ruled-sealed"] = {
       _comment = "V17. The row is RULED OUT by a sealed count band — the client evaluated cap's own rule against a secret and drew the hatch and the mark itself. It carries no `cues` because there is no cue: the marks come out of one FontString the client writes, and a cue is a badge cap shows. It eliminates anyway, which is the whole novelty — this is the first eliminating signal that is neither Blizzard's swipe nor cap's own badge.",
       cues = {  },
       eliminates = true,
-      scan = true,
-      swipe = false,
-    },
-    starved = {
-      cues = {
-        "starved",
-      },
       scan = true,
       swipe = false,
     },

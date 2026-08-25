@@ -1090,7 +1090,7 @@ local function buildSealed()
        "clears them together. A band draws the mark or the number, never both. " ..
        "The VALUES here are the gallery's; in the client cap never learns which band fired.")
 
-  section("V18 · sealed bar  ·  V19 · pandemic window")
+  section("V18 · sealed bar  ·  V19 · pandemic window  ·  V20 · proc bar")
   x = PAD
   local A, g = ns.Style.bar, ns.Paint.Geometry()
   for _, at in ipairs({ 0, 2, 4 }) do
@@ -1129,17 +1129,58 @@ local function buildSealed()
   plate:SetAlpha(b.plate.alpha)
   plate:SetSize(g.plate, g.plate)
   plate:SetPoint("CENTER")
-  local sprite = slot:CreateTexture(nil, "OVERLAY", nil, 7)
-  sprite:SetTexture(P.texture_root .. P.frame .. ".tga", nil, nil, "TRILINEAR")
-  sprite:SetVertexColor(P.rgb[1], P.rgb[2], P.rgb[3])
-  sprite:SetSize(P.size_px, P.size_px)
-  sprite:SetPoint("CENTER")
-  if P.pulse then ns.Paint.Breathe(slot, P.pulse):Play() end
+  -- The dial at a STATIC fraction: a swatch states the look; only the client drains the live
+  -- one (Channel's windowSink, SetDurationBar → RemainingTime).
+  local dial = CreateFrame("StatusBar", nil, slot)
+  dial:SetSize(P.dial.size_px, P.dial.size_px)
+  dial:SetPoint("CENTER")
+  dial:SetMinMaxValues(0, 1)
+  local dtrack = dial:CreateTexture(nil, "BACKGROUND")
+  dtrack:SetAllPoints(dial)
+  dtrack:SetColorTexture(P.dial.track_rgb[1], P.dial.track_rgb[2], P.dial.track_rgb[3],
+    P.dial.track_alpha)
+  local dfill = dial:CreateTexture(nil, "ARTWORK")
+  dfill:SetColorTexture(P.dial.rgb[1], P.dial.rgb[2], P.dial.rgb[3], 1)
+  if not dial:SetStatusBarTexture(dfill) then
+    dfill:SetAllPoints(dial)   -- refused as a bar fill: show the flat gold, not an empty ring
+  end
+  pcall(dial.SetRenderMode, dial,
+    Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial or 1)
+  dial:SetValue(0.75)
+  x = x + icon() + SPREAD
+
+  -- V20 · the proc bar: the proc's remaining lifetime as a thin bar directly above the
+  -- charge bar. Static fractions; the live one is Channel's procBarSink, drained by the
+  -- client. Edge grammar, not badge grammar — gold here is quantity, never polarity.
+  local PB = ns.Style.procbar
+  local host20 = swatch(x, y, SAMPLE[4].spell, "proc bar")
+  local charge20 = ns.Paint.CountBar(host20, {
+    rgb = A.rgb, track_rgb = A.track_rgb, track_alpha = A.track_alpha,
+    w = icon(), h = A.height_px,
+  })
+  charge20:SetPoint("BOTTOMLEFT", host20, "BOTTOMLEFT", 0, 0)
+  charge20:SetValue(2 / 4)
+  local pbar = CreateFrame("StatusBar", nil, host20)
+  pbar:SetPoint("BOTTOMLEFT", host20, "BOTTOMLEFT", 0, A.height_px + (PB.gap_px or 0))
+  pbar:SetPoint("BOTTOMRIGHT", host20, "BOTTOMRIGHT", 0, A.height_px + (PB.gap_px or 0))
+  pbar:SetHeight(PB.height_px)
+  pbar:SetMinMaxValues(0, 1)
+  local ptrack = pbar:CreateTexture(nil, "BACKGROUND")
+  ptrack:SetAllPoints(pbar)
+  ptrack:SetColorTexture(PB.track_rgb[1], PB.track_rgb[2], PB.track_rgb[3], PB.track_alpha)
+  local pfill = pbar:CreateTexture(nil, "ARTWORK")
+  pfill:SetColorTexture(PB.rgb[1], PB.rgb[2], PB.rgb[3], 1)
+  if not pbar:SetStatusBarTexture(pfill) then
+    pfill:SetAllPoints(pbar)   -- refused as a bar fill: show the flat gold, not an empty track
+  end
+  pbar:SetValue(0.6)
 
   y = y + icon() + CAPTION_H + 6
   note("A bar has NO BLANK STATE — the track draws at zero — and at full the WHOLE bar flips " ..
        "to the negative red: stop banking. The window badge authors no threshold at all: the " ..
-       "client computes its own, per spell, and owns whether the region is shown.")
+       "client computes its own, per spell, and owns whether the region is shown. The proc " ..
+       "bar is the proc's remaining lifetime above the charge bar — this many banked, this " ..
+       "long to use one — drained by the client off the proc's own duration.")
 end
 
 local function buildStyle(pane)

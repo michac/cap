@@ -79,8 +79,8 @@ describe("product characterization / Protection", function()
   it("declares no power type, so no row anywhere branches on a resource", function()
     assert.is_nil(cat.power)
     for _, e in ipairs(cat.entries) do
-      for _, band in ipairs(e.bands or {}) do
-        for _, t in ipairs(band.when or {}) do
+      for _, alt in ipairs(ns.Catalog.Alternatives(e)) do
+        for _, t in ipairs(alt) do
           assert.not_equal("resource", t[1], e.id .. " branches on a resource")
         end
       end
@@ -291,12 +291,8 @@ describe("product characterization / Protection", function()
     assert.equal(35395, cs.spell)
     assert.same({ 53595, 204019 }, cs.alt)
     -- Exactly one exists on a build and it is permanently on the row, so there is no identity
-    -- band to draw and nothing to say about the filler.
-    for _, band in ipairs(entry("crusader_strike").bands) do
-      for _, t in ipairs(band.when or {}) do
-        assert.not_equal("identity", t[1], "the filler bands on a distinction that never varies")
-      end
-    end
+    -- condition to declare and nothing to say about the filler: default membership.
+    assert.is_nil(entry("crusader_strike").scan_when)
     assert.is_nil(entry("crusader_strike").markers)
   end)
 end)

@@ -16,11 +16,10 @@ ns.Catalog.Register{
 
   entries = {
     {
+      -- Default membership (ready-self). The old two bands — ROTATION at <=4 shards, FALLBACK
+      -- otherwise — both yielded membership, so the shard term carried no membership
+      -- information; under blindness this row now stays lit, which is what a filler should do.
       id = "conflagrate", ability = "conflagrate",
-      bands = {
-        { tier = "ROTATION", when = { { "ready", "conflagrate" }, { "resource", "<=", 4 } } },
-        { tier = "FALLBACK", when = { { "ready", "conflagrate" } } },
-      },
       markers = {
         -- Migrated from `player-aura-stacks` to V16's bands on 2026-08-22. The shape is
         -- UNCHANGED — silent below two, the number at two and above — but it is now cap's own

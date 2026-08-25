@@ -28,8 +28,8 @@ describe("product characterization / Havoc pilot", function()
   it("declares no power type, because Fury is a secret primary", function()
     assert.is_nil(cat.power)
     for _, entry in ipairs(cat.entries) do
-      for _, band in ipairs(entry.bands) do
-        for _, term in ipairs(band.when) do
+      for _, alt in ipairs(ns.Catalog.Alternatives(entry)) do
+        for _, term in ipairs(alt) do
           assert.not_equal("resource", term[1], entry.id .. " branches on Fury")
         end
       end
@@ -251,7 +251,7 @@ describe("product characterization / Havoc pilot", function()
     assert.equal((170 - 25) / 170, ns.Channel.PowerBreak(bite.generation, 170))
   end)
 
-  --- One COOLDOWN entry evaluated against a forced readiness map.
+  --- One placed-cooldown entry evaluated against a forced readiness map.
   local function hold(id, ready)
     local entry
     for _, e in ipairs(H.catalogBySpec(ns, 577).entries) do
@@ -371,14 +371,12 @@ describe("product characterization / Havoc pilot", function()
     end
   end)
 
-  it("leaves no FALLBACK row without charges — the tier has no subject on this spec", function()
-    local byAbility = {}
-    for _, a in ipairs(cat.abilities) do byAbility[a.id] = a end
+  it("declares no scan_when anywhere — every Havoc row is a default ready-self member", function()
+    -- The FALLBACK-charges audit that stood here was about the tier having no subject on this
+    -- spec; without tiers that is vacuous, and what remains assertable is that the collapse
+    -- left no conditional membership behind.
     for _, entry in ipairs(cat.entries) do
-      if entry.bands[1].tier == "FALLBACK" then
-        assert.is_true(byAbility[entry.ability].charged,
-          entry.id .. " is filed FALLBACK, which catalog.md says never happens here")
-      end
+      assert.is_nil(entry.scan_when, entry.id .. " declares conditional membership")
     end
   end)
 end)

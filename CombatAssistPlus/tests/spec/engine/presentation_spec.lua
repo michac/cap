@@ -5,15 +5,15 @@ describe("engine / presentation", function()
   local ns
   before_each(function() ns = H.fresh() end)
 
-  it("draws every role tier as the ONE scan treatment, with nothing to tell them apart", function()
-    for _, tier in ipairs({ "COOLDOWN", "ROTATION", "FALLBACK" }) do
-      local d = ns.Treatment.For{ tier = tier }
-      assert.is_true(d.scan, tier .. " draws nothing")
-      -- The tier stays in the MODEL and reaches the paint as one bit. Anything here that could
-      -- tell one tier from another is a hue ladder growing back (render-shelf V2).
-      assert.is_nil(d.lane, tier .. " still carries a drawn lane")
-      assert.is_nil(d.thickness, tier .. " still carries a band width the border cannot use")
-    end
+  it("draws a member row as the ONE scan treatment, with nothing finer to draw", function()
+    local d = ns.Treatment.For{ member = true }
+    assert.is_true(d.scan)
+    -- Membership reaches the paint as one bit. Anything here that could grade one member row
+    -- against another is a hue ladder growing back (render-shelf V2).
+    assert.is_nil(d.lane, "a member row still carries a drawn lane")
+    assert.is_nil(d.thickness, "a member row still carries a band width the border cannot use")
+    assert.is_false(ns.Treatment.For{ member = false }.scan)
+    assert.is_false(ns.Treatment.For{}.scan)
     assert.is_nil(ns.Treatment.ORDER, "the lane validation set should be gone with the lanes")
     assert.is_nil(ns.Treatment.Pulse)
   end)
@@ -21,11 +21,9 @@ describe("engine / presentation", function()
   it("draws a charged row exactly as it draws any other in-scan row", function()
     -- CHARGES was a fourth hue that REPLACED the role lane. With one treatment there is nothing
     -- for it to replace: the catalog still authors `charged`, and the paint no longer reads it.
-    for _, tier in ipairs({ "COOLDOWN", "ROTATION", "FALLBACK" }) do
-      assert.same(ns.Treatment.For{ tier = tier },
-                  ns.Treatment.For{ tier = tier, charged = true })
-    end
-    -- A row with no readable tier is out of the scan, charged or not.
+    assert.same(ns.Treatment.For{ member = true },
+                ns.Treatment.For{ member = true, charged = true })
+    -- A non-member row is out of the scan, charged or not.
     assert.is_false(ns.Treatment.For{ charged = true }.scan)
   end)
 
@@ -56,18 +54,18 @@ describe("engine / presentation", function()
   -- draws it when it has been TOLD the button is down, and never infers the opposite.
   describe("the cooldown hatch", function()
     it("draws only on a readiness the CDM actually reported as false", function()
-      assert.is_true(ns.Treatment.For{ tier = "ROTATION", oncd = true }.hatch)
-      assert.is_false(ns.Treatment.For{ tier = "ROTATION", oncd = false }.hatch)
+      assert.is_true(ns.Treatment.For{ member = true, oncd = true }.hatch)
+      assert.is_false(ns.Treatment.For{ member = true, oncd = false }.hatch)
     end)
 
     it("draws nothing for an unknown or absent readiness", function()
-      assert.is_false(ns.Treatment.For{ tier = "ROTATION" }.hatch)
-      assert.is_false(ns.Treatment.For{ tier = "ROTATION", oncd = ns.Signal.UNKNOWN }.hatch)
-      assert.is_false(ns.Treatment.For{ tier = "ROTATION", oncd = nil }.hatch)
+      assert.is_false(ns.Treatment.For{ member = true }.hatch)
+      assert.is_false(ns.Treatment.For{ member = true, oncd = ns.Signal.UNKNOWN }.hatch)
+      assert.is_false(ns.Treatment.For{ member = true, oncd = nil }.hatch)
     end)
 
-    -- It is a fact about the button, not about cap's opinion of it, so a row cap has no tier
-    -- for still wears it. `Overlay.cell` renders that as `id:off~`, which is why a bare `off`
+    -- It is a fact about the button, not about cap's opinion of it, so a row outside the
+    -- scan still wears it. `Overlay.cell` renders that as `id:off~`, which is why a bare `off`
     -- can no longer be read as "nothing drawn".
     it("is independent of whether the row is in the scan", function()
       local d = ns.Treatment.For{ oncd = true }

@@ -10,8 +10,8 @@ Treatment.BAR = {
 }
 
 --- ONE binary treatment: a row is IN THE SCAN or it is not (render-shelf.md V13). Priority is
---- row order plus the overlays, never a hue — so the role tier the catalog authored decides
---- only WHETHER the row is in the scan, and the tier itself stays in the model.
+--- row order plus the overlays, never a hue — membership (`verdict.member`, Signal's
+--- scan_when evaluation) is the whole statement, and nothing finer exists to draw.
 --- The RULED-OUT hatch (V11) is independent of the scan, and has TWO causes: the CDM says the
 --- ability is down, or cap itself is ruling the row out with a negative cue. Both mean "not this
 --- one", so both stripe -- in different colours, because the two verdicts have different owners.
@@ -30,7 +30,7 @@ function Treatment.For(verdict)
     if (ns.Style.cues[key] or {}).polarity ~= "positive" then skip = true end
   end
   return {
-    scan = (verdict and verdict.tier) ~= nil,
+    scan = (verdict and verdict.member) == true,
     cues = cues,
     hatch = (verdict or {}).oncd == true,
     skip = skip,

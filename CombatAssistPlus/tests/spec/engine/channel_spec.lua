@@ -208,8 +208,38 @@ describe("engine / channel bands", function()
       { id = "m", display = { kind = "sealed-pandemic", ability = "dot", outside_s = "18" } },
       dotAbil))
 
+    -- V20 · the proc bar: a plan with no threshold and no numbers of its own — the slot
+    -- filters to the proc aura and the client drains the bar off its duration.
+    local pbar = ns.Channel.ContainerPlan(marker("db_core_clock"), declared)
+    assert.equal("sealed-proc-bar", pbar.kind)
+    assert.equal("player", pbar.unit)
+    assert.is_nil(pbar.max)
+    assert.is_nil(ns.Channel.ProcBarPlan(
+      { id = "m", display = { kind = "sealed-proc-bar", ability = "missing" } }, declared))
+
     -- A graded marker is not a container one, and vice versa: a marker is at most one of them.
     assert.is_nil(ns.Channel.ContainerPlan(marker("hog_awaits_tyrant"), declared))
     assert.is_nil(ns.Channel.GradedPlan(marker("db_core_charge")))
+  end)
+
+  it("authors the two-sided band as three step points, ordered or refused", function()
+    -- catalog.md Defeats item 1's named recipe, built 2026-08-24: hold while the dependency's
+    -- remaining time is inside (beyond, within). Step holds the previous value, so 5s reads 0
+    -- (the APL fires the dogs), 16s reads 1 (the dead zone), 30s reads 0 again.
+    assert.same({ { 0, 0 }, { 10.5, 1 }, { 21.5, 0 } }, ns.Channel.BandPoints(10.5, 21.5))
+    -- The reversed or degenerate pair is an empty band that would arm and never draw.
+    assert.is_nil(ns.Channel.BandPoints(21.5, 10.5))
+    assert.is_nil(ns.Channel.BandPoints(10.5, 10.5))
+    assert.is_nil(ns.Channel.BandPoints(0, 21.5))
+
+    -- HoldPlan carries the pair through, and refuses the reversed one at the plan seam too.
+    local paired = ns.Channel.HoldPlan({ id = "m", cue = "blocked",
+      display = { kind = "sealed-cooldown-range", ability = "dep",
+                  beyond = 10.5, within = 21.5 } })
+    assert.equal(10.5, paired.beyond)
+    assert.equal(21.5, paired.within)
+    assert.is_nil(ns.Channel.HoldPlan({ id = "m", cue = "blocked",
+      display = { kind = "sealed-cooldown-range", ability = "dep",
+                  beyond = 21.5, within = 10.5 } }))
   end)
 end)

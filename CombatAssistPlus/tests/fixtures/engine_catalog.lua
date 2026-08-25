@@ -6,9 +6,9 @@
 -- created was to keep the shipped catalog shaped like a fixture, which is exactly backwards.
 --
 -- So this is the pilot, preserved as what it always was: the smallest catalog that exercises
--- readable readiness, a readable marker pair, a two-band tier selection and a resource
--- comparison. It binds against `demonology-rows.lua` because that is the row capture the
--- harness has; nothing about it is a claim about how Demonology should be played.
+-- readable readiness, a readable marker pair, a declared `scan_when` alternative and a
+-- resource comparison. It binds against `demonology-rows.lua` because that is the row capture
+-- the harness has; nothing about it is a claim about how Demonology should be played.
 local ADDON, ns = ...
 
 ns.Catalog.Register{
@@ -26,21 +26,18 @@ ns.Catalog.Register{
 
   entries = {
     {
+      -- Default membership: no `scan_when`, so the engine reads ready(self) and nothing else.
       id = "tyrant", ability = "tyrant",
-      bands = {
-        { tier = "ROTATION", when = { { "ready", "tyrant" } } },
-      },
       markers = {
         { id = "dreadstalkers", when = { { "ready", "dreadstalkers", negate = true } } },
         { id = "grimoire", when = { { "identity", "grimoire", "transformed" } } },
       },
     },
     {
+      -- Declared membership: one conditional alternative, blind-able through the resource
+      -- read. Tests add a second alternative in situ to pin the OR semantics.
       id = "demonbolt", ability = "demonbolt",
-      bands = {
-        { tier = "ROTATION", when = { { "proc", "demonbolt" }, { "resource", "<=", 3 } } },
-        { tier = "FALLBACK", when = { { "proc", "demonbolt" } } },
-      },
+      scan_when = { { { "proc", "demonbolt" }, { "resource", "<=", 3 } } },
     },
   },
 

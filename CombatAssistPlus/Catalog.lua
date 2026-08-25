@@ -6,8 +6,6 @@ local Catalog = {}
 ns.Catalog = Catalog
 
 local registry = {}
-local TIERS = { COOLDOWN = 3, ROTATION = 2, FALLBACK = 1 }
-Catalog.TIERS = TIERS
 -- `subject = true` means "argument 1 is an ability id, declared in `abilities`". `talent = true`
 -- means "argument 1 is a talent id, declared in `talents`" — a separate subject class because a
 -- talent has no CDM row and must never be resolved as if it did. `aoe` takes no subject at all:
@@ -34,10 +32,21 @@ local DISPLAYS = {
   ["sealed-count-bands"] = true,
   ["sealed-count-bar"] = true,
   ["sealed-pandemic"] = true,
+  ["sealed-proc-bar"] = true,
   ["sealed-power-percent"] = true,
   ["sealed-cooldown-range"] = true,
 }
 Catalog.DISPLAYS = DISPLAYS
+
+-- The corner CLAIMERS (render-shelf.md Part 2.5's cession rule): kinds whose widgets sit on the
+-- badge stack's corner slots. Claimed BY DECLARATION, in marker order, whether or not the
+-- client is currently showing anything — that fact is sealed and the stack cannot re-flow on
+-- it. Overlay assigns the slots; the row's cue badges start below them.
+local CORNER_DISPLAYS = {
+  ["sealed-count-bands"] = true,
+  ["sealed-pandemic"] = true,
+}
+Catalog.CORNER_DISPLAYS = CORNER_DISPLAYS
 
 -- What ONE band of a `sealed-count-bands` display draws, as meaning rather than as pixels. The
 -- shelf (render-shelf.md V16/V17) owns the art each of these resolves to; a catalog picks from
@@ -85,10 +94,21 @@ function Catalog.ForBuild(specID, subTreeID)
   return loose
 end
 
+-- Scan membership is an OR of ANDs: `scan_when` lists alternatives, each a list of readable
+-- terms. An entry with no `scan_when` gets the default alternative — ready(self) — which is
+-- also why the default's read is registered here: Reads/Resolve walk this too, and a row whose
+-- only condition is implicit must still subscribe its readiness.
+function Catalog.Alternatives(entry)
+  return entry.scan_when or { { { "ready", entry.ability } } }
+end
+
 local function eachCondition(cat, fn)
   for _, entry in ipairs(cat.entries or {}) do
-    for _, band in ipairs(entry.bands or {}) do
-      for _, term in ipairs(band.when or {}) do fn(entry, term, "tier " .. tostring(band.tier)) end
+    local alts = Catalog.Alternatives(entry)
+    for i, alt in ipairs(type(alts) == "table" and alts or {}) do
+      if type(alt) == "table" then
+        for _, term in ipairs(alt) do fn(entry, term, "scan_when alternative " .. i) end
+      end
     end
     for _, marker in ipairs(entry.markers or {}) do
       for _, term in ipairs(marker.when or {}) do fn(entry, term, "marker " .. tostring(marker.id)) end
@@ -146,20 +166,20 @@ function Catalog.Check(cat)
     if not abilities[entry.ability] then
       fail("subject", entry.id, "entry names an undeclared ability")
     end
-    if type(entry.bands) ~= "table" or #entry.bands == 0 then
-      fail("shape", entry.id, "entry has no readable tier bands")
+    -- The role-tier `bands` left the model 2026-08-25. Reject them by name so a stale catalog
+    -- fails loudly instead of silently losing its membership conditions to the default.
+    if entry.bands ~= nil then
+      fail("shape", entry.id, "entry declares retired `bands`; membership is `scan_when`")
     end
-    local previous
-    for _, band in ipairs(entry.bands or {}) do
-      local rank = TIERS[band.tier]
-      if not rank then
-        fail("tier", entry.id, "band names unsupported tier " .. tostring(band.tier))
-      elseif previous and rank > previous then
-        fail("tier", entry.id, "bands must not rise in priority")
-      end
-      previous = rank or previous
-      if type(band.when) ~= "table" or #band.when == 0 then
-        fail("shape", entry.id, "tier " .. tostring(band.tier) .. " has no readable condition")
+    if entry.scan_when ~= nil then
+      if type(entry.scan_when) ~= "table" or #entry.scan_when == 0 then
+        fail("shape", entry.id, "scan_when must be a non-empty list of alternatives")
+      else
+        for i, alt in ipairs(entry.scan_when) do
+          if type(alt) ~= "table" or #alt == 0 then
+            fail("shape", entry.id, "scan_when alternative " .. i .. " has no readable condition")
+          end
+        end
       end
     end
     local markerIDs, positive = {}, nil
@@ -321,18 +341,34 @@ function Catalog.Check(cat)
               .. tostring(display.ability))
           end
           -- `within` = "ends inside this many seconds"; `beyond` = "has at least this long
-          -- left". Exactly one, because two would be two curves on one badge.
+          -- left". One alone is a one-sided hold; BOTH is the two-sided band (hold while
+          -- remaining is inside (beyond, within) — catalog.md Defeats item 1, closed
+          -- 2026-08-24), which demands beyond < within because the reversed pair is an empty
+          -- band that would arm and never draw.
           local within = type(display.within) == "number" and display.within or nil
           local beyond = type(display.beyond) == "number" and display.beyond or nil
-          if (within == nil) == (beyond == nil) then
+          if within == nil and beyond == nil then
             fail("display", entry.id,
-              "sealed-cooldown-range needs exactly one of within or beyond")
-          elseif (within or beyond) <= 0 then
+              "sealed-cooldown-range needs within, beyond, or both (the two-sided band)")
+          elseif (within or beyond) <= 0 or (beyond or 1) <= 0 then
             fail("display", entry.id,
               "sealed-cooldown-range needs a positive window in seconds")
+          elseif within and beyond and beyond >= within then
+            fail("display", entry.id,
+              "two-sided sealed-cooldown-range needs beyond < within — the reversed pair is "
+              .. "an empty band that arms and never draws")
           end
           if marker.cue == nil then
             fail("cue", entry.id, "marker " .. tostring(marker.id) .. " is a graded display with no cue")
+          end
+        elseif display.kind == "sealed-proc-bar" then
+          -- V20: the proc's remaining lifetime as a bar above the charge bar. The subject must
+          -- be a declared ability (normally an aura-family one); it carries no cue — the fill
+          -- is the whole statement — and no numbers of its own, so there is nothing else to
+          -- check.
+          if not abilities[display.ability] then
+            fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
+              .. tostring(display.ability))
           end
         end
       end

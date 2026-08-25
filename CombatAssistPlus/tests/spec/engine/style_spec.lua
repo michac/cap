@@ -50,9 +50,9 @@ describe("engine / style", function()
   it("declares ONE scan treatment and no hue ladder behind it", function()
     assert.is_nil(ns.Style.lanes, "the four-hue lane table should be gone, not emptied")
     assert.is_nil(ns.Treatment.LANE, "the tier→lane map should be gone, not mapped to itself")
-    -- ANY tier puts the row in the scan; no tier keeps it out. That is the whole contract.
-    assert.is_true(ns.Treatment.For{ tier = "COOLDOWN" }.scan)
-    assert.is_true(ns.Treatment.For{ tier = "NOSUCHTIER" }.scan)
+    -- Membership puts the row in the scan; nothing else does. That is the whole contract.
+    assert.is_true(ns.Treatment.For{ member = true }.scan)
+    assert.is_false(ns.Treatment.For{ member = false }.scan)
     assert.is_false(ns.Treatment.For{}.scan)
   end)
 

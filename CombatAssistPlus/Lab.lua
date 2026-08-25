@@ -31,7 +31,7 @@ ns.LabStyle = {
         caption = "<b>control — the sink's own job</b>. `SetDurationText` normally draws a countdown, and with no rule it is Blizzard's seconds formatter. Everything to the right replaces that text with a rule cap wrote.",
         place = "centre",
         remaining_pct = 80,
-        verdict = "below",
+        verdict = "open",
       },
       {
         ability = "Immolation Aura",
@@ -49,7 +49,7 @@ ns.LabStyle = {
         composited = true,
         place = "badge",
         remaining_pct = 20,
-        verdict = "below",
+        verdict = "open",
       },
       {
         ability = "Immolation Aura",
@@ -67,7 +67,7 @@ ns.LabStyle = {
         composited = true,
         place = "badge",
         remaining_pct = 80,
-        verdict = "below",
+        verdict = "open",
       },
       {
         ability = "Immolation Aura",
@@ -84,7 +84,7 @@ ns.LabStyle = {
         caption = "<b>THE INVERSION</b> — hatched while there is plenty left, which is `do not refresh yet`. This is the direction `AddPandemicRegion` cannot express at all: it calls `SetShown(inWindow)` with no rule to flip.",
         place = "badge",
         remaining_pct = 80,
-        verdict = "below",
+        verdict = "open",
       },
       {
         ability = "Immolation Aura",
@@ -120,7 +120,7 @@ ns.LabStyle = {
         composited = true,
         place = "badge",
         remaining_pct = 80,
-        verdict = "below",
+        verdict = "open",
       },
       {
         ability = "Immolation Aura",
@@ -142,7 +142,7 @@ ns.LabStyle = {
         composited = true,
         place = "badge",
         remaining_pct = 45,
-        verdict = "below",
+        verdict = "open",
       },
     },
     draws = "duration",

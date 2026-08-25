@@ -87,11 +87,39 @@ local function configure(f, item, declared)
   -- Frames are kept and reused, but a badge belonging to a marker this catalog no longer
   -- declares would never be reached by `graded()` again and would sit lit forever.
   for _, badge in pairs(f.gradedBadges) do badge:Hide() end
+  -- Part 2.5's cession rule: corner sealed displays claim stack slots 0..n-1 BY DECLARATION,
+  -- in marker order, and the row's cue badges start at slot n. Static on purpose — whether the
+  -- client is showing any of them is sealed, so the stack cannot re-flow around them; a gated
+  -- or refused corner display keeps its claim and leaves a blank step.
+  local cornerNext = 0
+  f.cornerBase = 0
+  -- V20's lift is the bottom edge's own static rule: a row that also declares V18's charge
+  -- bar lifts the proc bar to sit directly above it. Declaration-driven for the same reason
+  -- as the corner claims — whether either bar is currently drawn is sealed.
+  local lift = 0
+  for _, marker in ipairs(item.entry.markers or {}) do
+    local kind = marker.display and marker.display.kind
+    if kind and ns.Catalog.CORNER_DISPLAYS[kind] then
+      f.cornerBase = f.cornerBase + 1
+    end
+    if kind == "sealed-count-bar" then
+      local b, pb = ns.Style.bar, ns.Style.procbar
+      lift = (b and b.height_px or 0) + (pb and pb.gap_px or 0)
+    end
+  end
   for _, marker in ipairs(item.entry.markers or {}) do
     -- A readable marker is still evaluated and still reported; the shelf's cue vocabulary has
     -- no drawn form for the two ad-hoc Warlock ones, so nothing is drawn for it.
     local gradedPlan = ns.Channel.GradedPlan(marker)
     local containerPlan = not gradedPlan and ns.Channel.ContainerPlan(marker, declared)
+    -- This marker's corner claim, whether or not it arms this pass — the claim is the
+    -- declaration's, so a refusal or gate does not move its neighbours.
+    local cornerAt
+    local kind = marker.display and marker.display.kind
+    if kind and ns.Catalog.CORNER_DISPLAYS[kind] then
+      cornerAt = cornerNext
+      cornerNext = cornerNext + 1
+    end
     if gradedPlan then
       f.gradedPlans[marker.id] = gradedPlan
       -- One instance per MARKER, so a two-band union stacks rather than overwrites. Built here
@@ -113,7 +141,7 @@ local function configure(f, item, declared)
         container:Show()
         status = "armed"
       elseif not InCombatLockdown() then
-        container, status = ns.Channel.Arm(f, marker, declared)
+        container, status = ns.Channel.Arm(f, marker, declared, cornerAt, lift)
         if container then f.channels[key] = container end
       else
         status = "refused"
@@ -221,7 +249,7 @@ local function graded(f, verdict)
   -- Where a graded badge sits in the flowing stack. It shares its cue's place with the shared
   -- badge of the same key -- two instances of one cue draw stacked on top of each other, which
   -- is what the old fixed slots did too. A graded cue nobody else is wearing goes on the end.
-  local order, depth = f.cueOrder or {}, 0
+  local order, depth = f.cueOrder or {}, f.cornerBase or 0
   for _ in pairs(order) do depth = depth + 1 end
   for id, armed in pairs(f.graded) do
     local badge = f.gradedBadges[id]
@@ -274,8 +302,11 @@ local function paint(f, verdict, item)
   -- `d.cues` arrives in shelf-RANK order (Signal), so its index IS the badge's place in the
   -- stack. Re-anchored every update: the same cue sits on the corner when it is alone and one
   -- step down when a higher-ranked one is showing beside it.
+  -- Part 2.5's cession rule: slots 0..cornerBase-1 belong to the row's declared corner sealed
+  -- displays, so the readable badges start below them.
+  local base = f.cornerBase or 0
   local wanted = {}
-  for i, key in ipairs(d.cues or {}) do wanted[key] = i - 1 end
+  for i, key in ipairs(d.cues or {}) do wanted[key] = i - 1 + base end
   for key, badge in pairs(f.badges) do
     local at = wanted[key]
     if at then

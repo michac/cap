@@ -45,9 +45,8 @@ ns.Catalog.Register{
     --
     -- Its line is alignment-gated, not press-on-cooldown: the Eye Beam weave or the Meta path.
     -- Authored literally that is a negative badge lit across the whole steady state, so these
-    -- two bands are the ACTIONABLE SLICE of it. Same cue twice = one badge = the OR.
+    -- two marker ranges are the ACTIONABLE SLICE of it. Same cue twice = one badge = the OR.
     { id = "vengeful_retreat", ability = "vengeful_retreat",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "vengeful_retreat" } } } },
       markers = {
         { id = "vr_awaits_eye_beam", cue = "blocked",
           display = { kind = "sealed-cooldown-range", ability = "eye_beam", within = 8 } },
@@ -60,7 +59,6 @@ ns.Catalog.Register{
     -- because the band grammar is AND-only: naming the same cue three times unions into a single
     -- badge, and that union IS the OR. A satisfied dependency draws nothing.
     { id = "metamorphosis", ability = "metamorphosis",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "metamorphosis" } } } },
       markers = {
         -- Eye Beam READY. This is NOT redundant with the band below, which deliberately reads
         -- nothing at zero remaining: Meta sits LEFT of Eye Beam in the row, so a quiet Meta is
@@ -90,7 +88,6 @@ ns.Catalog.Register{
     -- it works because a graded cue may curve on ONE secret while being gated on as many
     -- READABLE facts as it likes.
     { id = "the_hunt", ability = "the_hunt",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "the_hunt" } } } },
       markers = {
         { id = "hunt_awaits_eye_beam", cue = "blocked",
           when = {
@@ -104,13 +101,12 @@ ns.Catalog.Register{
           display = { kind = "sealed-cooldown-range", ability = "metamorphosis", within = 15 } },
       } },
     { id = "eye_beam", ability = "eye_beam",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "eye_beam" } } } } },
+       },
     -- Essence Break's window wants Eye Beam inside it, so spending it with Eye Beam a moment
     -- away throws the window away. The clock is secret, so cap never reads it: it authors the
     -- band and the client paints the badge while the remaining time sits inside it
     -- (catalog.md:158, cue C2).
     { id = "essence_break", ability = "essence_break",
-      bands = { { tier = "COOLDOWN", when = { { "ready", "essence_break" } } } },
       markers = {
         { id = "essence_break_awaits_eye_beam", cue = "blocked",
           display = { kind = "sealed-cooldown-range", ability = "eye_beam", within = 4 } },
@@ -120,7 +116,6 @@ ns.Catalog.Register{
     -- generators cost nothing, so `insufficientPower` is never true for them — they stay clean
     -- while the spenders wear the badge, which is the whole point of the cue.
     { id = "blade_dance", ability = "blade_dance",
-      bands = { { tier = "ROTATION", when = { { "ready", "blade_dance" } } } },
       markers = {
         { id = "blade_dance_starved", cue = "starved",
           when = { { "affordable", "blade_dance", negate = true } } },
@@ -136,7 +131,6 @@ ns.Catalog.Register{
     --   25 the unconditional floor — BELOW Chaos Strike. Position 7 is wrong here, and
     --      `immolation_single_target` is the badge that corrects it.
     { id = "immolation_aura", ability = "immolation_aura",
-      bands = { { tier = "ROTATION", when = { { "ready", "immolation_aura" } } } },
       markers = {
         -- `isActive` is NeverSecret and answers in both directions, but only ONE direction is
         -- drawn: at max it is the gold `capped` badge (a charge is being lost right now). Below
@@ -206,7 +200,6 @@ ns.Catalog.Register{
           } },
       } },
     { id = "chaos_strike", ability = "chaos_strike",
-      bands = { { tier = "ROTATION", when = { { "ready", "chaos_strike" } } } },
       markers = {
         { id = "chaos_strike_starved", cue = "starved",
           when = { { "affordable", "chaos_strike", negate = true } } },
@@ -222,7 +215,6 @@ ns.Catalog.Register{
     -- Rung 22 is not an overcap rule at all; it promotes Felblade above Chaos Strike while Fury
     -- is low, and the badge says the negation: above 100, spend before you generate.
     { id = "felblade", ability = "felblade",
-      bands = { { tier = "ROTATION", when = { { "ready", "felblade" } } } },
       markers = {
         { id = "felblade_overcap", cue = "overcap",
           display = { kind = "sealed-power-percent", power = "Fury", threshold = 100 } },
@@ -231,7 +223,6 @@ ns.Catalog.Register{
     -- build takes Demon Blades, which replaces the button with a passive. On a build without it
     -- this is a real button. The entry binds only if the row exists, so it costs nothing.
     { id = "demons_bite", ability = "demons_bite",
-      bands = { { tier = "ROTATION", when = { { "ready", "demons_bite" } } } },
       markers = {
         -- Demon's Bite rolls 20–30; the midpoint is the honest authoring of a range cap
         -- cannot read, and the cue is a "close to overflowing" readout, not a guarantee.
@@ -239,8 +230,8 @@ ns.Catalog.Register{
           display = { kind = "sealed-power-percent", power = "Fury", generation = 25 } },
       } },
     { id = "fel_rush", ability = "fel_rush",
-      bands = { { tier = "FALLBACK", when = { { "ready", "fel_rush" } } } } },
+       },
     { id = "throw_glaive", ability = "throw_glaive",
-      bands = { { tier = "FALLBACK", when = { { "ready", "throw_glaive" } } } } },
+       },
   },
 }
