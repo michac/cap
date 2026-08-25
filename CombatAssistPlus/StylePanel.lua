@@ -77,7 +77,7 @@ local function swipe(host)
   cd:SetCooldown(GetTime() - 1200, 3600)
 end
 
---- ⚠ Rate limited to the animation's own duration, as Paint.ShouldSnap limits the live path:
+--- ⚠ Rate limited to the animation's own duration, as Paint.ShouldReplay limits the live path:
 --- Stop() does not restore scale, so an unlimited click can park a frame part-scaled.
 local function replayOnClick(hosts, plays, duration)
   local last

@@ -1,5 +1,7 @@
 -- Overlay.lua — addon-owned scan edges, cue badges and cooldown hatches on CDM rows, drawn
--- through ns.Paint. No stock-proc suppression: the first flight tests coexistence.
+-- through ns.Paint. Blizzard's stock proc glow is not suppressed — `Glow.lua` DIMS it to
+-- `tokens.surfaces.proc_glow_alpha` so cap's emphasis is not competing with a large gold
+-- overlay that reads like one.
 local ADDON, ns = ...
 
 local issecretvalue = issecretvalue
@@ -108,8 +110,8 @@ local function configure(f, item, declared)
     end
   end
   for _, marker in ipairs(item.entry.markers or {}) do
-    -- A readable marker is still evaluated and still reported; the shelf's cue vocabulary has
-    -- no drawn form for the two ad-hoc Warlock ones, so nothing is drawn for it.
+    -- A marker with no `cue` is still evaluated and still reported; it simply reaches no badge
+    -- sink, so nothing is drawn for it.
     local gradedPlan = ns.Channel.GradedPlan(marker)
     local containerPlan = not gradedPlan and ns.Channel.ContainerPlan(marker, declared)
     -- This marker's corner claim, whether or not it arms this pass — the claim is the

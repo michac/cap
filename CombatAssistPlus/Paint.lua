@@ -87,7 +87,7 @@ function Paint.StripeTexCoord(w, h, tile_px, pitch_px, phase_pct)
   return u, u + w / tile_px, 0, h / tile_px
 end
 
---- A hand-replayed one-shot is rate limited to its own duration, as ShouldSnap limits the live
+--- A hand-replayed one-shot is rate limited to its own duration, as the live
 --- path: Stop() does not restore scale, so a second click mid-play can park a frame part-scaled.
 function Paint.ShouldReplay(lastAt, now, duration)
   return not lastAt or (now - lastAt) >= duration

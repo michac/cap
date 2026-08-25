@@ -191,8 +191,9 @@ function Catalog.Check(cat)
       else
         markerIDs[marker.id] = true
       end
-      -- `cue` stays OPTIONAL: a marker with none is evaluated and reported but draws nothing,
-      -- which is what the two Warlock context markers still are.
+      -- `cue` stays OPTIONAL: a marker with none is evaluated and reported but draws nothing.
+      -- A marker carrying only a `display` is the shipped case; one carrying neither is legal
+      -- and silent.
       if marker.cue ~= nil then
         local cue = cues()[marker.cue]
         if not cue then

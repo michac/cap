@@ -1,5 +1,5 @@
--- Frame.lua — the free-floating movable panel (spec.md §3.4): drag to place,
--- position saved, placement out of combat only. M4's substrate.
+-- Frame.lua — the free-floating movable panel: drag to place, position saved, placement out
+-- of combat only. The substrate every drawn row sits on.
 --
 -- Free-floating by design: it anchors to UIParent, never to the Cooldown Manager.
 -- Plain non-secure frame — cap only ever shows things, and protection is one-way
