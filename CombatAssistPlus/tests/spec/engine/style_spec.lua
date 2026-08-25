@@ -20,17 +20,9 @@ describe("engine / style", function()
     local S = ns.Style
     assert.is_number(S.surfaces.icon_px)
     assert.is_number(S.surfaces.row_gap_px)
-    assert.is_number(S.arrival.duration_s)
-    assert.is_string(S.arrival.smoothing)
-    assert.is_number(S.motion.tick_s)
     assert.is_string(S.badges.texture_root)
     assert.is_string(S.badges.plate.texture)
     assert.is_string(S.badges.halo_texture)
-    assert.is_string(S.ring.texture_root)
-    assert.is_string(S.ring.texture)
-    assert.is_number(S.ring.thickness_px)
-    assert.is_number(S.ring.frames)
-    assert.is_number(S.ring.grid)
     assert.equal(3, #S.ready.rgb)
     assert.is_number(S.ready.line_px)
     assert.is_number(S.ready.alpha)
@@ -89,41 +81,19 @@ describe("engine / style", function()
       "Paint.lua re-acquired a ticker — motion belongs to AnimationGroups")
   end)
 
-  it("keeps no arrival machinery in the live path — the scan edge is still", function()
-    -- The frame walk, its sheet coordinates and its rate limiter went with the lane border.
-    -- ns.Style.arrival and Media/ring.tga stay: Part 7's arrival variants are still their subject.
-    for _, gone in ipairs({ "ShouldSnap", "ArrivalFrame", "FrameCoords", "RingBand",
-                            "RingTexture" }) do
+  it("keeps no arrival machinery anywhere — the scan edge is still", function()
+    -- The frame walk, its sheet coordinates and its rate limiter went with the lane border in
+    -- V1's retirement. The ANIMATION went with the lab's arrival experiments, which were judged
+    -- and deleted: `Paint.Arrival`, `tokens.ring`, `tokens.motion`, `tokens.arrival` and
+    -- Media/ring.tga are all gone, so there is no arrival left in either half of the addon.
+    for _, gone in ipairs({ "ShouldSnap", "ShouldReplay", "Arrival", "ArrivalFrame", "FrameCoords",
+                            "RingBand", "RingTexture", "Ring", "Flash", "Ghost", "Halo" }) do
       assert.is_nil(ns.Paint[gone], "Paint." .. gone .. " outlived the treatment that used it")
     end
-    assert.is_function(ns.Paint.Arrival, "the lab still animates arrivals")
-  end)
-
-  it("ships the ring sheet Part 7 draws, and lays its frames out in the grid", function()
-    local ring = ns.Style.ring
-    assert.is_true(exists(RING_MEDIA .. ring.texture .. ".tga"),
-      "the shelf names " .. ring.texture .. " with no texture in Media/")
-    -- Declared art lives beside Media/badges/, never in Media/lab/ — lab art and style art
-    -- sharing a folder is what makes the folder stop meaning anything.
-    assert.is_false(exists("CombatAssistPlus/Media/lab/" .. ring.texture .. ".tga"))
-    -- Every frame has a cell, and a one-frame arrival is a still image rather than an arrival.
-    assert.is_true(ring.frames > 1)
-    assert.is_true(ring.frames <= ring.grid * ring.grid)
-    -- Power of two, sheet included, or the client will not read it.
-    local side = ring.tile_px * ring.grid
-    while side > 1 do
-      assert.equal(0, side % 2, ring.tile_px .. "x" .. ring.grid .. " is not a power of two")
-      side = side / 2
+    for _, gone in ipairs({ "ring", "motion", "arrival" }) do
+      assert.is_nil(ns.Style[gone], "ns.Style." .. gone .. " outlived its last reader")
     end
-    -- The widest frame plus its band has to leave a transparent centre in its own cell.
-    local outer = (ring.gutter_px or 0) + (ring.travel_px or 0)
-    assert.is_true(2 * (outer + ring.thickness_px) < ring.tile_px)
-  end)
-
-  it("ties the frame walk to the arrival it is supposed to last", function()
-    -- The frames ARE the arrival, so the three numbers cannot disagree (capart check gates it too).
-    assert.equal(ns.Style.arrival.duration_s,
-      ns.Style.ring.frames * ns.Style.motion.tick_s)
+    assert.is_false(exists(RING_MEDIA .. "ring.tga"), "Media/ring.tga outlived its subject")
   end)
 
   it("ships a texture for every frame the cue vocabulary names", function()

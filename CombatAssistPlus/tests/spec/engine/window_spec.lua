@@ -43,23 +43,19 @@ describe("engine / style window", function()
     assert.equal(200, ns.Window.Fit(500, 40, 220, 80, 200))
   end)
 
-  it("measures a swatch row and an arrival stage the way the gallery draws them", function()
+  it("measures a swatch row the way the gallery draws it", function()
     assert.equal(16, ns.StylePanel.RowWidth(0, 56, 18, 8))
     assert.equal(72, ns.StylePanel.RowWidth(1, 56, 18, 8))
     assert.equal(294, ns.StylePanel.RowWidth(4, 56, 18, 8))
-    -- pad*2 + subject + isolation + the stage, which is symmetric about its own centre.
-    assert.equal(496, ns.StylePanel.StageWidth(56, 120, 2, 62, 8))
-    assert.equal(248, ns.StylePanel.StageWidth(56, 120, 0, 62, 8))
+    -- StageWidth went with the arrival experiments: the isolation stage had no other subject.
+    assert.is_nil(ns.StylePanel.StageWidth)
   end)
 
-  it("files every Part 7 entry onto one lab tab AND gives the gallery a way to draw it", function()
+  it("gives the gallery a way to draw every Part 7 entry", function()
     local seen = 0
     for key, entry in pairs(ns.LabStyle) do
       if key:sub(1, 1) ~= "_" then
         seen = seen + 1
-        local tab = ns.StylePanel.LabTab(entry.draws)
-        assert.is_true(tab == "stripes" or tab == "arrival" or tab == "ready",
-                       key .. " has no lab tab to draw on")
         -- An entry nothing can draw is invisible in the client, which is the only place a
         -- treatment can be judged at all — so it is worse than absent, not merely unfinished.
         assert.is_true(ns.StylePanel.CanDraw(entry.draws),
@@ -68,15 +64,13 @@ describe("engine / style window", function()
     end
     -- ⚠ PENDING, not a failure — see lab_spec.lua. An empty lab is Part 7's resting state, and a
     -- contract with no subject must go quiet rather than red.
-    if seen == 0 then pending("the lab is empty — no entry to file onto a tab, by design") end
+    if seen == 0 then pending("the lab is empty — nothing to draw, by design") end
   end)
 
-  it("routes each experiment family to its own tab, and anything else to stripes", function()
-    assert.equal("arrival", ns.StylePanel.LabTab("arrival-sweep"))
-    assert.equal("arrival", ns.StylePanel.LabTab("arrival-ghost"))
-    assert.equal("ready", ns.StylePanel.LabTab("ready-glow"))
-    assert.equal("ready", ns.StylePanel.LabTab("ready-line"))
-    assert.equal("stripes", ns.StylePanel.LabTab("stripes"))
-    assert.equal("stripes", ns.StylePanel.LabTab(nil))
+  it("holds one lab tab, because the family split went with the families", function()
+    -- Three tabs existed to give the arrival variants an isolation stage and the readiness ones
+    -- the true row pitch. Both stages went with their entries, so the routing has no question
+    -- left to answer and a tab that can never render advertises one the gallery cannot ask.
+    assert.is_nil(ns.StylePanel.LabTab)
   end)
 end)

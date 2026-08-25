@@ -55,15 +55,6 @@ describe("engine / lab", function()
     assert.equal(0, sheet.tile_px % sheet.pitch_px)
   end)
 
-  it("stages the arrival variants against real neighbours", function()
-    local stage = ns.LabStyle._arrival_stage
-    if not stage then return end
-    assert.is_true(stage.neighbours >= 1, "a stage with no neighbours cannot show the crossing")
-    -- The row pitch is the STYLE's and is never restated in the lab.
-    assert.is_nil(stage.pitch_px)
-    assert.is_nil(stage.row_gap_px)
-  end)
-
   it("tiles the sheet at its authored size rather than stretching one copy over the host",
     function()
       -- A host twice the sheet's width shows the sheet twice, not one stretched copy.
@@ -93,27 +84,14 @@ describe("engine / lab", function()
     assert.equal(8 / 128, rh - rz)
   end)
 
-  it("measures how far a scaled border reaches past its own edge, and whose row it lands in",
-    function()
-      assert.equal(0, ns.Paint.Overhang(60, 1.00))
-      assert.equal(30, ns.Paint.Overhang(60, 2.00))
-      assert.equal(7.5, ns.Paint.Overhang(60, 1.25))
-      -- The live border frame is the icon rect itself, against a row pitch of icon + row_gap:
-      -- row_gap of clear space, which 2.00x crosses many times over.
-      local S = ns.Style.surfaces
-      local frame, gap = S.icon_px, S.icon_px + S.row_gap_px
-      assert.is_true(ns.Paint.CrossesNeighbour(frame, 2.00, gap))
-      assert.is_false(ns.Paint.CrossesNeighbour(frame, 1.00, gap))
-    end)
-
-  it("draws a fat ring at least one whole pixel fatter than the resting one", function()
-    assert.equal(9, ns.Paint.FatRing(3, 3.0))
-    assert.equal(6, ns.Paint.FatRing(2, 3.0))
-    -- A multiplier that rounds back onto the resting thickness would draw it twice.
-    assert.equal(2, ns.Paint.FatRing(1, 1.0))
-    assert.equal(3, ns.Paint.FatRing(2, 1.2))
-    -- Whole pixels: a half-pixel strip is a blur rather than a thicker line.
-    assert.equal(4, ns.Paint.FatRing(3, 1.4))
+  it("keeps no scaled-border geometry — nothing is drawn at a scale any more", function()
+    -- `Overhang`, `CrossesNeighbour` and `FatRing` measured a border drawn LARGER than its own
+    -- rect, which only the arrival and readiness experiments ever did. Nothing scales a frame
+    -- now, so the arithmetic has no subject and a helper with no subject is a claim about a
+    -- treatment that does not exist.
+    for _, gone in ipairs({ "Overhang", "CrossesNeighbour", "FatRing" }) do
+      assert.is_nil(ns.Paint[gone], "Paint." .. gone .. " outlived the treatment that scaled")
+    end
   end)
 
   -- Part 7 · the sealed displays. The gallery draws them by hand from a cell's stated value,
@@ -160,12 +138,9 @@ describe("engine / lab", function()
       assert.is_false(ns.Paint.BandIsFullIcon(nil, icon))
     end)
 
-  it("rate limits a hand-replayed one-shot to its own duration", function()
-    -- An exactly representable duration, so the boundary case is the rule and not a rounding.
-    local d = 0.5
-    assert.is_true(ns.Paint.ShouldReplay(nil, 100, d))
-    assert.is_false(ns.Paint.ShouldReplay(100, 100 + d / 2, d))
-    assert.is_true(ns.Paint.ShouldReplay(100, 100 + d, d))
-    assert.is_true(ns.Paint.ShouldReplay(100, 100 + d * 2, d))
+  it("has nothing left to rate limit — the lab replays nothing on click", function()
+    -- `ShouldReplay` limited the gallery's click-to-replay, which only the arrival rows offered.
+    -- Every surviving lab cell is a still, so there is no second play to guard against.
+    assert.is_nil(ns.Paint.ShouldReplay)
   end)
 end)

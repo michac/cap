@@ -20,10 +20,6 @@ local function store()
   return root
 end
 
-function Mode.Get()
-  return store().mode
-end
-
 function Mode.IsAoE()
   return store().mode == AOE
 end

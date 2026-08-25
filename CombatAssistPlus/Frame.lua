@@ -192,12 +192,7 @@ end)
 -- Child rows — the M4 seam
 -- ---------------------------------------------------------------------------
 
--- A child may need more room than the bar column does; the widest request wins and it never
--- shrinks below LAYOUT.width.
-local requested = LAYOUT.width
-
 local function relayout()
-  local width = math.max(LAYOUT.width, requested)
   local y = -LAYOUT.padding
   for _, row in ipairs(rows) do
     row.region:ClearAllPoints()
@@ -207,14 +202,8 @@ local function relayout()
     y = y - row.height - LAYOUT.spacing
   end
   local content = (#rows > 0) and (-y - LAYOUT.spacing + LAYOUT.padding) or 0
-  panel:SetWidth(width)
+  panel:SetWidth(LAYOUT.width)
   panel:SetHeight(math.max(LAYOUT.minHeight, content))
-end
-
-function ns.Frame.RequestWidth(w)
-  if type(w) ~= "number" or w <= requested then return end
-  requested = w
-  relayout()
 end
 
 local function indexOf(region)
@@ -247,10 +236,7 @@ function ns.Frame.Detach(region)
   return true
 end
 
-function ns.Frame.Relayout() relayout() end
 function ns.Frame.Get() return panel end
-function ns.Frame.RowCount() return #rows end
-function ns.Frame.IsUnlocked() return unlocked end
 
 -- ---------------------------------------------------------------------------
 -- Commands

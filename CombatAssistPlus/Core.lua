@@ -43,7 +43,6 @@ end
 ns.Commands = {}
 
 local byName = {}
-ns.CommandByName = byName
 
 -- Modules register their own commands from their own file, so adding one never
 -- edits Core.lua. `order` sorts the help listing (default 50); registration
@@ -83,7 +82,6 @@ local function commandsInOrder()
   end
   return sorted
 end
-ns.CommandsInOrder = commandsInOrder
 
 function cmdHelp()
   emit("commands:")

@@ -4,12 +4,6 @@
 local ADDON, ns = ...
 
 ns.Style = {
-  arrival = {
-    duration_s = 0.4,
-    from_alpha = 0.00,
-    from_scale = 2.00,
-    smoothing = "OUT",
-  },
   badges = {
     asset_root = "previews/assets/kenney",
     diameter_pct = 40,
@@ -233,9 +227,6 @@ ns.Style = {
     rgb = { 0.92, 0.92, 0.9 },
     size = 16,
   },
-  motion = {
-    tick_s = 0.025,
-  },
   pandemic = {
     _comment = "V19. The pandemic window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge — halo, plate and dial together — appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively. The badge holds cue-badge brightness exactly — plate at badges.plate.alpha, NO region pulse and NO numeral — and its centre is the DIAL: a radial StatusBar the CLIENT drains off the aura's own duration object (SetDurationBar -> SetTimerDuration, direction = RemainingTime; §3.5.2, T1), gold arc (`dial.rgb`) over a dark track (`dial.track_rgb`/`track_alpha`) on the plate. Cap reads nothing — the bar's value is sealed (`BarValue`) and the drain is the client's. ⚠ ApplyDurationBar never calls SetMinMaxValues, so the addon calls SetMinMaxValues(0, 1) at setup or the bar draws 0 % forever (§4.8.1 finding 3); Radial render mode is pcall'd with linear fallback. (Its predecessor glyphs are both retired: timer_CW_75, a static Kenney clock whose baked 75% wedge read as a live radial attached to nothing, and briefly `fire` — the dial is the wedge's claim made TRUE, an arc that actually is the DoT draining.) ⚠ The AddPandemicRegion + SetDurationBar one-button pair is UNFLOWN — each half measured alone (Part 5). Its motion is the FULL positive-cue treatment: V14's promotion ring (armed before the handover, FlipBook) plus `glow`, the SAME halo the positive cues wear (badges.halo art, radial falloff from badges.halo_falloff), breathing behind the plate, armed before the handover since that is the only motion that survives the in-combat forbidden-object seal (§3.5.3). The OUTSIDE-window state of the pair deliberately has no token group: it reuses the count vocabulary's positive hatch crop and this group's gold, and its threshold (outside_s, seconds) is the CATALOG's number, never the shelf's.",
     dial = {
@@ -280,18 +271,6 @@ ns.Style = {
     blend = "BLEND",
     line_px = 2,
     rgb = { 1.00, 0.86, 0.45 },
-  },
-  ring = {
-    corner_px = 4,
-    frames = 16,
-    grid = 4,
-    gutter_px = 1,
-    texture = "ring",
-    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
-    thickness_px = 2,
-    tile_px = 64,
-    tint = "shelf",
-    travel_px = 5,
   },
   surfaces = {
     border_px = 1,

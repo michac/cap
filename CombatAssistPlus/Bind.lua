@@ -24,8 +24,6 @@ local LOGIN_GRACE = 5
 local state = {
   rows = {},      -- cooldownID -> row
   order = {},     -- rows in viewer order
-  bySpell = {},   -- spellID -> rows, from the rule-15 union
-  byPool = {},    -- spellID -> rows, from linkedSpellIDs
   generation = 0,
   signature = "",
   frames = 0,
@@ -132,23 +130,6 @@ local function buildRow(viewerDef, frame, cooldownID, index)
     spellIDs = ids,
     isKnown = isKnown,
   }
-end
-
-local function reindex()
-  local bySpell, byPool = {}, {}
-  for _, row in ipairs(state.order) do
-    for id in pairs(row.spellIDs) do
-      local t = bySpell[id]
-      if not t then t = {}; bySpell[id] = t end
-      t[#t + 1] = row
-    end
-    for _, id in ipairs(row.pool) do
-      local t = byPool[id]
-      if not t then t = {}; byPool[id] = t end
-      t[#t + 1] = row
-    end
-  end
-  state.bySpell, state.byPool = bySpell, byPool
 end
 
 local function signatureOf(order)
@@ -292,7 +273,6 @@ local function resolve(reason)
   state.lastAt, state.lastReason = GetTime(), reason
   state.pending, state.pendingReason = false, nil
   state.deferredLast, state.deferred = state.deferred, 0
-  reindex()
 
   local signature = signatureOf(order)
   if signature ~= state.signature then
@@ -369,38 +349,12 @@ watcher:RegisterUnitEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
 -- The read API
 -- ---------------------------------------------------------------------------
 
-local function copy(list)
-  local out = {}
-  for i = 1, #list do out[i] = list[i] end
-  return out
-end
-
 local Bind = {}
 ns.Bind = Bind
 
 -- The live array, in viewer order. Treat as read-only.
 function Bind.Rows()
   return state.order
-end
-
-function Bind.Row(cooldownID)
-  return state.rows[cooldownID]
-end
-
--- Rows answering to a spellID. The default union is base + static overrides +
--- the resolved live id (rule 15); `includePool` widens it to linkedSpellIDs,
--- which matches aura ids but also matches rows that only ever cast them.
-function Bind.RowsForSpell(spellID, includePool)
-  local hits = state.bySpell[spellID]
-  local out = hits and copy(hits) or {}
-  if includePool then
-    local seen = {}
-    for i = 1, #out do seen[out[i]] = true end
-    for _, row in ipairs(state.byPool[spellID] or {}) do
-      if not seen[row] then out[#out + 1] = row end
-    end
-  end
-  return out
 end
 
 -- Returns the item frame and whether the binding was confirmed this call. An
@@ -420,10 +374,6 @@ end
 
 function Bind.Generation()
   return state.generation
-end
-
-function Bind.Health()
-  return state.health
 end
 
 -- One plain table per bound row, in viewer order. Snapshot counts rows; this says WHICH,

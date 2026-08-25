@@ -124,18 +124,3 @@ function Stream:Meta(k, v)
   if not sess then return end
   sess.meta[k] = Capture.Safe(v)
 end
-
---- Discard this session's content and restart it. For one-run streams.
-function Stream:Wipe()
-  local sess = self:_session()
-  if not sess then return end
-  sess.lines, sess.rows, self.last = {}, {}, nil
-  sess.started = date("%Y-%m-%d %H:%M:%S")
-end
-
---- Entry count, for a chat confirmation.
-function Stream:Count()
-  local sess = self.session
-  if not sess then return 0 end
-  return #sess.lines + #sess.rows
-end
