@@ -66,13 +66,7 @@ function Window.Store(key)
   return s
 end
 
-local function readable(...)
-  for i = 1, select("#", ...) do
-    local v = select(i, ...)
-    if v == nil or issecretvalue(v) then return false end
-  end
-  return true
-end
+local readable = ns.readable
 
 -- ⚠ A window is never scaled, so its centre offset from UIParent's is already in UIParent
 -- units and needs none of Frame.lua's scale normalisation. Call SetScale on one and this

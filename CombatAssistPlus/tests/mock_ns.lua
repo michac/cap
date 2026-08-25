@@ -17,6 +17,10 @@ end
 --- A namespace with the pure core loaded and every catalog registered.
 function H.fresh()
   local ns = {}
+  -- FIRST: Core.lua holds the shared fenced reads (`ns.plain`, `ns.num`, `ns.token`,
+  -- `ns.readable`, `ns.SpecAndHero`) that every other module binds at load time. Its slash
+  -- command and loader frame are guarded on `CreateFrame`, so only the pure half loads here.
+  H.load(ns, "Core.lua")
   H.load(ns, "Catalog.lua")
   -- Its event frame is guarded on `CreateFrame`, so only the pure half loads here.
   H.load(ns, "Talents.lua")

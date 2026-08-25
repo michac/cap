@@ -436,15 +436,7 @@ local function buildSealed()
   dial:SetSize(P.dial.size_px, P.dial.size_px)
   dial:SetPoint("CENTER")
   dial:SetMinMaxValues(0, 1)
-  local dtrack = dial:CreateTexture(nil, "BACKGROUND")
-  dtrack:SetAllPoints(dial)
-  dtrack:SetColorTexture(P.dial.track_rgb[1], P.dial.track_rgb[2], P.dial.track_rgb[3],
-    P.dial.track_alpha)
-  local dfill = dial:CreateTexture(nil, "ARTWORK")
-  dfill:SetColorTexture(P.dial.rgb[1], P.dial.rgb[2], P.dial.rgb[3], 1)
-  if not dial:SetStatusBarTexture(dfill) then
-    dfill:SetAllPoints(dial)   -- refused as a bar fill: show the flat gold, not an empty ring
-  end
+  ns.Paint.BarFill(dial, P.dial, "gallery dial")
   pcall(dial.SetRenderMode, dial,
     Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial or 1)
   dial:SetValue(0.75)
@@ -466,14 +458,7 @@ local function buildSealed()
   pbar:SetPoint("BOTTOMRIGHT", host20, "BOTTOMRIGHT", 0, A.height_px + (PB.gap_px or 0))
   pbar:SetHeight(PB.height_px)
   pbar:SetMinMaxValues(0, 1)
-  local ptrack = pbar:CreateTexture(nil, "BACKGROUND")
-  ptrack:SetAllPoints(pbar)
-  ptrack:SetColorTexture(PB.track_rgb[1], PB.track_rgb[2], PB.track_rgb[3], PB.track_alpha)
-  local pfill = pbar:CreateTexture(nil, "ARTWORK")
-  pfill:SetColorTexture(PB.rgb[1], PB.rgb[2], PB.rgb[3], 1)
-  if not pbar:SetStatusBarTexture(pfill) then
-    pfill:SetAllPoints(pbar)   -- refused as a bar fill: show the flat gold, not an empty track
-  end
+  ns.Paint.BarFill(pbar, PB, "gallery proc bar")
   pbar:SetValue(0.6)
 
   y = y + icon() + CAPTION_H + 6

@@ -18,6 +18,9 @@ local function loadAnchor()
     end },
     RegisterCommand = function() end,
   }
+  -- Core.lua FIRST: Anchor binds its fenced reads (`ns.num`, `ns.plain`, `ns.SpecAndHero`) as
+  -- file-locals at load, so they have to be on the namespace before the chunk runs.
+  H.load(ns, "Core.lua")
   H.load(ns, "Anchor.lua")
 
   -- The module captured the stub as a file-local at load, so the pure functions keep

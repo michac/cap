@@ -643,19 +643,38 @@ end
 --- ⚠ Radial is a RENDER MODE, not a masked fill: at 12.1 `SetRenderMode` drives the managed
 --- texture's radial progress percent instead of moving anchors, so the circle needs no
 --- MaskTexture. A client without it falls back to the linear fill rather than drawing nothing.
-function Paint.CountBar(host, o)
-  local bar = CreateFrame("StatusBar", nil, host)
-  bar:SetSize(o.w, o.h)
-  bar:SetFrameLevel(host:GetFrameLevel() + 4)
-
+--- Track behind, fill in front, and the fill handed over as the bar's own texture. The four
+--- StatusBars cap builds — V18's charge bar, V19's dial, V20's proc bar and the gallery's swatch
+--- — differ in where they are anchored, whether they drain radially and who fills them, and
+--- agreed byte for byte on these eight lines. So they share them.
+---
+--- ⚠ House rule 8: `SetStatusBarTexture` returns a discardable success bool, and a dropped
+--- failure here is a bar that drains INVISIBLY — the sibling of §4.8.1 finding 3. Two of the
+--- four callers checked it and two did not; the shared version checks, so `who` is a required
+--- caller name rather than a nicety.
+function Paint.BarFill(bar, o, who)
   local track = bar:CreateTexture(nil, "BACKGROUND")
   track:SetAllPoints(bar)
   local tr = o.track_rgb or { 0, 0, 0 }
   track:SetColorTexture(tr[1], tr[2], tr[3], o.track_alpha or 0.55)
 
   local fill = bar:CreateTexture(nil, "ARTWORK")
-  fill:SetColorTexture(o.rgb[1], o.rgb[2], o.rgb[3], 1)
-  bar:SetStatusBarTexture(fill)
+  fill:SetColorTexture(o.rgb[1], o.rgb[2], o.rgb[3], o.alpha or 1)
+  if not bar:SetStatusBarTexture(fill) then
+    if ns.Log and ns.Log.Mark then
+      ns.Log.Mark(who .. ": SetStatusBarTexture refused the fill")
+    end
+    -- Refused as a bar fill: show the flat colour rather than an empty track.
+    fill:SetAllPoints(bar)
+  end
+  return fill
+end
+
+function Paint.CountBar(host, o)
+  local bar = CreateFrame("StatusBar", nil, host)
+  bar:SetSize(o.w, o.h)
+  bar:SetFrameLevel(host:GetFrameLevel() + 4)
+  Paint.BarFill(bar, o, "Paint.CountBar")
 
   if o.mode == "radial" and bar.SetRenderMode and Enum and Enum.StatusBarRenderMode then
     pcall(bar.SetRenderMode, bar, Enum.StatusBarRenderMode.Radial)

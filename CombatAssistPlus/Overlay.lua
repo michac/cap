@@ -351,10 +351,7 @@ local function cell(id, d)
   return s .. hatch
 end
 
-local function num(v)
-  if v == nil or issecretvalue(v) or type(v) ~= "number" then return "?" end
-  return tostring(math.floor(v))
-end
+local num = ns.num
 
 function Overlay.Render(snap)
   snap = snap or {}

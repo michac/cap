@@ -7,7 +7,6 @@
 -- and cost the ability to lay bars out mid-pull.
 local ADDON, ns = ...
 
-local issecretvalue = issecretvalue
 
 local FRAME_NAME = "CombatAssistPlusPanel"
 
@@ -64,13 +63,7 @@ local function store()
   return s
 end
 
-local function readable(...)
-  for i = 1, select("#", ...) do
-    local v = select(i, ...)
-    if v == nil or issecretvalue(v) then return false end
-  end
-  return true
-end
+local readable = ns.readable
 
 -- The panel's scale expressed against UIParent's, so the maths below never
 -- assumes who the parent is.

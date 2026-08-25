@@ -13,14 +13,7 @@ local ADDON, ns = ...
 
 local KEY, OK, ERR, WARN, R = "|cff8ab4f8", "|cff8bd17c", "|cffe06c75", "|cffe5c07b", "|r"
 
--- Localised, as every other module does: the predicate runs BEFORE type(), because asking a
--- secret value what type it is is itself the mistake (security-taint-and-restricted-data.md §7).
-local issecretvalue = issecretvalue or function() return false end
-
-local function num(v)
-  if v == nil or issecretvalue(v) or type(v) ~= "number" then return "?" end
-  return tostring(v)
-end
+local num = ns.num
 
 local function row(label, value)
   ns.Emit(("  %-11s%s"):format(label, value))

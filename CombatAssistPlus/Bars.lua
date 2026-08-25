@@ -1,5 +1,12 @@
 -- Bars.lua — the independent Tyrant countdown experiment. `Bars.Plan` is the pure seam.
 --
+-- ⚠ DORMANT BY DESIGN, and fully wired. `Sense.Roster()` returns `catalog.bar`, no catalog
+-- declares one, so `Bars.Plan` is called on every verdict pass and returns an empty plan. That is
+-- not drift: `spec.md` §3.3 grants the permission, and the generator emits `bar` from
+-- `catalog.json` whenever the key is present — so the day a catalog wants a bar, this executes
+-- without a line changing here. Do not delete it as unreachable; it is unreached, which is not
+-- the same thing, and the difference is one authored key.
+--
 -- The remaining time never enters Lua — the client is handed a duration object and draws
 -- from it (security-taint-and-restricted-data.md §4.8.1 findings 2, 3, 5). Those sinks are
 -- aspect-less and hand nothing back, so `armed` is the strongest word available here.

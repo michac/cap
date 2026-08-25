@@ -54,10 +54,7 @@ local graceStarted = false
 -- Reading values that may be secret
 -- ---------------------------------------------------------------------------
 
-local function plain(v)
-  if v == nil then return false end
-  return not issecretvalue(v)
-end
+local plain = ns.plain
 
 -- Three answers, not two. "empty" is a genuinely unoccupied slot; "secret" and
 -- "unreadable" are slots we must draw no conclusion about.

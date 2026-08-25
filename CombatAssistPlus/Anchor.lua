@@ -10,7 +10,6 @@
 -- SetPoint; and cap stops ordering only by asking (Anchor.Judge, ask), never by latching.
 local ADDON, ns = ...
 
-local issecretvalue = issecretvalue
 
 ns.Anchor = ns.Anchor or {}
 local Anchor = ns.Anchor
@@ -77,10 +76,7 @@ end
 -- Pure: the line body, and the dedup key
 -- ---------------------------------------------------------------------------
 
-local function num(v)
-  if v == nil or issecretvalue(v) or type(v) ~= "number" then return "?" end
-  return tostring(math.floor(v))
-end
+local num = ns.num
 
 local function list(ids)
   if not ids or #ids == 0 then return "-" end
@@ -207,9 +203,7 @@ local P = {
 
 local function bit(v) return v and "1" or "0" end
 
-local function plain(v)
-  return v ~= nil and not issecretvalue(v)
-end
+local plain = ns.plain
 
 -- File scope runs before ADDON_LOADED, so the scratch carries the shape until ns.db
 -- exists — the same reason, and the same shape, as Mode.lua's.
@@ -518,28 +512,7 @@ end
 -- Arming
 -- ---------------------------------------------------------------------------
 
-local function specAndHero()
-  local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
-  local specID
-  if getSpec then
-    local okIndex, index = pcall(getSpec)
-    if okIndex and plain(index) then
-      local getID = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
-        or GetSpecializationInfo
-      if getID then
-        local okInfo, id = pcall(getID, index)
-        if okInfo and plain(id) then specID = id end
-      end
-    end
-  end
-  local hero
-  local talents = C_ClassTalents
-  if talents and talents.GetActiveHeroTalentSpec then
-    local ok, subTreeID = pcall(talents.GetActiveHeroTalentSpec)
-    if ok and plain(subTreeID) then hero = subTreeID end
-  end
-  return specID, hero
-end
+local specAndHero = ns.SpecAndHero
 
 local function viewerRows()
   local out = {}

@@ -5,7 +5,6 @@
 -- `Log.Render` is pure and IS the dedup key; the wrapper below owns the clock and ring.
 local ADDON, ns = ...
 
-local issecretvalue = issecretvalue
 
 ns.Log = ns.Log or {}
 local Log = ns.Log
@@ -21,23 +20,11 @@ local stream = ns.Capture.Open("bind", { sessions = 8, cap = 2000, dedup = false
 -- Rendering
 -- ---------------------------------------------------------------------------
 
-local function plain(v)
-  return v ~= nil and not issecretvalue(v)
-end
+local plain = ns.plain
 
--- `Capture.Safe` leaves whitespace ("Beast Mastery") and braces, which in a space-delimited line split a field or forge a group boundary.
-local function token(v)
-  local s = ns.Capture.Safe(v):gsub("%s+", "_"):gsub("[{}|]", "")
-  if s == "" then return "?" end
-  return s
-end
+local token = ns.token
 
--- A digit here has to mean a measurement, so anything else renders "?". The predicate
--- runs before type(): security-taint-and-restricted-data.md §7.
-local function num(v)
-  if v == nil or issecretvalue(v) or type(v) ~= "number" then return "?" end
-  return tostring(math.floor(v))
-end
+local num = ns.num
 
 --- The body a Line or a Mark carries — no frames, db, clock or game reads; `spec` and
 --- `hero` are resolved by the caller and ride the snapshot. ⚠ No `pairs()`: the key is
@@ -88,10 +75,11 @@ end
 -- The stateful wrapper
 -- ---------------------------------------------------------------------------
 
--- The hero tree answers four ways and a reader must tell them apart: a name · `#<id>`
--- (an id we could not name) · `-` (none chosen) · `?` (the read refused). Game reads, so
--- they resolve here rather than inside Render.
-local function specAndHero()
+-- ⚠ NOT `ns.SpecAndHero`, despite the name it used to carry. That one answers in IDS, for the
+-- engine; this one answers in NAMES, for a human reading a log line — and the hero tree answers
+-- four ways a reader must tell apart: a name · `#<id>` (an id we could not name) · `-` (none
+-- chosen) · `?` (the read refused). Game reads, so they resolve here rather than inside Render.
+local function specAndHeroNames()
   local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
   local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo
   local spec = "?"
@@ -127,7 +115,7 @@ local lastBody, combat, samples = nil, nil, 0
 
 local function snapshot()
   local snap = ns.Bind.Snapshot()
-  snap.spec, snap.hero = specAndHero()
+  snap.spec, snap.hero = specAndHeroNames()
   return snap
 end
 

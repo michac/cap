@@ -52,10 +52,7 @@ local state = {
 -- Reading values that may be secret
 -- ---------------------------------------------------------------------------
 
-local function plain(v)
-  if v == nil then return false end
-  return not issecretvalue(v)
-end
+local plain = ns.plain
 
 --- A struct read that refuses rather than guessing. `nil` means "no answer", which is
 --- what every caller here turns into an unknown gate.
@@ -325,19 +322,9 @@ end
 -- Rendering — pure, and IS the dedup key
 -- ---------------------------------------------------------------------------
 
-local function num(v)
-  if v == nil or issecretvalue(v) or type(v) ~= "number" then return "?" end
-  return tostring(math.floor(v))
-end
+local num = ns.num
 
--- `Capture.Safe` is necessary and not sufficient for a space-delimited line: it leaves
--- internal whitespace ("Demonology / Diabolist") and braces, which split a field or
--- forge a group boundary.
-local function token(v)
-  local s = ns.Capture.Safe(v):gsub("%s+", "_"):gsub("[{}|]", "")
-  if s == "" then return "?" end
-  return s
-end
+local token = ns.token
 
 local function pair(t)
   if not t then return "-" end
@@ -643,28 +630,7 @@ end
 -- Binding, and the settle
 -- ---------------------------------------------------------------------------
 
-local function specAndHero()
-  local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
-  local specID
-  if getSpec then
-    local okIndex, index = pcall(getSpec)
-    if okIndex and plain(index) then
-      local getID = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
-        or GetSpecializationInfo
-      if getID then
-        local okInfo, id = pcall(getID, index)
-        if okInfo and plain(id) then specID = id end
-      end
-    end
-  end
-  local hero
-  local talents = C_ClassTalents
-  if talents and talents.GetActiveHeroTalentSpec then
-    local ok, subTreeID = pcall(talents.GetActiveHeroTalentSpec)
-    if ok and plain(subTreeID) then hero = subTreeID end
-  end
-  return specID, hero
-end
+local specAndHero = ns.SpecAndHero
 
 local function report(kind, findings)
   for _, f in ipairs(findings) do

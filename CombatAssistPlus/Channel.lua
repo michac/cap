@@ -572,13 +572,7 @@ local function barSink(button, host, plan, style)
   bar:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
   bar:SetHeight(style.height_px)
 
-  local track = bar:CreateTexture(nil, "BACKGROUND")
-  track:SetAllPoints(bar)
-  track:SetColorTexture(style.track_rgb[1], style.track_rgb[2], style.track_rgb[3],
-    style.track_alpha)
-  local fill = bar:CreateTexture(nil, "ARTWORK")
-  fill:SetColorTexture(style.rgb[1], style.rgb[2], style.rgb[3], style.alpha)
-  bar:SetStatusBarTexture(fill)
+  ns.Paint.BarFill(bar, style, "barSink")
   -- The segment grid: one tick per application boundary, cap's own track art over the fill,
   -- so a half bar reads as 2 of 4 rather than as "some".
   local w = ns.Paint.Extent(host)
@@ -660,17 +654,7 @@ local function buildDial(parent, dial, who)
   bar:SetSize(dial.size_px, dial.size_px)
   bar:SetPoint("CENTER")
   bar:SetMinMaxValues(0, 1)
-  local track = bar:CreateTexture(nil, "BACKGROUND")
-  track:SetAllPoints(bar)
-  track:SetColorTexture(dial.track_rgb[1], dial.track_rgb[2], dial.track_rgb[3],
-    dial.track_alpha)
-  local fill = bar:CreateTexture(nil, "ARTWORK")
-  fill:SetColorTexture(dial.rgb[1], dial.rgb[2], dial.rgb[3], 1)
-  -- House rule 8: `SetStatusBarTexture` returns a discardable success bool — a dropped failure
-  -- here is a bar that drains invisibly, §4.8.1 finding 3's sibling trap.
-  if not bar:SetStatusBarTexture(fill) and ns.Log and ns.Log.Mark then
-    ns.Log.Mark(who .. ": SetStatusBarTexture refused the dial fill")
-  end
+  ns.Paint.BarFill(bar, dial, who)
   -- Radial is measured on a SetTimerDuration-driven bar [client 2026-08-21]; a client that
   -- refuses it here gets a linear drain rather than no dial.
   pcall(bar.SetRenderMode, bar,
@@ -692,17 +676,7 @@ local function procBarSink(button, host, style, lift)
   -- ⚠ FIRST: `ApplyDurationBar` never calls `SetMinMaxValues` (§4.8.1 finding 3) — without a
   -- range the bar draws 0 % forever, and nothing downstream would ever say so.
   bar:SetMinMaxValues(0, 1)
-  local track = bar:CreateTexture(nil, "BACKGROUND")
-  track:SetAllPoints(bar)
-  track:SetColorTexture(style.track_rgb[1], style.track_rgb[2], style.track_rgb[3],
-    style.track_alpha)
-  local fill = bar:CreateTexture(nil, "ARTWORK")
-  fill:SetColorTexture(style.rgb[1], style.rgb[2], style.rgb[3], 1)
-  -- House rule 8: `SetStatusBarTexture` returns a discardable success bool — a dropped failure
-  -- here is a bar that drains invisibly, §4.8.1 finding 3's sibling trap.
-  if not bar:SetStatusBarTexture(fill) and ns.Log and ns.Log.Mark then
-    ns.Log.Mark("procBarSink: SetStatusBarTexture refused the fill")
-  end
+  ns.Paint.BarFill(bar, style, "procBarSink")
   --@unverified a 3 px full-width SetDurationBar has never been watched, nor two client-drained
   --@unverified bars stacked on one bottom edge; render-shelf.md V20, in the flight acceptance
   --@unverified set.
