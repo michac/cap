@@ -29,7 +29,7 @@ ns.Catalog.Register{
     { id = "divine_storm", spell = 53385 },
     { id = "blade_of_justice", spell = 184575 },
     { id = "judgment", spell = 20271, alt = { 24275 } },
-    { id = "crusader_strike", spell = 35395, alt = { 406646 } },
+    { id = "crusader_strike", spell = 35395, alt = { 407480 } },
     { id = "expurgation", spell = 383346, family = "auras", unit = "target" },
   },
 
