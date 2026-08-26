@@ -205,15 +205,38 @@ ns.Catalog.Register{
         },
       },
     },
-    -- 7 · blade_of_justice. 7. ONE cue, and it is the vocabulary's second positive.
+    -- 7 · blade_of_justice. 7. ONE cue, and it is the vocabulary's second positive — worn by
+    -- TWO markers, because the rung's reachability condition is a disjunction and `when` is
+    -- AND-only.
     { id = "blade_of_justice", ability = "blade_of_justice",
       markers = {
+        -- `resource <= 4` is the reachability term. `generators` 1 is an unconditional call
+        -- into `finishers` gated on `holy_power=5&cooldown.wake_of_ashes.remains`, so rung 2 is
+        -- only REACHED when that rung did not fire — which is `holy_power<=4` OR Wake of Ashes
+        -- ready. `when` is AND-only (`Signal.lua`), so the OR is authored as two markers
+        -- wearing the same cue: this is its left half. Same term, same reason, as
+        -- `tv_awaits_blade` and `ds_awaits_blade`.
         { id = "boj_opener",
           cue = "priority",
           when = {
             { "ready", "blade_of_justice" },
             { "talent", "holy_flames" },
             { "aura", "expurgation", negate = true },
+            { "resource", "<=", 4 },
+          },
+        },
+        -- The right half of the same OR. At five Holy Power `generators` 1 still falls through
+        -- whenever Wake of Ashes is READY (`cooldown.wake_of_ashes.remains` is 0, so the rung's
+        -- own condition is false), and rung 2 is reached again. Two markers, one cue: the union
+        -- IS the disjunction, and `Catalog.lua`'s two-positive-cues refusal is per CUE, not per
+        -- marker — one badge on screen either way.
+        { id = "boj_opener_woa",
+          cue = "priority",
+          when = {
+            { "ready", "blade_of_justice" },
+            { "talent", "holy_flames" },
+            { "aura", "expurgation", negate = true },
+            { "ready", "wake_of_ashes" },
           },
         },
       },

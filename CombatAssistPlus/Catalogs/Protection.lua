@@ -138,6 +138,7 @@ ns.Catalog.Register{
             { "aura", "vanguard", negate = true },
             { "talent", "divine_guidance" },
             { "ready", "avengers_shield" },
+            { "ready", "consecration" },
           },
           display = {
             ability = "divine_guidance",
@@ -200,6 +201,7 @@ ns.Catalog.Register{
             { "talent", "blessed_assurance" },
             { "identity", "judgment", "base" },
             { "ready", "judgment" },
+            { "ready", "crusader_strike" },
           },
         },
       },

@@ -177,7 +177,9 @@ ns.Catalog.Register{
     },
     -- 7 · hand_of_guldan. Two lives, one lane: both are shard spenders. The identity carries
     -- the transform with no cue, because Ruination outranks the ordinary press by one rung and
-    -- both are pressed from this position.
+    -- both are pressed from this position. ⚠ But the two HOLDS are rung-11 facts and both carry
+    -- `identity(hand_of_guldan, "base")` to say so: rung 10 (Ruination) is unconditional, so
+    -- nothing the window rule knows can hold it.
     { id = "hand_of_guldan", ability = "hand_of_guldan",
       markers = {
         -- Sense.buildReads asks affordability of the LIVE id, so this is Ruination's cost —
@@ -191,10 +193,17 @@ ns.Catalog.Register{
         -- Tyrant holds ITSELF below five shards (readable); Hand of Gul'dan holds itself while
         -- Tyrant is nearly here (sealed). Gated on resource because rung 11's |soul_shard=5
         -- makes the spend unconditional at cap, and on affordability so it never lands on a
-        -- starved row.
+        -- starved row. ⚠ `identity(hand_of_guldan, "base")` scopes the hold to the row's BASE
+        -- life. Both holds are derived from rung 11; while Ruination is armed the row displays
+        -- rung 10, which is UNCONDITIONAL and ranked above rung 11 — holding it there would
+        -- withhold a press the APL makes without any condition at all.
         { id = "hog_awaits_tyrant",
           cue = "blocked",
-          when = { { "resource", "<=", 4 }, { "affordable", "hand_of_guldan" } },
+          when = {
+            { "resource", "<=", 4 },
+            { "affordable", "hand_of_guldan" },
+            { "identity", "hand_of_guldan", "base" },
+          },
           display = {
             ability = "summon_demonic_tyrant",
             kind = "sealed-cooldown-range",
@@ -203,13 +212,18 @@ ns.Catalog.Register{
         },
         -- The READABLE half of the same window rule (cue I): Tyrant READY at sub-five shards
         -- holds the spend — rung 11's remains>5 is false at zero remaining. Cue F covers
-        -- `nearly here`; this covers `here, board not built`.
+        -- `nearly here`; this covers `here, board not built`. ⚠ `identity(hand_of_guldan,
+        -- "base")` scopes the hold to the row's BASE life. Both holds are derived from rung 11;
+        -- while Ruination is armed the row displays rung 10, which is UNCONDITIONAL and ranked
+        -- above rung 11 — holding it there would withhold a press the APL makes without any
+        -- condition at all.
         { id = "hog_awaits_shards",
           cue = "building",
           when = {
             { "ready", "summon_demonic_tyrant" },
             { "resource", "<=", 4 },
             { "affordable", "hand_of_guldan" },
+            { "identity", "hand_of_guldan", "base" },
           },
         },
       },

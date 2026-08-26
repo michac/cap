@@ -81,29 +81,45 @@ describe("product characterization / Retribution", function()
   -- Cue H. The catalog's ONE promotion, and it is justified by density, not importance: said by
   -- elimination the opener needs four holds, which is over render-shelf.md Part 0.5's budget.
   it("promotes Blade of Justice at the opener, and only there", function()
-    local m = marker("blade_of_justice", "boj_opener")
-    assert.is_not_nil(m)
-    assert.equal("priority", m.cue)
-    local t = terms(m)
-    -- The APL rung, minus `time<5` -- the latch subsumes it.
-    assert.is_true(t["ready:blade_of_justice"])
-    assert.is_true(t["talent:holy_flames"])
-    assert.is_true(t["aura:expurgation:!"])
-    -- One marker only. A second cue here would make it a general "press this" pointer.
-    assert.equal(1, #entry("blade_of_justice").markers)
+    -- TWO markers wear cue H, and that is how the rung's reachability OR is written: `generators`
+    -- 1 diverts to `finishers` at `holy_power=5&cooldown.wake_of_ashes.remains`, so rung 2 is
+    -- REACHED at `holy_power<=4` OR with Wake of Ashes ready. `when` is AND-only, so the two
+    -- halves are two markers naming the same cue -- one badge, either way.
+    for _, id in ipairs({ "boj_opener", "boj_opener_woa" }) do
+      local m = marker("blade_of_justice", id)
+      assert.is_not_nil(m)
+      assert.equal("priority", m.cue)
+      local t = terms(m)
+      -- The APL rung, minus `time<5` -- the latch subsumes it.
+      assert.is_true(t["ready:blade_of_justice"])
+      assert.is_true(t["talent:holy_flames"])
+      assert.is_true(t["aura:expurgation:!"])
+    end
+    -- ...and each carries its own half of the reachability disjunction. A promotion that carries
+    -- its rung's condition but not its rung's REACHABILITY presses a button the APL never got to.
+    assert.is_true(terms(marker("blade_of_justice", "boj_opener"))["resource:<="])
+    assert.is_true(terms(marker("blade_of_justice", "boj_opener_woa"))["ready:wake_of_ashes"])
+    -- These two and no more. A THIRD marker here would make it a general "press this" pointer.
+    assert.equal(2, #entry("blade_of_justice").markers)
   end)
 
   -- The promotion must be the ONLY positive cue anywhere in the catalog: pass 1 says "press the
-  -- positive cue" and says nothing about how two of them rank on one row.
-  it("spends exactly one positive cue", function()
-    local positives = {}
+  -- positive cue" and says nothing about how two of them rank on one row. ⚠ The invariant is one
+  -- positive CUE, not one marker -- `Catalog.lua`'s own refusal is `positive ~= marker.cue`, so
+  -- two markers wearing the SAME positive cue is legal and is what the OR above needs.
+  it("spends exactly one positive cue, on exactly one entry", function()
+    local cues, entries, positives = {}, {}, {}
     for _, e in ipairs(cat.entries) do
       for _, m in ipairs(e.markers or {}) do
         if m.cue == "priority" or m.cue == "capped" then
           positives[#positives + 1] = e.id .. ":" .. m.id
+          cues[m.cue] = true
+          entries[e.id] = true
         end
       end
     end
-    assert.same({ "blade_of_justice:boj_opener" }, positives)
+    assert.same({ "blade_of_justice:boj_opener", "blade_of_justice:boj_opener_woa" }, positives)
+    assert.same({ priority = true }, cues)
+    assert.same({ blade_of_justice = true }, entries)
   end)
 end)
