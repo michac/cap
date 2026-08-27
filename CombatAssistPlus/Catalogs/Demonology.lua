@@ -338,7 +338,22 @@ ns.Catalog.Register{
     -- 9 · shadow_bolt. Default membership (ready-self): a filler is always a scan candidate.
     -- The row changed KIND is said by the icon itself; the ordering correction lives on
     -- Demonbolt, which is the row that has to move. Nothing here is load-bearing for visibility
-    -- — Shadow Bolt has no cooldown, so `ready` never goes false.
+    -- — Shadow Bolt has no cooldown, so `ready` never goes false. ⚠ AND NO `alt` ON THE
+    -- ABILITY, WHICH IS ALSO AUTHORED — checked in the code 2026-08-27 rather than assumed,
+    -- because this entry cites BOTH the Shadow Bolt rung (`diabolist` 15) and the Infernal Bolt
+    -- rung (`diabolist` 16) while the ability declares one id, 686, with no `alt`. `alt` exists
+    -- for a DIFFERENT ROW, never for an override on this one — so Havoc's base-only note and
+    -- Retribution's four `alt` declarations are not rival conventions but the two halves of one
+    -- rule. `Bind.buildRow` sets `base = info.spellID` and puts it in `row.spellIDs`
+    -- unconditionally, beside the override, the tooltip id and the live id, and
+    -- `Catalog.findRow` matches ANY member; so cooldownID 34990 answers to 686 whether the row
+    -- is wearing Shadow Bolt or Infernal Bolt, and the base id binds in both lives. The `alt`
+    -- cases are the other shape: Templar Strike, Hammer of Wrath and this catalog's own
+    -- `grimoire` choice node each carry their OWN `info.spellID`, so a declared base alone
+    -- would find nothing. Infernal Bolt has no Essential row of its own in any set (Category-2
+    -- TrackedBuff, OrderIndex 58/59 — `catalog.md`'s row-set table), so an `alt` of 433891
+    -- would match nothing today and, if a TrackedBuff row for it were ever laid out, would bind
+    -- the WRONG row. The same reading covers Ruination riding Hand of Gul'dan.
     { id = "shadow_bolt", ability = "shadow_bolt",
       markers = {
         -- V20 · how long the armed Art — and so the Infernal Bolt on this row — has left,

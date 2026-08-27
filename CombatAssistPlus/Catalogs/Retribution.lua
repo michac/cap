@@ -45,7 +45,24 @@ ns.Catalog.Register{
   },
 
   -- Entry order IS the authored priority; `Catalog.OrderCheck` reports when the player's
-  -- Cooldown Manager disagrees with it.
+  -- Cooldown Manager disagrees with it.  ⚠ THE RUNG-CITATION CONVENTION, stated so nobody
+  -- "fixes" it back. A state's `apl` names the rung that carries the FACT the state is about,
+  -- not the rung that presses this row. So `dt_overcap` cites `generators 1` (where
+  -- `holy_power=5` lives), not `generators 4` (Divine Toll's own rung), and `tv_awaits_blade`
+  -- cites `generators 5` (the Blade of Justice proc rung that outranks it). A `_clear` state
+  -- has no such fact and therefore cites the row's own rung. `finishers 1` is the `ds_castable`
+  -- VARIABLE rung and citing it is deliberate, not sloppy: a `variable` line is where the fact
+  -- is defined and the rungs below merely test it. For a COMBINED state the tie is broken by
+  -- the list itself: it cites the EARLIEST of its markers' rungs — the one the priority list
+  -- reaches first, and so the one that actually eliminates this row. That is always the
+  -- citation of one of its single-marker siblings, never a third number. Worked:
+  -- `dt_overcap_and_wrath` cites `generators 1` over `generators 4`; `ds_aoe_only_and_blade`
+  -- and the two `tv_blade_*` states cite `generators 5` over `finishers 1`/`4`, because their
+  -- `resource <= 4` term means `generators` 1's conditional call into `finishers` cannot have
+  -- fired; `tv_aoe_and_empyrean` cites `finishers 1` because both its markers do. This is
+  -- DISPLAY-ONLY and deliberately UNGATED — `catalog_gate_holds` and
+  -- `catalog_gate_display_provenance` read these citations for their own purposes, and a gate
+  -- on the convention itself would freeze an editorial choice.
   entries = {
     -- 1 · execution_sentence. 1. A PLACED cooldown, not a press-on-cooldown one. FOUR markers,
     -- one cue key, so the AND-only band grammar unions them into a single badge.
