@@ -27,6 +27,10 @@ local stream = ns.Capture.Open("panel", { sessions = 8, cap = 500, dedup = false
 --- ⚠ A MISSING VERDICT DRAWS HATCHED, and it goes through `Treatment.For` rather than through a
 --- literal, so the inverted-unknown rule has exactly one implementation. A verdict with no
 --- `member` is not a member, and on a virtual row that is the hatch.
+---
+--- ⚠ `spellID` is the DECLARED BASE id and stays that way, because this function is pure. The
+--- live face is a client read and is resolved on the draw, in `Panel.Face` — see the note there
+--- for why a virtual row cannot say `identity` in its catalog at all.
 function Panel.Plan(resolved, out)
   local plan = {}
   local byEntry = (out or {}).byEntry or {}
@@ -55,6 +59,34 @@ function Panel.Cell(desc)
   local s = desc.id .. ":scan"
   if #(d.cues or {}) > 0 then s = s .. "+" .. table.concat(d.cues, ",") end
   return s .. hatch
+end
+
+--- The spell whose ART this row should draw: the live override face where the client reports
+--- one, else the declared base id.
+---
+--- ⚠ THIS IS THE ONE CLIENT READ ON THIS SURFACE AND IT IS DELIBERATELY NOT IN `Panel.Plan`.
+--- `Plan` is the pure seam `Bars.Plan` is, so the read lives here, beside `artOf`, on the
+--- impure side that is tested in the client. It is a TEXTURE and never a condition: nothing
+--- branches on the answer, so a refusal costs the base art and nothing else.
+---
+--- ⚠ It exists because a virtual row may not declare its transform. `Catalog.Check` refuses any
+--- subject predicate naming a virtual ability — the ability has no CDM row, so `identity` would
+--- read UNKNOWN for life and, V12 inverting the unknown, hatch the row forever. Devourer's
+--- Consume becomes Devour inside Void Metamorphosis and the catalog is silent about it by
+--- construction; without this the standing row would draw Consume's icon through a whole window
+--- in which the button is Devour.
+---
+--- Three guards, each a measured trap (`knowledge/addon-dev/cdm-rider-patterns.md` §3 and §5):
+---   * a refused or SECRET return is "cap has no override", never an id;
+---   * `~= 0` explicitly, because 0 is TRUTHY in Lua and 0 is how the client says "none";
+---   * `~= spellID`, because an override equal to its input is not a transform.
+function Panel.Face(spellID)
+  if type(spellID) ~= "number" then return spellID end
+  if not (C_Spell and C_Spell.GetOverrideSpell) then return spellID end
+  local ok, override = pcall(C_Spell.GetOverrideSpell, spellID)
+  if not ok or not ns.plain(override) then return spellID end
+  if type(override) ~= "number" or override == 0 or override == spellID then return spellID end
+  return override
 end
 
 local num = ns.num
@@ -195,7 +227,7 @@ end
 --- index IS the badge's place in the flowing stack.
 local function paint(icon, desc)
   local d = desc.draw or {}
-  local texture = artOf(desc.spellID)
+  local texture = artOf(Panel.Face(desc.spellID))
   if texture ~= nil and icon.artSet ~= texture then
     icon.art:SetTexture(texture)
     icon.artSet = texture

@@ -256,6 +256,49 @@ describe("engine / virtual row", function()
       assert.same({}, Panel.Plan(plain, ns.Signal.Evaluate(plain, H.world())))
     end)
 
+    -- ---------------------------------------------------------------- the live face
+
+    -- ⚠ THE ONE PLACE V12 READS THE CLIENT, and it is here rather than in the catalog because
+    -- the catalog is FORBIDDEN to say it: `Catalog.Check` refuses a subject predicate naming a
+    -- virtual ability, so a standing row cannot declare `identity` about itself. Devourer's
+    -- Consume becomes Devour inside Void Metamorphosis; without this the row draws Consume's
+    -- icon through a window in which the button is Devour.
+    describe("face", function()
+      local saved
+      before_each(function() saved = _G.C_Spell end)
+      after_each(function() _G.C_Spell = saved end)
+
+      it("draws the override face when the client reports one", function()
+        _G.C_Spell = { GetOverrideSpell = function() return 1217610 end }
+        assert.equal(1217610, Panel.Face(473662))
+      end)
+
+      it("keeps the base id for every shape of 'no override'", function()
+        -- nil is the ordinary answer for an untransformed spell...
+        _G.C_Spell = { GetOverrideSpell = function() return nil end }
+        assert.equal(473662, Panel.Face(473662))
+        -- ...and 0 is the other one. 0 is TRUTHY in Lua, so it has to be tested explicitly or
+        -- the row would try to draw the art of spell zero.
+        _G.C_Spell = { GetOverrideSpell = function() return 0 end }
+        assert.equal(473662, Panel.Face(473662))
+        -- An override equal to its input is not a transform.
+        _G.C_Spell = { GetOverrideSpell = function(id) return id end }
+        assert.equal(473662, Panel.Face(473662))
+      end)
+
+      it("falls back to the base id when the call is absent, raises, or answers oddly", function()
+        _G.C_Spell = nil
+        assert.equal(473662, Panel.Face(473662))
+        _G.C_Spell = { GetOverrideSpell = function() error("taint") end }
+        assert.equal(473662, Panel.Face(473662))
+        _G.C_Spell = { GetOverrideSpell = function() return "1217610" end }
+        assert.equal(473662, Panel.Face(473662))
+        -- A plan with no spell id at all (an undeclared ability) passes straight through.
+        _G.C_Spell = { GetOverrideSpell = function() return 1217610 end }
+        assert.is_nil(Panel.Face(nil))
+      end)
+    end)
+
     it("writes a capture cell per entry in the overlay's own grammar", function()
       local resolved = ns.Catalog.Resolve(cat, H.rows())
       local out = ns.Signal.Evaluate(resolved, H.blindWorld())
