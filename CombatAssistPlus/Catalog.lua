@@ -94,12 +94,34 @@ function Catalog.ForBuild(specID, subTreeID)
   return loose
 end
 
+-- V12's two kinds of virtual row (render-shelf.md § "V12 · Virtual row"), fixed by the ability
+-- rather than by the moment: `gated` availability varies and the row is hatched until a positive
+-- readable verdict clears it; `standing` availability is constant and the row draws clear
+-- forever. The value of the `virtual` key is the WHOLE declaration — there is no second field.
+local VIRTUAL = { gated = true, standing = true }
+Catalog.VIRTUAL = VIRTUAL
+
+-- The two units an ability may name. Not a style choice: `Channel.Arm` derives the aura filter
+-- from it (`unit == "player"` ⇒ HELPFUL, else HARMFUL) and hands the string straight to
+-- `SetUnit`, so a typo would silently arm a container watching a unit token the client does not
+-- know and the display would never draw. These are the only two that appear across all five
+-- shipped catalogs.
+local UNITS = { player = true, target = true }
+
 -- Scan membership is an OR of ANDs: `scan_when` lists alternatives, each a list of readable
 -- terms. An entry with no `scan_when` gets the default alternative — ready(self) — which is
 -- also why the default's read is registered here: Reads/Resolve walk this too, and a row whose
 -- only condition is implicit must still subscribe its readiness.
 function Catalog.Alternatives(entry)
-  return entry.scan_when or { { { "ready", entry.ability } } }
+  if entry.scan_when then return entry.scan_when end
+  -- ⚠ A `standing` virtual row asks for NO verdict at all, so it has no alternatives — not even
+  -- the default one. Handing it ready(self) would be worse than useless twice over: it has no
+  -- CDM row, so `world.ready` never carries it and the read would be UNKNOWN for life; and
+  -- `eachCondition` walks this, so the synthesized term would put the ability back into
+  -- `needsRow` and demand a row for the one ability whose definition is not having one.
+  -- `Catalog.Check` forbids `scan_when` on a standing entry, so this is the only shape it takes.
+  if entry.virtual == "standing" then return {} end
+  return { { { "ready", entry.ability } } }
 end
 
 local function eachCondition(cat, fn)
@@ -135,6 +157,12 @@ function Catalog.Check(cat)
     if ability.charged ~= nil and type(ability.charged) ~= "boolean" then
       fail("shape", ability.id, "charged must be boolean")
     end
+    -- `unit` flows straight through `Channel.ContainerPlan` into `SetUnit`, and the aura filter
+    -- (HELPFUL vs HARMFUL) is derived from it. An unrecognised token arms a container watching
+    -- nothing and the sealed display never draws — a silence with no error behind it.
+    if ability.unit ~= nil and not UNITS[ability.unit] then
+      fail("shape", ability.id, "unit must be player or target, not " .. tostring(ability.unit))
+    end
   end
 
   -- Talents are declared the way abilities are, and for the same reason: a term names a
@@ -154,6 +182,10 @@ function Catalog.Check(cat)
     if type(talent.entry) ~= "number" then fail("shape", talent.id, "talent has no numeric entry id") end
   end
 
+  -- Every ability a virtual entry declares. Collected because a virtual ability has no CDM row
+  -- BY DEFINITION, and every `subject` predicate is sourced from one — see the refusal below.
+  local virtualAbilities = {}
+
   local entries = {}
   for _, entry in ipairs(cat.entries or {}) do
     if type(entry.id) ~= "string" or entry.id == "" then
@@ -170,6 +202,25 @@ function Catalog.Check(cat)
     -- fails loudly instead of silently losing its membership conditions to the default.
     if entry.bands ~= nil then
       fail("shape", entry.id, "entry declares retired `bands`; membership is `scan_when`")
+    end
+    -- V12. `virtual` is the whole declaration of a cap-owned icon, and the two kinds differ in
+    -- exactly one thing: whether the row asks for a verdict at all.
+    if entry.virtual ~= nil then
+      virtualAbilities[entry.ability] = true
+      if not VIRTUAL[entry.virtual] then
+        fail("shape", entry.id, "virtual must be gated or standing, not " .. tostring(entry.virtual))
+      elseif entry.virtual == "standing" and entry.scan_when ~= nil then
+        -- A standing row is the terminus of the elimination walk: it draws clear, permanently.
+        -- A condition beside it would silently decide whether the terminus is there at all,
+        -- which is a contradiction rather than a refinement.
+        fail("shape", entry.id, "a standing virtual row asks for no verdict and takes no scan_when")
+      elseif entry.virtual == "gated" and entry.scan_when == nil then
+        -- ⚠ THE DEFAULT ALTERNATIVE IS A TRAP HERE. `Catalog.Alternatives`' default is
+        -- ready(self), and a virtual ability has no CDM row, so `world.ready` never carries it:
+        -- the read would be UNKNOWN for life and — V12 inverting the unknown polarity — the row
+        -- would draw hatched forever. Safe, and useless. The author says what makes it available.
+        fail("shape", entry.id, "a gated virtual row needs an explicit scan_when")
+      end
     end
     if entry.scan_when ~= nil then
       if type(entry.scan_when) ~= "table" or #entry.scan_when == 0 then
@@ -218,6 +269,15 @@ function Catalog.Check(cat)
       local sealed = marker.display ~= nil
       if not (readable or sealed) then
         fail("shape", entry.id, "marker " .. tostring(marker.id) .. " needs a when or a display")
+      end
+      -- ⚠ A SEALED DISPLAY IS AN AuraContainer THE CLIENT BUILDS AND GATES, and every one of
+      -- them is parented to cap's overlay frame ON a Cooldown Manager item. A virtual row has no
+      -- item underneath it, nothing has ever built one over a cap-owned frame, and the first
+      -- consumer declares none — so the shape is refused rather than shipped untried. Readable
+      -- markers (`when` + optional `cue`) are fine and draw as ordinary badges.
+      if sealed and entry.virtual then
+        fail("display", entry.id, "marker " .. tostring(marker.id)
+          .. " carries a sealed display on a virtual row, which has no CDM frame to host one")
       end
       if readable and (type(marker.when) ~= "table" or #marker.when == 0) then
         fail("shape", entry.id, "marker " .. tostring(marker.id) .. " has no readable condition")
@@ -395,6 +455,24 @@ function Catalog.Check(cat)
     if spec.subject and not abilities[term[2]] then
       fail("subject", entry.id, where .. " names undeclared ability " .. tostring(term[2]))
     end
+    -- ⚠ NO SUBJECT PREDICATE CAN ASK ABOUT A VIRTUAL ABILITY, and this is the same trap the
+    -- `gated`-needs-a-`scan_when` rule closes, arriving through the explicit door instead of the
+    -- default one. EVERY subject read is sourced from a CDM row: `Sense.buildReads` walks
+    -- `state.bound.abilities` for `proc` / `identity` / `capped` / `affordable` / `onCooldown`
+    -- (Sense.lua:446), and `Track:Bind` binds `ready` / `aura` off the same list (Track.lua:35).
+    -- `Catalog.Resolve` puts an ability there only when it found a row. So a term about an
+    -- ability whose whole declaration is *"there is no row"* reads UNKNOWN for the life of the
+    -- session — and on a virtual row, V12 inverting the unknown, that is HATCHED FOREVER with
+    -- nothing anywhere saying why. Declaring `virtual` IS the author's assertion that no row
+    -- exists, so this is decidable here rather than at bind time.
+    -- ⚠ It bites the shapes a spec actually wants: an identity spine across a transform
+    -- (Devourer's Consume → Devour) is exactly this, and it is not readable today. Refusing it
+    -- at authoring time is the point — the alternative is a row that never draws and never says so.
+    if spec.subject and virtualAbilities[term[2]] then
+      fail("subject", entry.id, where .. " asks " .. tostring(name) .. " about "
+        .. tostring(term[2]) .. ", a virtual ability — it has no CDM row, so the read is UNKNOWN "
+        .. "for life and the row hatches forever")
+    end
     if spec.talent and not talents[term[2]] then
       fail("subject", entry.id, where .. " names undeclared talent " .. tostring(term[2]))
     end
@@ -430,10 +508,17 @@ end
 
 function Catalog.Resolve(cat, rows)
   local out = {
-    abilities = {}, entries = {}, byAbility = {}, byEntry = {}, declared = {}, dropped = {},
+    abilities = {}, entries = {}, virtual = {}, byAbility = {}, byEntry = {},
+    declared = {}, dropped = {},
   }
   local needsRow = {}
-  for _, entry in ipairs(cat.entries or {}) do needsRow[entry.ability] = true end
+  -- ⚠ A VIRTUAL ENTRY'S OWN ABILITY IS EXCLUDED, because having no CDM row is the definition of
+  -- one — demanding a row for it would drop the ability and report a binding failure for the
+  -- shape V12 exists to express. A CONDITION naming that ability elsewhere still needs the row:
+  -- that read comes off the CDM, and `eachCondition` below is not weakened.
+  for _, entry in ipairs(cat.entries or {}) do
+    if not entry.virtual then needsRow[entry.ability] = true end
+  end
   eachCondition(cat, function(_, term)
     local spec = PREDICATES[term[1]]
     if spec and spec.subject then needsRow[term[2]] = true end
@@ -451,7 +536,12 @@ function Catalog.Resolve(cat, rows)
   end
   for _, entry in ipairs(cat.entries or {}) do
     local row = out.byAbility[entry.ability]
-    if row then
+    if entry.virtual then
+      -- Its own list, in authored order, and never `out.entries`: everything downstream of that
+      -- list assumes a row to anchor to. `byEntry` stays unset for the same reason, which is
+      -- also what keeps `OrderCheck` skipping these — a virtual row has no layout position.
+      out.virtual[#out.virtual + 1] = { entry = entry }
+    elseif row then
       -- The AUTHORED flag, never a client maxCharges read: the artifact's roster column and
       -- the live border must not be able to disagree about which rows are purple.
       local charged = (out.declared[entry.ability] or {}).charged and true or false
@@ -488,7 +578,9 @@ function Catalog.CheckBound(cat, rows)
   local resolved = Catalog.Resolve(cat, rows)
   local found = {}
   for _, entry in ipairs(cat.entries or {}) do
-    if not resolved.byEntry[entry.id] then
+    -- A virtual entry is exempt, not tolerated: "no CDM row" is what `virtual` declares, so
+    -- reporting it here would make the correct authoring read as a binding failure.
+    if not (entry.virtual or resolved.byEntry[entry.id]) then
       found[#found + 1] = { check = "binding", entry = entry.id, detail = "enhanced ability has no CDM row" }
     end
   end

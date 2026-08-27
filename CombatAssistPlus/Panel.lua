@@ -1,0 +1,263 @@
+-- Panel.lua — V12's virtual rows: cap-owned icons for presses the Cooldown Manager has no frame
+-- for. `Panel.Plan` is the pure seam, the way `Bars.Plan` is.
+--
+-- ⚠ THIS IS NOT `Frame.lua`'s `CombatAssistPlusPanel`. That is a draggable 220px box stacking
+-- `Bars`' rows vertically; V12 declares a horizontal icon strip with its own anchor, size and
+-- growth direction in `ns.Style.panel`. Two surfaces, two frames.
+--
+-- ⚠ ADDITIVE, ALWAYS. cap owns every frame here; the Cooldown Manager is neither written to nor
+-- rearranged, which is why a virtual row engages none of `spec.md` §4's re-anchoring rules.
+local ADDON, ns = ...
+
+local issecretvalue = issecretvalue
+
+ns.Panel = ns.Panel or {}
+local Panel = ns.Panel
+
+local stream = ns.Capture.Open("panel", { sessions = 8, cap = 500, dedup = false })
+
+-- ---------------------------------------------------------------------------
+-- The plan — pure
+-- ---------------------------------------------------------------------------
+
+--- One descriptor per virtual entry, in AUTHORED order, because the panel's left-to-right order
+--- is the priority it declares — a standing terminus earns its silence by sitting at the end
+--- (render-shelf.md V12), and sorting here would throw that away.
+---
+--- ⚠ A MISSING VERDICT DRAWS HATCHED, and it goes through `Treatment.For` rather than through a
+--- literal, so the inverted-unknown rule has exactly one implementation. A verdict with no
+--- `member` is not a member, and on a virtual row that is the hatch.
+function Panel.Plan(resolved, out)
+  local plan = {}
+  local byEntry = (out or {}).byEntry or {}
+  local declared = (resolved or {}).declared or {}
+  for _, item in ipairs((resolved or {}).virtual or {}) do
+    local entry = item.entry
+    local ability = declared[entry.ability]
+    plan[#plan + 1] = {
+      id = entry.id,
+      kind = entry.virtual,
+      ability = entry.ability,
+      spellID = ability and ability.spell or nil,
+      draw = ns.Treatment.For(byEntry[entry.id] or { virtual = entry.virtual }),
+    }
+  end
+  return plan
+end
+
+--- `id:scan[+cue,cue]` or `id:off`, with a trailing `~` for the hatch — deliberately the same
+--- grammar `Overlay` writes, so one reader parses both surfaces. On this surface the hatch is
+--- the complement of the scan, so `off~` is the resting state rather than a second fact.
+function Panel.Cell(desc)
+  local d = desc.draw or {}
+  local hatch = d.hatch and "~" or ""
+  if not d.scan then return desc.id .. ":off" .. hatch end
+  local s = desc.id .. ":scan"
+  if #(d.cues or {}) > 0 then s = s .. "+" .. table.concat(d.cues, ",") end
+  return s .. hatch
+end
+
+local num = ns.num
+
+function Panel.Render(snap)
+  snap = snap or {}
+  return "D{" .. table.concat({
+    "n:" .. num(snap.entries), "icons:" .. num(snap.icons), "noart:" .. num(snap.noart),
+  }, " ") .. "}"
+    .. " P{" .. (#(snap.cells or {}) > 0 and table.concat(snap.cells, " ") or "-") .. "}"
+end
+
+-- ---------------------------------------------------------------------------
+-- The frames
+-- ---------------------------------------------------------------------------
+
+local host
+local pool = {}
+local placedKey
+
+--- cap's own strip, parented to `UIParent` at MEDIUM. MEDIUM is where UIParent, the action bars
+--- and every opened panel live; a surface at HIGH covers the talent window at every frame level,
+--- which `Overlay` learned the hard way. Nothing here anchors to a Cooldown Manager frame, so
+--- there is no item level to lift off — the strip sits where the shelf puts it.
+local function container()
+  if host then return host end
+  local p = ns.Style.panel
+  host = CreateFrame("Frame", nil, UIParent)
+  host:SetFrameStrata("MEDIUM")
+  host:SetPoint(p.anchor, UIParent, p.anchor, p.x, p.y)
+  host:SetSize(p.icon_px, p.icon_px)
+  host:Hide()
+  return host
+end
+
+--- Where the Nth icon sits: the strip EDGE the growth starts from, plus one step per index.
+---
+--- ⚠ The edge is derived from `grow`, never from `anchor`. `anchor` places the whole strip
+--- against UIParent — the shelf's `BOTTOM` centres it — and hanging the icons off that same
+--- point would grow the strip out of its own centre instead of filling it. A `grow` the shelf
+--- does not declare runs RIGHT rather than stacking every icon on one spot.
+local function slot(index)
+  local p = ns.Style.panel
+  local step = (p.icon_px + p.gap_px) * index
+  local grow = p.grow
+  if grow == "LEFT" then return "RIGHT", -step, 0 end
+  if grow == "UP" then return "BOTTOM", 0, step end
+  if grow == "DOWN" then return "TOP", 0, -step end
+  return "LEFT", step, 0
+end
+
+--- One icon: the spell art, V11's hatch (both causes), V13's scan edge, and a badge per cue.
+--- Built out of combat or not at all — every widget here is cap's own, so nothing is restricted,
+--- but the badge set is built once for the same reason `Overlay` builds it once.
+local function build()
+  local p = ns.Style.panel
+  local f = CreateFrame("Frame", nil, container())
+  f:SetSize(p.icon_px, p.icon_px)
+  f:Hide()
+
+  -- ⚠ NO SetTexCoord. Cropping the baked ring off a spell icon is the convention on an action
+  -- button, and it is also a number — and the shelf declares none for this surface. An undeclared
+  -- crop in Lua is exactly the divergence `render-shelf.md` exists to end, so the art is drawn
+  -- whole until the shelf says otherwise.
+  local art = f:CreateTexture(nil, "BACKGROUND")
+  art:SetAllPoints(f)
+
+  local icon = {
+    frame = f, art = art,
+    border = ns.Paint.Border(f),
+    hatch = ns.Paint.Hatch(f),
+    skip = ns.Paint.Hatch(f, nil, (ns.Style.hatch or {}).skip),
+    badges = {},
+  }
+  for key in pairs(ns.Style.cues) do icon.badges[key] = ns.Paint.Badge(f, key) end
+  return icon
+end
+
+--- The spell's own art, or nil. `GetSpellTexture` answers a FileDataID or a path and either is
+--- fine for `SetTexture`; a refusal, a secret and an absent call are three different worlds and
+--- all three end here as "cap has no art", which is drawn as a bare frame rather than guessed at.
+local function artOf(spellID)
+  if type(spellID) ~= "number" then return nil end
+  if not (C_Spell and C_Spell.GetSpellTexture) then return nil end
+  local ok, texture = pcall(C_Spell.GetSpellTexture, spellID)
+  if not ok or texture == nil or issecretvalue(texture) then return nil end
+  return texture
+end
+
+--- Every cue frame down. Called on each path that stops drawing an icon, so a hidden one cannot
+--- leave a badge lit or stepping.
+local function quiet(icon)
+  icon.border:Hide()
+  if icon.hatch then icon.hatch:Hide() end
+  if icon.skip then icon.skip:Hide() end
+  for _, badge in pairs(icon.badges) do badge:Hide() end
+end
+
+--- Re-place the strip only when the roster changes. The icons are cap's own frames, so this is
+--- free — but the SIZE is what centres the strip under its anchor, and recomputing it every pass
+--- would fight a player dragging nothing and cost a layout pass at 10 Hz.
+local function relayout(plan)
+  local ids = {}
+  for _, desc in ipairs(plan) do ids[#ids + 1] = desc.id end
+  local key = table.concat(ids, ",")
+  if key == placedKey then return end
+  placedKey = key
+
+  local p = ns.Style.panel
+  local f = container()
+  local n = #ids
+  local span = n > 0 and (n * p.icon_px + (n - 1) * p.gap_px) or p.icon_px
+  local vertical = p.grow == "UP" or p.grow == "DOWN"
+  f:SetSize(vertical and p.icon_px or span, vertical and span or p.icon_px)
+
+  -- Every pooled icon goes down first: an id the new roster does not carry keeps its frame
+  -- (frames cannot be destroyed) and would otherwise stay lit at its old place forever.
+  for _, icon in pairs(pool) do
+    quiet(icon)
+    icon.frame:Hide()
+  end
+  for i, id in ipairs(ids) do
+    local icon = pool[id]
+    if not icon then
+      icon = build()
+      pool[id] = icon
+    end
+    -- ⚠ `ClearAllPoints` first. `SetPoint` ADDS an anchor rather than replacing one, so a frame
+    -- re-anchored without clearing keeps both and is stretched between them.
+    icon.frame:ClearAllPoints()
+    local point, x, y = slot(i - 1)
+    icon.frame:SetPoint(point, f, point, x, y)
+  end
+end
+
+--- Compose one icon: the art, the hatch, the scan edge, then a badge per cue — the same order
+--- `Overlay` composes a CDM row in, bottom to top. `d.cues` arrives in shelf-RANK order, so its
+--- index IS the badge's place in the flowing stack.
+local function paint(icon, desc)
+  local d = desc.draw or {}
+  local texture = artOf(desc.spellID)
+  if texture ~= nil and icon.artSet ~= texture then
+    icon.art:SetTexture(texture)
+    icon.artSet = texture
+  end
+  icon.border:SetShown(d.scan == true)
+  if icon.hatch then icon.hatch:SetShown(d.hatch == true) end
+  if icon.skip then icon.skip:SetShown(d.skip == true) end
+
+  local wanted = {}
+  for i, key in ipairs(d.cues or {}) do wanted[key] = i - 1 end
+  for key, badge in pairs(icon.badges) do
+    local at = wanted[key]
+    if at then
+      badge:SetPoint("TOPRIGHT", icon.frame, "TOPRIGHT", ns.Paint.StackOffset(at))
+      badge.frame:SetAlpha(1)
+      badge:Show()
+    else
+      badge:Hide()
+    end
+  end
+  return texture ~= nil
+end
+
+local lastBody
+local function write(body, edge)
+  if not edge and body == lastBody then return end
+  local text = ("t%.1f "):format(GetTime()) .. (edge and ("# " .. edge .. " ") or "") .. body
+  if edge then stream:Mark(text) else stream:Line(text) end
+  if not ns.db then return end
+  lastBody = body
+  stream:Meta("version", ns.version)
+end
+
+--- cap has stopped drawing, or this build declares no virtual rows. The strip goes down whole:
+--- an empty panel must not leave one icon from the last roster lit over nothing.
+local function dark(edge)
+  for _, icon in pairs(pool) do
+    quiet(icon)
+    icon.frame:Hide()
+  end
+  if host then host:Hide() end
+  placedKey = nil
+  write(Panel.Render{ entries = 0, icons = 0, noart = 0 }, edge)
+end
+
+local function draw(out, bound, edge)
+  if not (out and bound) then return dark(edge) end
+  local plan = Panel.Plan(bound, out)
+  if #plan == 0 then return dark(edge) end
+  relayout(plan)
+
+  local cells, icons, noart = {}, 0, 0
+  for _, desc in ipairs(plan) do
+    local icon = pool[desc.id]
+    if icon then
+      if paint(icon, desc) then icons = icons + 1 else noart = noart + 1 end
+      icon.frame:Show()
+    end
+    cells[#cells + 1] = Panel.Cell(desc)
+  end
+  container():Show()
+  write(Panel.Render{ entries = #plan, icons = icons, noart = noart, cells = cells }, edge)
+end
+
+ns.Sense.OnVerdicts(draw)

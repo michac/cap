@@ -53,6 +53,16 @@ function H.withBars(ns)
   return ns.Bars
 end
 
+--- The pure core plus `Panel`, whose `Plan` is pure. V12's surface subscribes to the verdicts
+--- and opens a capture stream at load, so the harness supplies both — OUR modules, never a
+--- client API. No frame is built until a verdict arrives, which is why loading it is safe here.
+function H.withPanel(ns)
+  H.load(ns, "Capture.lua")
+  ns.Sense = ns.Sense or { OnVerdicts = function() end }
+  H.load(ns, "Panel.lua")
+  return ns.Panel
+end
+
 --- The 21-row Demonology set recorded by cap v0.2.0 in the live client.
 function H.rows()
   return assert(loadfile(ROOT .. "tests/fixtures/demonology-rows.lua"))()

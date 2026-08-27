@@ -244,6 +244,15 @@ ns.Style = {
     rgb = { 1.00, 0.78, 0.25 },
     tint = "shelf",
   },
+  panel = {
+    _comment = "V12's virtual row: the geometry of cap's OWN icon strip, for presses the Cooldown Manager carries no frame for. It ships to Style.lua and Panel.lua draws from it — icon_px sizes each icon, gap_px separates them, and anchor/x/y place the strip against UIParent while grow says which way it fills. ⚠ `anchor` positions the WHOLE strip; the edge the icons hang off is derived from `grow`, so a centred anchor stays centred as the roster grows.",
+    anchor = "BOTTOM",
+    gap_px = 6,
+    grow = "RIGHT",
+    icon_px = 50,
+    x = 0,
+    y = 190,
+  },
   procbar = {
     _comment = "V20. The proc's remaining lifetime as a thin client-drained bar above V18's charge bar (or on the bottom edge when no charge bar is declared). SetDurationBar -> SetTimerDuration(RemainingTime); SetMinMaxValues(0,1) FIRST (§4.8.1 finding 3); linear render mode. Gold over a dark track — the edge carries quantity, not polarity, which is why this lives here and not in the badge column (the corner-dial form it replaces lasted one day; V19's badge dial stays). gap_px separates it from the charge bar below. No art, so no tint key.",
     gap_px = 1,

@@ -106,6 +106,37 @@ local function orderCues(keys)
   return out
 end
 
+--- Every readable marker on one entry, written into the verdict. Shared by the CDM rows and the
+--- virtual ones (V12) so the two can never evaluate a marker differently: a virtual row's badges
+--- are ordinary readable badges, and the only thing V12 changes is where the icon lives.
+local function markersOf(entry, world, verdict, out)
+  local cues = {}
+  for _, marker in ipairs(entry.markers or {}) do
+    -- Sealed displays are acquired by Channel and never become Lua predicates.
+    if marker.when then
+      local state, parts = Signal.Explain(marker.when, world)
+      if marker.display then
+        -- A READABLE GATE on a sealed cue. It never contributes a cue — the client paints
+        -- that from the curve — it only says whether the paint is allowed at all. `blind` is
+        -- `false` here for the same reason `off` is: an unknown must not license a badge.
+        verdict.gates[marker.id] = state == "on"
+        if state == "blind" then out.unknowns = out.unknowns + 1 end
+      elseif state == "on" then
+        verdict.markers[#verdict.markers + 1] = marker.id
+        if marker.cue then cues[marker.cue] = true end
+        out.markers = out.markers + 1
+      elseif state == "blind" then
+        out.unknowns = out.unknowns + 1
+      end
+      -- The reason a marker drew OR was withheld — captured for every readable marker so a
+      -- flight can answer "why", not just "what". `off` is the most telling: a cleanly
+      -- ruled-out gate names the fact that ruled it out.
+      verdict.reasons[#verdict.reasons + 1] = { id = marker.id, state = state, terms = parts }
+    end
+  end
+  verdict.cues = orderCues(cues)
+end
+
 function Signal.Evaluate(resolved, world)
   local out = { byEntry = {}, emphasized = 0, markers = 0, unknowns = 0 }
   for _, bound in ipairs((resolved or {}).entries or {}) do
@@ -125,31 +156,35 @@ function Signal.Evaluate(resolved, world)
       out.emphasized = out.emphasized + 1
     end
     if blind then out.unknowns = out.unknowns + 1 end
-    local cues = {}
-    for _, marker in ipairs(entry.markers or {}) do
-      -- Sealed displays are acquired by Channel and never become Lua predicates.
-      if marker.when then
-        local state, parts = Signal.Explain(marker.when, world)
-        if marker.display then
-          -- A READABLE GATE on a sealed cue. It never contributes a cue — the client paints
-          -- that from the curve — it only says whether the paint is allowed at all. `blind` is
-          -- `false` here for the same reason `off` is: an unknown must not license a badge.
-          verdict.gates[marker.id] = state == "on"
-          if state == "blind" then out.unknowns = out.unknowns + 1 end
-        elseif state == "on" then
-          verdict.markers[#verdict.markers + 1] = marker.id
-          if marker.cue then cues[marker.cue] = true end
-          out.markers = out.markers + 1
-        elseif state == "blind" then
-          out.unknowns = out.unknowns + 1
-        end
-        -- The reason a marker drew OR was withheld — captured for every readable marker so a
-        -- flight can answer "why", not just "what". `off` is the most telling: a cleanly
-        -- ruled-out gate names the fact that ruled it out.
-        verdict.reasons[#verdict.reasons + 1] = { id = marker.id, state = state, terms = parts }
-      end
+    markersOf(entry, world, verdict, out)
+    out.byEntry[entry.id] = verdict
+  end
+  -- V12's virtual rows, into the SAME `byEntry`: they are verdicts about entries, and a second
+  -- map would make every consumer ask which one to look in.
+  for _, item in ipairs((resolved or {}).virtual or {}) do
+    local entry = item.entry
+    local isMember, blind
+    if entry.virtual == "standing" then
+      -- Availability is a constant, so there is nothing to read and nothing to be blind about.
+      -- This is the terminus that makes elimination total: the sweep always lands somewhere.
+      isMember, blind = true, false
+    else
+      -- `gated` evaluates its `scan_when` exactly as a CDM entry does — which is also where the
+      -- INVERTED unknown polarity comes from for free: `member` is false when blind, and
+      -- `Treatment` hatches a virtual row that is not a member.
+      isMember, blind = member(entry, world)
     end
-    verdict.cues = orderCues(cues)
+    local verdict = {
+      entry = entry.id, row = nil, virtual = entry.virtual,
+      member = isMember, blind = blind,
+      -- `oncd` is meaningless here: there is no CDM readiness latch behind a cap-owned icon.
+      -- The hatch comes from the scan's complement, in `Treatment.For`.
+      oncd = false,
+      emphasized = isMember, markers = {}, cues = {}, reasons = {}, gates = {},
+    }
+    if isMember then out.emphasized = out.emphasized + 1 end
+    if blind then out.unknowns = out.unknowns + 1 end
+    markersOf(entry, world, verdict, out)
     out.byEntry[entry.id] = verdict
   end
   return out

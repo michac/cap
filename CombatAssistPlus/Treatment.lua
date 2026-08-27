@@ -43,10 +43,22 @@ function Treatment.For(verdict)
   for _, key in ipairs(cues) do
     if (ns.Style.cues[key] or {}).polarity ~= "positive" then skip = true end
   end
+  local scan = (verdict and verdict.member) == true
+  -- ⚠ V12 INVERTS THE UNKNOWN, and this branch is the whole of it. A CDM row's hatch is
+  -- Blizzard's readiness latch, and an unknown draws bare because absence of a hatch asserts
+  -- nothing next to an icon that is there regardless. A virtual row exists ONLY to say "press
+  -- this now", so bare IS the instruction — an unknown drawn bare would be a positive one. The
+  -- hatch is therefore the complement of the scan: not a member, not now.
+  local hatch
+  if verdict and verdict.virtual then
+    hatch = verdict.member ~= true
+  else
+    hatch = (verdict or {}).oncd == true
+  end
   return {
-    scan = (verdict and verdict.member) == true,
+    scan = scan,
     cues = cues,
-    hatch = (verdict or {}).oncd == true,
+    hatch = hatch,
     skip = skip,
   }
 end

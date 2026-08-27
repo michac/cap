@@ -29,6 +29,7 @@ Sense.lua
 Glow.lua
 Bars.lua
 Overlay.lua
+Panel.lua
 Anchor.lua
 Frame.lua
 Window.lua

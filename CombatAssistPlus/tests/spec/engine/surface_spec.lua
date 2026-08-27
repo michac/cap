@@ -76,6 +76,25 @@ describe("engine / surface", function()
       assert.is_true(have.badge.Show and have.badge.Hide)
     end)
 
+  it("gives the virtual-row panel the same guarantee, on the same builders", function()
+    -- V12 draws through Paint too — its own frames, the same border, hatch and badges — so it is
+    -- blind to exactly the same nil-call defect, and `Panel.paint()` going down takes the whole
+    -- strip with it. Its objects are named `icon.*` rather than `f.*`; the badges are shared.
+    local panel = read("Panel.lua")
+    local owners = { ["icon%.border"] = "border", ["icon%.hatch"] = "hatch",
+                     ["icon%.skip"] = "hatch", ["badge"] = "badge" }
+    local checked = 0
+    for pattern, obj in pairs(owners) do
+      for method in panel:gmatch(pattern .. ":([%a_]+)%s*%(") do
+        checked = checked + 1
+        assert.is_true((have[obj] or {})[method] == true,
+          ("Panel calls %s:%s(), which Paint's `%s` table does not define"):format(
+            pattern:gsub("%%", ""), method, obj))
+      end
+    end
+    assert.is_true(checked >= 6, "the panel call map matched only " .. checked .. " call sites")
+  end)
+
   it("gives the gallery the same guarantee, since it draws through the same builders", function()
     local panel = read("StylePanel.lua")
     for method in panel:gmatch("badge:([%a_]+)%s*%(") do
