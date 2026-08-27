@@ -37,6 +37,26 @@ ns.Catalog.Register{
     { id = "blessed_assurance", spell = 433015, family = "auras" },
     { id = "divine_guidance", spell = 433106, family = "auras" },
     { id = "shining_light", spell = 321136, family = "auras" },
+    -- The Sacred Weapon BUFF, not the cast. 432502 is the only "Sacred Weapon" id carrying
+    -- Effect=6 apply-aura rows (five, all ImplicitTarget=21 target-ally, including
+    -- EffectAura=468 -> Tempered in Battle), SpellMisc.DurationIndex=18 -> Duration=20000,
+    -- description ending "Lasts $d." [T1 DB2 @ 12.1.0.69214,
+    -- knowledge/classes/paladin/protection/abilities.md -> Spell-ID anchors]. This is what
+    -- `buff.sacred_weapon.remains<6` reads. 432472 is the CAST, 432616/441590 the proc's damage
+    -- and healing, 432757 name residue rendering Holy Bulwark's text. It holds NO
+    -- CooldownSetSpell row anywhere and needs none: a sealed container is cap's OWN frame,
+    -- filtered by includeSpellIDs and bound with SetUnit(plan.unit) (Channel.lua:768, :849).
+    { id = "sacred_weapon", spell = 432502, family = "auras", unit = "player" },
+    -- The Consecration PLAYER aura -- "Standing in Consecration" -- and NOT the cast. All three
+    -- of 188370's SpellEffect rows are Effect=6 at ImplicitTarget=1 (caster), and the
+    -- Protection talent Strength of Conviction 379008 hangs its points on this id specifically
+    -- [T1 DB2 @ 12.1.0.69214, abilities.md -> Spell-ID anchors]. 26573 is the cast and the CDM
+    -- row (the 12 s field); 81297 is the periodic damage inside the field; 204242 is the enemy
+    -- snare (ImplicitTarget=6, EffectAura=33). WARNING 188370 has Duration = -1: it is
+    -- PRESENT/ABSENT only, so V19 and V20 are impossible on it and a presence band is the only
+    -- available form. Like every aura subject it needs no CDM row -- the container is cap's own
+    -- frame.
+    { id = "consecration_up", spell = 188370, family = "auras", unit = "player" },
   },
 
   -- Node + entry from `knowledge/classes/paladin/protection/ability-inventory.tsv` @ 12.1. ⚠
@@ -103,7 +123,8 @@ ns.Catalog.Register{
         },
       },
     },
-    -- 4 · holy_armaments. Rungs 10 / 14, 23. One button, two jobs.
+    -- 4 · holy_armaments. Rungs 10 / 14, 23. One button, two jobs. ⚠ Rung 23's charge dump is
+    -- not authored and the reason is the ROW ORDER, not missing data (Defeats, item 4).
     { id = "holy_armaments", ability = "holy_armaments",
       markers = {
         { id = "ha_banks_bulwark",
@@ -113,6 +134,28 @@ ns.Catalog.Register{
             ability = "avenging_wrath",
             beyond = 5,
             kind = "sealed-cooldown-range",
+          },
+        },
+        -- V19, and the FIRST consumer of `outside_s` in any catalog. Rung 10 is `holy_armaments
+        -- ,if=next_armament=sacred_weapon&(buff.sacred_weapon.remains<6|!buff.sacred_weapon.up)
+        -- `, and V19's pair says both halves without cap reading either. Plenty of buff left ->
+        -- the gold do-not-refresh hatch, off SetDurationText bands on the aura's remaining
+        -- seconds at the catalog's own 6 (Channel.lua:625-643); inside Blizzard's refresh
+        -- window -> the badge, on a window the CLIENT computes per spell. No buff at all -> no
+        -- aura, no button, no sink, so the row draws nothing and is a live candidate, which is
+        -- the `!buff.sacred_weapon.up` half for free. 6 is the APL's own number and is also 30
+        -- % of the buff's 20 s duration, so the hatch's edge and the client's window edge very
+        -- nearly coincide -- the seam is a flight question. Gated on the SACRED WEAPON life: in
+        -- the Bulwark life rung 10 cannot fire and the weapon buff says nothing about the
+        -- Bulwark. That gate rests on the same open direction as cue D (fact-classification.md
+        -- 5.1) -- if the identity reads the other way round, BOTH treatments land on the wrong
+        -- life.
+        { id = "ha_weapon_healthy",
+          when = { { "identity", "holy_armaments", "transformed" }, { "ready", "holy_armaments" } },
+          display = {
+            ability = "sacred_weapon",
+            kind = "sealed-pandemic",
+            outside_s = 6,
           },
         },
       },
@@ -159,9 +202,11 @@ ns.Catalog.Register{
         },
       },
     },
-    -- 6 · consecration. Rungs 15, 19, 24 and 29. ⚠ Rungs 19 and 24 are not modelled:
-    -- `!consecration.up` reads a Category-3 (TrackedBar) row, the same unmeasured alert-edge
-    -- question as Avenging Wrath's buff.
+    -- 6 · consecration. Rungs 15, 19, 24 and 29. ⚠ Rungs 19 and 24 are now expressed on a
+    -- BLESSED ASSURANCE build, as a V16 presence band on the player aura 188370 -- not as an
+    -- `aura` latch, so the unmeasured Category-3 alert-edge question is bypassed rather than
+    -- answered. On a Divine Guidance build they remain unmodelled, because rung 15 presses
+    -- Consecration with the field up on a count cap may not read (Defeats, item 2).
     { id = "consecration", ability = "consecration",
       markers = {
         { id = "cons_awaits_hammer",
@@ -183,6 +228,44 @@ ns.Catalog.Register{
               {
                 draw = "none",
                 threshold = 5,
+              },
+            },
+            kind = "sealed-count-bands",
+          },
+        },
+        -- A PRESENCE band, and the only shape 188370 allows: the player aura carries Duration =
+        -- -1, so it is present-or-absent and there is no remaining time on it to band or drain
+        -- — the 12 s clock lives on the cast, 26573. One band at threshold 0 therefore draws
+        -- for every value the aura can have, and the client's own blank when the aura is absent
+        -- is the whole of the other state. That is rungs 19 and 24's `!consecration.up` read as
+        -- an elimination, with no aura duration entering a Lua condition and no latch on an
+        -- unmeasured row class. ⚠ GATED ON talent(blessed_assurance), which is what makes it
+        -- honest rather than merely narrow. Rung 15
+        -- (`consecration,if=buff.divine_guidance.stack>=5`) carries NO `!consecration.up` term,
+        -- so on a Divine Guidance build a capped count presses Consecration with the field
+        -- still under you — and the count is sealed, so cap could never gate on it. On the
+        -- other half of choice node 95235 rung 15 cannot exist at all. The gate is a POSITIVE
+        -- talent read rather than `!talent(divine_guidance)` on purpose: same coverage, one
+        -- fewer negation in the safety case, and it makes the mutual exclusion with
+        -- `cons_awaits_hammer` (which requires talent(divine_guidance)) a property of the
+        -- choice node rather than of an argument. ⚠ ready(crusader_strike) is the outranker
+        -- term: rung 29 is an UNCONDITIONAL Consecration, so with the whole rest of the row
+        -- unavailable the field-up Consecration IS the press and the hatch would eliminate the
+        -- correct button.
+        { id = "cons_field_up",
+          when = {
+            { "talent", "blessed_assurance" },
+            { "ready", "consecration" },
+            { "ready", "crusader_strike" },
+          },
+          display = {
+            ability = "consecration_up",
+            bands = {
+              {
+                draw = "mark",
+                hatch = true,
+                polarity = "negative",
+                threshold = 0,
               },
             },
             kind = "sealed-count-bands",

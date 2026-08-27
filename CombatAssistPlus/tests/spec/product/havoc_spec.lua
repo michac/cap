@@ -71,11 +71,14 @@ describe("product characterization / Havoc pilot", function()
     return ns.Signal.Evaluate(resolved, world).byEntry.immolation_aura
   end
 
-  it("draws capped at max charges — rung 10, which has no target term", function()
+  it("draws the positive cue at max charges — rung 10, which has no target term", function()
+    -- ⚠ The cue is `priority`, not `capped`: rung 2's marker joined this entry on 2026-08-26 and
+    -- two markers must wear the SAME positive cue. The condition is unchanged; the READING is
+    -- not — `capped` said *impending loss* and `priority` says only *press this one*.
     for _, aoe in ipairs{ false, true } do
       local full = immolation(true, { aoe = aoe })
-      assert.same({ "capped" }, full.cues, "a banked charge is worth spending at any count")
-      assert.is_false(skips(full), "capped is the one positive cue and must not read as skip")
+      assert.same({ "priority" }, full.cues, "a banked charge is worth spending at any count")
+      assert.is_false(skips(full), "the one positive cue must not read as skip")
       assert.is_true(ns.Treatment.For(full).scan)
     end
   end)
@@ -281,6 +284,131 @@ describe("product characterization / Havoc pilot", function()
     assert.same({}, v.cues)
     assert.is_false(skips(v))
     assert.is_true(ns.Treatment.For(v).scan)
+  end)
+
+  -- The sibling of Retribution's "spends exactly one positive cue, on exactly one entry". ⚠ The
+  -- invariant is one positive CUE, not one marker: `Catalog.lua:202`'s refusal is
+  -- `positive ~= marker.cue`, so two markers wearing the SAME positive cue is legal, draws ONE
+  -- card, and is how rungs 2 and 10 — which mean the same action — share a badge. This is the
+  -- thing a future edit would break by re-badging one of them back to `capped`.
+  it("spends exactly one positive cue, worn by TWO markers on ONE entry", function()
+    local cues, entries, positives = {}, {}, {}
+    for _, e in ipairs(cat.entries) do
+      for _, m in ipairs(e.markers or {}) do
+        if m.cue and (ns.Style.cues[m.cue] or {}).polarity == "positive" then
+          positives[#positives + 1] = e.id .. ":" .. m.id
+          cues[m.cue] = true
+          entries[e.id] = true
+        end
+      end
+    end
+    assert.same({ "immolation_aura:immolation_capped", "immolation_aura:immolation_pre_meta" },
+      positives)
+    assert.same({ priority = true }, cues, "two positives on one entry must be the SAME cue")
+    assert.same({ immolation_aura = true }, entries)
+    -- And the merged shape must actually validate: this is the assertion Catalog.Check makes.
+    assert.same({}, ns.Catalog.Check(cat))
+  end)
+
+  it("draws rung 2 off a SEALED band and rung 10 off a readable charge read — one cue, two lanes",
+    function()
+    local entry
+    for _, e in ipairs(cat.entries) do if e.id == "immolation_aura" then entry = e end end
+    local pre, capped
+    for _, m in ipairs(entry.markers) do
+      if m.id == "immolation_pre_meta" then pre = m end
+      if m.id == "immolation_capped" then capped = m end
+    end
+
+    -- Rung 2: two readable talent gates BESIDE a sealed band. `gcd.max*3` is 4.5s at a 1.5s
+    -- global; 5 is a rounding, and the number lives here so a change to it is visible.
+    local plan = ns.Channel.HoldPlan(pre)
+    assert.equal("sealed-cooldown-range", plan.kind)
+    assert.equal("metamorphosis", plan.ability)
+    assert.equal(5, plan.within)
+    assert.equal("priority", plan.cue)
+    assert.is_nil(plan.beyond)
+
+    -- ⚠ Rung 2 sits ABOVE everything, so unlike rung 10 it carries NO cooldown fence. Rung 10 is
+    -- below rungs 3 and 4 and must stand down for them, or a positive cue points past a cooldown
+    -- that outranks it. The fence is a function of the rung's height, and this asserts both ends.
+    local function preds(marker)
+      local out = {}
+      for _, t in ipairs(marker.when or {}) do out[#out + 1] = t[1] .. ":" .. tostring(t[2]) end
+      table.sort(out)
+      return out
+    end
+    assert.same({ "talent:a_fire_inside", "talent:violent_transformation" }, preds(pre))
+    local fence = preds(capped)
+    assert.is_true(#fence > #preds(pre), "rung 10 must carry more gates than rung 2, not fewer")
+    local hasMeta, hasHunt = false, false
+    for _, t in ipairs(capped.when) do
+      if t[1] == "ready" and t[2] == "metamorphosis" then hasMeta = true end
+      if t[1] == "ready" and t[2] == "the_hunt" then hasHunt = true end
+    end
+    assert.is_true(hasMeta and hasHunt, "rung 10 stands down for the rungs above it")
+  end)
+
+  it("gates ALL THREE Metamorphosis holds on Chaotic Transformation — the talent that makes the "
+    .. "reset exist", function()
+    -- Rung 3 is `(!talent.chaotic_transformation | !cooldown.blade_dance.up &
+    -- cooldown.eye_beam.remains>8) & …`, so WITHOUT the talent the first disjunct is true and
+    -- there is no hold at all. Ungated, the two readable marks fire on the ordinary steady state
+    -- of such a build — and Metamorphosis is row position 2, so the leftmost GCD row would wear a
+    -- permanent red badge. Same shape, same argument as The Hunt's Eternal Hunt gate below.
+    local entry
+    for _, e in ipairs(cat.entries) do if e.id == "metamorphosis" then entry = e end end
+    local resolved = { entries = { { entry = entry, row = {} } } }
+    local function verdict(talented)
+      return ns.Signal.Evaluate(resolved, H.world{
+        -- Both reset targets UP: the state that raises both readable marks.
+        ready = H.map(false, { metamorphosis = true, eye_beam = true, blade_dance = true }),
+        talent = H.map(true, { chaotic_transformation = talented }),
+      }).byEntry.metamorphosis
+    end
+
+    local off = verdict(false)
+    assert.same({}, off.cues, "untalented, rung 3 is unconditional — no hold may draw")
+    assert.is_false(skips(off))
+    assert.is_false(off.gates.meta_awaits_eye_beam, "the sealed band is gated too, not just the marks")
+
+    local on = verdict(true)
+    assert.same({ "blocked" }, on.cues)
+    assert.same({ "meta_wastes_eye_beam", "meta_wastes_death_sweep" }, on.markers)
+    assert.is_true(on.gates.meta_awaits_eye_beam)
+
+    -- An unknown talent read WITHHOLDS, exactly as the untalented case does — never licenses.
+    local blind = ns.Signal.Evaluate(resolved, H.world{
+      ready = H.map(false, { metamorphosis = true, eye_beam = true, blade_dance = true }),
+      talent = H.map("unknown"),
+    }).byEntry.metamorphosis
+    assert.same({}, blind.cues)
+    assert.is_false(blind.gates.meta_awaits_eye_beam)
+  end)
+
+  it("hangs the Inertia clock on the ARMED state, and it is a display rather than a cue", function()
+    -- V20. Rung 16 is `felblade,if=buff.inertia_trigger.up`, so the bar and the rung that presses
+    -- this button share ONE subject: `1215159`, the 12s ARMED state — not `427641` (the 5s held
+    -- +12%) and not `427640` (the talent passive, which is the CDM row). A wrong subject draws
+    -- NOTHING, silently, which is why the id is asserted here rather than trusted.
+    local armed
+    for _, ability in ipairs(cat.abilities) do
+      if ability.id == "inertia_trigger" then armed = ability end
+    end
+    assert.is_table(armed, "the bar's subject must be a declared ability")
+    assert.equal(1215159, armed.spell)
+    assert.equal("auras", armed.family, "an aura subject must say so — family decides what it binds")
+
+    local entry
+    for _, e in ipairs(cat.entries) do if e.id == "felblade" then entry = e end end
+    local clock
+    for _, m in ipairs(entry.markers) do if m.id == "felblade_inertia_clock" then clock = m end end
+    assert.is_table(clock)
+    assert.equal("sealed-proc-bar", clock.display.kind)
+    assert.equal("inertia_trigger", clock.display.ability)
+    -- No cue: a proc bar states duration, never rank. It must not reach the elimination walk.
+    assert.is_nil(clock.cue)
+    assert.is_nil(clock.when, "no gate — the slot filters to the aura, so visibility IS the gate")
   end)
 
   it("holds The Hunt on TWO sealed bands — one per axis — and never on readiness alone", function()

@@ -31,18 +31,41 @@ ns.Catalog.Register{
     { id = "judgment", spell = 20271, alt = { 24275 } },
     { id = "crusader_strike", spell = 35395, alt = { 407480 } },
     { id = "expurgation", spell = 383346, family = "auras", unit = "target" },
+    -- The STACKING aura, and it is NOT the id the review named. `425518` is the Templar hero
+    -- TALENT — `CumulativeAura = 0`, and its SpellEffect 0 is a PROC_TRIGGER_SPELL whose
+    -- `EffectTriggerSpell` is 433674. `433674` carries `CumulativeAura = 60`, which is the same
+    -- 60 the spell text names, and it holds CooldownSet 901's Category-2 slot at OrderIndex 45
+    -- — a Tracked Buff row in Retribution's own set, which is the row the player was being
+    -- asked to watch [T1 DB2: SpellName / SpellEffect / SpellAuraOptions / CooldownSetSpell @
+    -- 12.1.0.69214]. ⚠ `family` is declared rather than defaulted BECAUSE a sealed display
+    -- whose subject does not resolve draws nothing at all and is indistinguishable from a
+    -- client refusal — the Destruction bug. **The stack HOLDS at 60, and the mark is therefore
+    -- a resting state rather than a flicker.** `CumulativeAura = 60` caps it and alone could
+    -- not have answered this; the spell text does: *"**While Wake of Ashes and Hammer of Light
+    -- are unavailable**, you consume 60 stacks…"* The consumption is CONDITIONAL, not automatic
+    -- — for as long as either button is available the counter sits at 60 and stays there, so
+    -- there is no fill-and-empty race for the band to lose. And nothing auto-casts: the payoff
+    -- is *"empowering yourself to cast Hammer of Light an additional time for free"*, which the
+    -- player still presses. That is exactly why the band is worth drawing — it says a free
+    -- Hammer is banked and waiting.
+    { id = "lights_deliverance", spell = 433674, family = "auras", unit = "player" },
   },
 
-  -- Node + entry from `knowledge/classes/paladin/retribution/ability-inventory.tsv`.
+  -- Node + entry from `knowledge/classes/paladin/retribution/ability-inventory.tsv`. ⚠
+  -- `execution_sentence` is declared as a TALENT as well as an ability because `generators` 3's
+  -- first disjunct is `!talent.execution_sentence` — the rung is unconditional on a build
+  -- without it, so the hold that yields to it must ask whether it is TAKEN, not only whether it
+  -- is ready.
   talents = {
     { id = "holy_flames", node = 109371, entry = 115438, spell = 406545 },
     { id = "radiant_glory", node = 81549, entry = 102525, spell = 458359 },
+    { id = "execution_sentence", node = 109373, entry = 115435, spell = 343527 },
   },
 
   -- Entry order IS the authored priority; `Catalog.OrderCheck` reports when the player's
   -- Cooldown Manager disagrees with it.
   entries = {
-    -- 1 · execution_sentence. 1. A PLACED cooldown, not a press-on-cooldown one. Three markers,
+    -- 1 · execution_sentence. 1. A PLACED cooldown, not a press-on-cooldown one. FOUR markers,
     -- one cue key, so the AND-only band grammar unions them into a single badge.
     { id = "execution_sentence", ability = "execution_sentence",
       markers = {
@@ -72,6 +95,18 @@ ns.Catalog.Register{
             kind = "sealed-cooldown-range",
           },
         },
+        -- The SAME clause `aw_awaits_expurgation` authors one entry down —
+        -- `(!talent.holy_flames|dot.expurgation.ticking)`, the last term of cooldowns 10 — and
+        -- it is one marker rather than two because the APL's OR negates into a plain AND: Holy
+        -- Flames talented AND the DoT absent.
+        { id = "es_awaits_expurgation",
+          cue = "blocked",
+          when = {
+            { "ready", "execution_sentence" },
+            { "talent", "holy_flames" },
+            { "aura", "expurgation", negate = true },
+          },
+        },
       },
     },
     -- 2 · avenging_wrath. 2. The window everything aligns into.
@@ -83,6 +118,24 @@ ns.Catalog.Register{
             { "ready", "avenging_wrath" },
             { "talent", "holy_flames" },
             { "aura", "expurgation", negate = true },
+          },
+        },
+        -- V20 · the DoT the hold above waits on, as a bar the CLIENT drains, hosted on the row
+        -- whose badge depends on it. It is V20 and not V19 deliberately: V19's badge wears the
+        -- FULL positive-cue treatment — promotion ring and halo — and nothing in this priority
+        -- refreshes Expurgation, so "press now" is a sentence this row must not say. A bottom
+        -- edge carries quantity, not verdict. ⚠ It needs NO Cooldown-Manager row for its
+        -- subject: a sealed container is cap's own frame, filtered by `includeSpellIDs` and
+        -- pointed with `SetUnit(plan.unit)` — which is exactly why it is worth having. The
+        -- `aura` latch above goes blind when the player never enabled the Tracked Buff row; the
+        -- bar does not. GATED on the talent, the same readable-gate seam Demonology's Doom
+        -- window uses: without Holy Flames the fact is not part of the priority and an armed
+        -- display would sit dark forever with no way to tell that from a refusal.
+        { id = "aw_expurgation_clock",
+          when = { { "talent", "holy_flames" } },
+          display = {
+            ability = "expurgation",
+            kind = "sealed-proc-bar",
           },
         },
       },
@@ -111,13 +164,88 @@ ns.Catalog.Register{
             within = 6,
           },
         },
+        -- The SEALED half of `generators` 3's Execution Sentence clause, and the pair is now
+        -- gated CONSISTENTLY: both this and `woa_awaits_sentence_ready` carry
+        -- `talent(execution_sentence)`, for the same reason and in the same words. The clause
+        -- is `(!talent.execution_sentence|cooldown.execution_sentence.remains>4|target.time_to_
+        -- die<10)`, so on a build WITHOUT Execution Sentence the first disjunct is TRUE and
+        -- `generators` 3 is unconditional — a hold derived from that clause has no business
+        -- drawing there at all. ⚠ **This was NOT harmless-by-refusal, and the difference is the
+        -- point.** A `sealed-cooldown-range` binds on the CATALOG's static `spell` number
+        -- (`Channel.HoldPlan` / `Channel.ArmHold`), never on whether the client knows the spell
+        -- — so on an untalented build the plan built, the Step curve built, and
+        -- `Overlay.armGraded` reported status **`armed`**. What kept it dark was the per-draw
+        -- nil-guard in `Channel.HoldAlpha`: `C_Spell.GetSpellCooldownDuration` is
+        -- `MayReturnNothing` and its sibling `C_Spell.GetSpellCooldown` is recorded as
+        -- returning nil on an unknown spell (`knowledge/addon-dev/cooldown-manager.md:2065`).
+        -- That is safe by accident of the client, and it printed `armed` in every capture on a
+        -- build where the hold could never be right. With the talent term the marker's readable
+        -- gate resolves false, `Overlay` hides the badge and reports **`gated`** — nothing
+        -- failed, the row is simply not in the state that licenses the display. Safe because we
+        -- said so, and it says so in the capture.
         { id = "woa_awaits_sentence",
           cue = "blocked",
-          when = { { "identity", "wake_of_ashes", "base" }, { "ready", "wake_of_ashes" } },
+          when = {
+            { "identity", "wake_of_ashes", "base" },
+            { "ready", "wake_of_ashes" },
+            { "talent", "execution_sentence" },
+          },
           display = {
             ability = "execution_sentence",
             kind = "sealed-cooldown-range",
             within = 4,
+          },
+        },
+        -- The READABLE half of `woa_awaits_sentence`, and the sibling of
+        -- `es_awaits_wrath_ready` one row to the left. `generators` 3's second clause is `(!tal
+        -- ent.execution_sentence|cooldown.execution_sentence.remains>4|target.time_to_die<10)`:
+        -- with Execution Sentence talented and READY the first two disjuncts are false, so the
+        -- APL does not press Wake of Ashes at all — and the `within = 4` band reads NOTHING at
+        -- zero remaining, exactly as the Avenging Wrath band does on row 1. ⚠ The `talent` term
+        -- is load-bearing and not belt-and-braces: on a build without Execution Sentence the
+        -- first disjunct is TRUE and this rung is unconditional, so an ungated hold would badge
+        -- a press the APL makes freely. ⚠ ONE HONEST OVER-HOLD: `target.time_to_die<10` also
+        -- satisfies the clause and cap does not model the encounter — no `fight_remains`, by
+        -- product rule, the same exclusion Demonology's rung 1 records. So in the last ten
+        -- seconds of a fight this holds a Wake of Ashes the APL presses. That is a MISSED
+        -- PRESS, not a wrong one, which is the direction this project accepts everywhere else.
+        { id = "woa_awaits_sentence_ready",
+          cue = "blocked",
+          when = {
+            { "identity", "wake_of_ashes", "base" },
+            { "ready", "wake_of_ashes" },
+            { "talent", "execution_sentence" },
+            { "ready", "execution_sentence" },
+          },
+        },
+        -- V16 · silent until armed. `draw = "none"` below 60 is the whole resting state — the
+        -- row is unchanged and the player is not being asked to read a counter — and at 60 one
+        -- positive mark meaning A FREE HAMMER OF LIGHT IS BANKED AND WAITING FOR YOU, on the
+        -- row that will display it and on a button you still have to press. The 60 is a RESTING
+        -- state, not a threshold the counter crosses and leaves: the spell text conditions the
+        -- consumption on Wake of Ashes and Hammer of Light both being unavailable, so while
+        -- either is available the stack sits at 60 and stays there. `mark` and not `count`:
+        -- "how many more" stops being the live question the moment the answer is none. cap
+        -- authors the 60 and the client evaluates it against a secret; cap never learns which
+        -- side the count fell on. ⚠ This narrows the finishers-2 defeat and does not close it —
+        -- the four clip conditions are buff-REMAINING comparisons and still have no S-form. ⚠ A
+        -- count band CLAIMS A CORNER by declaration (`Catalog.CORNER_DISPLAYS`), so this row's
+        -- cue badges start below it whether or not anything is drawing.
+        { id = "woa_lights_deliverance",
+          display = {
+            ability = "lights_deliverance",
+            bands = {
+              {
+                draw = "none",
+                threshold = 0,
+              },
+              {
+                draw = "mark",
+                polarity = "positive",
+                threshold = 60,
+              },
+            },
+            kind = "sealed-count-bands",
           },
         },
       },

@@ -28,14 +28,30 @@ ns.Catalog.Register{
     { id = "demons_bite", spell = 344859 },
     { id = "fel_rush", spell = 344865, charged = true },
     { id = "throw_glaive", spell = 185123, charged = true },
+    -- buff.inertia_trigger — the ARMED state, `1215159`, Tier 1 @ 12.1.0.69214
+    -- (knowledge/classes/demon-hunter/havoc/abilities.md, `## Spell-ID anchors`). One dummy
+    -- aura row carrying NO damage modifier, AuraDescription *“Your next Fel Rush or Felblade
+    -- increases your damage…”*, duration 12000. It is deliberately NOT `427641` (the 5s HELD
+    -- buff, which carries the +12%) and not `427640` (the talent passive that owns the CDM
+    -- row). An aura-family subject: it never enters Signal and cap never learns its value — it
+    -- exists so a sealed display can name it.
+    { id = "inertia_trigger", spell = 1215159, family = "auras" },
   },
 
   -- Node + entry from `knowledge/classes/demon-hunter/havoc/ability-inventory.tsv`. This is
-  -- what `talent.a_fire_inside` in the APL means, read as itself rather than through a proxy.
+  -- what `talent.<name>` in the APL means, read as itself rather than through a proxy. ⚠
+  -- `violent_transformation` is a FEL-SCARRED hero talent (node 94912 / entry 117509 / spell
+  -- 452409, confirmed through TraitNodeEntry -> TraitDefinition 122521 at 12.1.0.69214), which
+  -- is why it may be named here at all — a spec-and-hero pair is the unit. Its `description`
+  -- column in the tsv is Devourer text (Void Metamorphosis / Voidblade), the same 12.1 API
+  -- description bleed `abilities.md:183` flags for `471306`; the IDS are sound, the prose in
+  -- that column is not.
   talents = {
     { id = "a_fire_inside", node = 95143, entry = 117741, spell = 427775 },
     { id = "burning_wound", node = 90917, entry = 112826, spell = 391189 },
     { id = "eternal_hunt", node = 110427, entry = 137049, spell = 1270898 },
+    { id = "chaotic_transformation", node = 91024, entry = 112947, spell = 388112 },
+    { id = "violent_transformation", node = 94912, entry = 117509, spell = 452409 },
   },
 
   -- Entry order IS the authored priority. `Catalog.OrderCheck` compares it against Blizzard's
@@ -67,19 +83,23 @@ ns.Catalog.Register{
         },
       },
     },
-    -- 2 · metamorphosis. Meta's payoff is its RESET of Eye Beam and Death Sweep. The APL
-    -- condition `!cooldown.blade_dance.up & cooldown.eye_beam.remains>8` straddles the
-    -- readable/sealed line: readiness is readable, remaining time is not. Three markers rather
-    -- than one because the band grammar is AND-only — naming the same cue three times unions
-    -- into a single badge, and that union IS the OR.
+    -- 2 · metamorphosis. Meta's payoff is its RESET of Eye Beam and Death Sweep, and the reset
+    -- is CHAOTIC TRANSFORMATION's — rung 3 reads `(!talent.chaotic_transformation |
+    -- !cooldown.blade_dance.up & cooldown.eye_beam.remains>8)`, so on a build without that
+    -- talent the first disjunct is true and there is no hold at all. Every marker here is
+    -- therefore gated on it, exactly as The Hunt's two bands are gated on Eternal Hunt. Under
+    -- the gate the condition straddles the readable/sealed line: readiness is readable,
+    -- remaining time is not. Three markers rather than one because the band grammar is AND-only
+    -- — naming the same cue three times unions into a single badge, and that union IS the OR.
     { id = "metamorphosis", ability = "metamorphosis",
       markers = {
         { id = "meta_wastes_eye_beam",
           cue = "blocked",
-          when = { { "ready", "eye_beam" } },
+          when = { { "talent", "chaotic_transformation" }, { "ready", "eye_beam" } },
         },
         { id = "meta_awaits_eye_beam",
           cue = "blocked",
+          when = { { "talent", "chaotic_transformation" } },
           display = {
             ability = "eye_beam",
             kind = "sealed-cooldown-range",
@@ -88,7 +108,7 @@ ns.Catalog.Register{
         },
         { id = "meta_wastes_death_sweep",
           cue = "blocked",
-          when = { { "ready", "blade_dance" } },
+          when = { { "talent", "chaotic_transformation" }, { "ready", "blade_dance" } },
         },
       },
     },
@@ -149,20 +169,48 @@ ns.Catalog.Register{
       },
     },
     -- 7 · immolation_aura. Immolation Aura sits ABOVE Chaos Strike and its rung is set by
-    -- CHARGES, not by target count. Three rungs in APL order: 10 (a banked charge, no target
-    -- term, outranks the spenders and Eye Beam), 20 (above Chaos Strike at 2+ targets — what
-    -- position 7 encodes), and 25 (the unconditional floor, BELOW Chaos Strike, which the red
-    -- badge corrects).
+    -- CHARGES and by METAMORPHOSIS, not by target count. Four rungs in APL order: 2 (the top of
+    -- the whole list — Violent Transformation is about to reset it, so spend the charge first),
+    -- 10 (a banked charge, no target term, outranks the spenders and Eye Beam), 20 (above Chaos
+    -- Strike at 2+ targets — what position 7 encodes), and 25 (the unconditional floor, BELOW
+    -- Chaos Strike, which the red badge corrects). Rungs 2 and 10 wear the SAME positive cue on
+    -- purpose: both mean *press Immolation Aura now*, so one gold badge is honest rather than a
+    -- compromise.
     { id = "immolation_aura", ability = "immolation_aura",
       markers = {
+        -- Rung 10. It wore `capped` until 2026-08-26 and now wears `priority`, because rung 2
+        -- joined it on this entry and both rungs mean the same ACTION. ⚠ What that costs is
+        -- stated rather than lost: `capped` said *impending loss* — you are wasting a charge
+        -- right now — and `priority` says only *press this one*. That distinction is DELETED on
+        -- this entry, deliberately. The two `ready` negations stay: rung 10 sits BELOW rungs 3
+        -- and 4, so without them a positive cue would point straight past a cooldown that
+        -- outranks it. Rung 2 needs no such fence, which is the difference between the two
+        -- markers.
         { id = "immolation_capped",
-          cue = "capped",
+          cue = "priority",
           when = {
             { "talent", "a_fire_inside" },
             { "talent", "burning_wound" },
             { "ready", "metamorphosis", negate = true },
             { "ready", "the_hunt", negate = true },
             { "capped", "immolation_aura" },
+          },
+        },
+        -- Rung 2 — `immolation_aura,if=talent.violent_transformation&talent.a_fire_inside&coold
+        -- own.metamorphosis.remains<gcd.max*3`, the HIGHEST line in the list. Two readable
+        -- talent gates and one sealed band: cap hands the client a 5s curve on Metamorphosis's
+        -- remaining time and never learns the clock. `gcd.max*3` is 4.5s at a 1.5s global, so 5
+        -- is a ROUNDING and is authored as one. Both talents gate it, so on a build without
+        -- either it never fires and never hatches. ⚠ It carries NO cooldown fence, unlike
+        -- `immolation_capped`: rung 2 is above every other rung, so a positive cue overriding
+        -- the elimination scan here is exactly right.
+        { id = "immolation_pre_meta",
+          cue = "priority",
+          when = { { "talent", "violent_transformation" }, { "talent", "a_fire_inside" } },
+          display = {
+            ability = "metamorphosis",
+            kind = "sealed-cooldown-range",
+            within = 5,
           },
         },
         { id = "immolation_single_target",
@@ -214,6 +262,16 @@ ns.Catalog.Register{
             kind = "sealed-power-percent",
             power = "Fury",
             threshold = 100,
+          },
+        },
+        -- V20 · the ARMED window's own clock on the row that spends it. Rung 16
+        -- (`felblade,if=buff.inertia_trigger.up`) is keyed on this exact aura, so the bar and
+        -- the rung have one subject. No cue, no threshold, no gate: the slot filters to the
+        -- aura, so the bar exists exactly while the window does and its visibility IS the gate.
+        { id = "felblade_inertia_clock",
+          display = {
+            ability = "inertia_trigger",
+            kind = "sealed-proc-bar",
           },
         },
       },
