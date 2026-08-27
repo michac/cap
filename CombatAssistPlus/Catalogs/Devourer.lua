@@ -209,18 +209,28 @@ ns.Catalog.Register{
         },
         -- The AoE half of the position-1 correction. In AoE Collapsing Star is rung 9, BELOW
         -- Void Ray's rung 8, and the face is the leftmost icon on the line — so without this
-        -- the scan takes it a rung early whenever Void Ray is up. `ready(void_ray)` is the
-        -- whole point: a hold that names a row must check that row can actually fire, or it
-        -- eliminates the correct press in every state where the outranker is swiped. In single
-        -- target the hold is absent because rung 5 sits ABOVE rung 8 and position 1 is right. ⚠
-        -- The single-target/AoE split rests on cap's OWN `/cap aoe` toggle, not on a game read
-        -- of enemy count.
+        -- the scan takes it a rung early whenever Void Ray is up. `ready(void_ray)` is
+        -- necessary but NOT sufficient, and the fourth term is why. ⚠ Rung 8 is
+        -- `!buff.eradicate.up|!buff.moment_of_craving.up|set_bonus...4pc`, so with BOTH procs
+        -- banked and no 4-piece the APL skips Void Ray and rung 9 IS the press — and a hold on
+        -- readiness alone would badge the correct press `blocked`, which is the one direction
+        -- this catalog refuses (cue D is argued on exactly the opposite standard). cap cannot
+        -- read that AND: the overlay channel gives Eradicate and Moment of Craving ONE row, so
+        -- `proc(reap)` is their OR and rung 8 needs their AND (`fact-classification.md` §4.2,
+        -- documented misordering 4). `!proc(reap)` is the strongest thing cap can say that is
+        -- still SAFE — neither proc up implies `!eradicate`, which implies rung 8 fires. The
+        -- cost is that with exactly ONE proc up the hold is missing and Collapsing Star over-
+        -- ranks by one rung, which is a missed hold and not a wrong press. In single target the
+        -- hold is absent because rung 5 sits ABOVE rung 8 and position 1 is right. ⚠ The
+        -- single-target/AoE split rests on cap's OWN `/cap aoe` toggle, not on a game read of
+        -- enemy count.
         { id = "star_yields_to_void_ray",
           cue = "blocked",
           when = {
             { "identity", "void_metamorphosis", "transformed" },
             { "aoe" },
             { "ready", "void_ray" },
+            { "proc", "reap", negate = true },
           },
         },
       },
