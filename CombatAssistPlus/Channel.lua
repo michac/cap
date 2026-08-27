@@ -184,8 +184,10 @@ function Channel.CountElements(bands)
   return out
 end
 
---- Pure dependency binding for the SEALED RADIAL (render-shelf.md V18). `max` reaches the client
---- as `maxApplications`, which is what makes the clamp turn "or more" into "full".
+--- Pure dependency binding for the SEALED BAR (render-shelf.md V18). `max` reaches the client
+--- as `maxApplications`, which is what makes the clamp turn "or more" into "full". The whole-bar
+--- red flip at that value is unconditional and lives in `Channel.Arm`'s own slot: it follows from
+--- the KIND, never from a catalog key.
 function Channel.BarPlan(marker, abilities)
   local display = marker and marker.display
   local ability = display and abilities and abilities[display.ability]
@@ -196,7 +198,6 @@ function Channel.BarPlan(marker, abilities)
   end
   return {
     kind = display.kind, spell = ability.spell, max = display.max,
-    full = display.full and true or false,
     unit = ability.unit or "player", sink = "SetApplicationBar",
   }
 end

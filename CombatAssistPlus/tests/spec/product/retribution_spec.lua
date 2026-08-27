@@ -122,4 +122,27 @@ describe("product characterization / Retribution", function()
     assert.same({ priority = true }, cues)
     assert.same({ blade_of_justice = true }, entries)
   end)
+
+  -- ⚠ THE ABSENCE IS AUTHORED, so it is asserted rather than left to nobody noticing.
+  -- A `sealed-count-bands` on Light's Deliverance shipped 2026-08-25 and was deleted 2026-08-27:
+  -- `lights_deliverance` appears in NO rung of the priority list, which reads only the result
+  -- (`buff.hammer_of_light_free.up`, finishers 2), so drawing the banked count was cap authoring
+  -- a fact the APL does not consider. A primitive existing is not a reason to spend it. The
+  -- reasoning and the DB2 research (433674, the stacking aura -- not the 425518 hero talent that
+  -- procs it) are in `specs/retribution/catalog.md`'s Changelog.
+  it("draws no stack count anywhere, and declares no aura for one", function()
+    for _, e in ipairs(cat.entries) do
+      for _, m in ipairs(e.markers or {}) do
+        assert.not_equal("sealed-count-bands", (m.display or {}).kind,
+          e.id .. ":" .. m.id .. " draws a stack count no rung reads")
+      end
+    end
+    for _, a in ipairs(cat.abilities or {}) do
+      assert.not_equal("lights_deliverance", a.id,
+        "the ability declaration outlived the only marker that named it")
+    end
+    -- …and the catalog still validates with the ability gone, which is what proves nothing
+    -- else was resolving against it.
+    assert.same({}, ns.Catalog.Check(cat))
+  end)
 end)

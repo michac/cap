@@ -298,8 +298,9 @@ describe("engine / catalog", function()
     assert.equal(4, marker(demo, "db_core_charge").display.max)
     assert.equal("doom", marker(demo, "db_doom_window").display.ability)
 
-    -- `max` is the number that MATTERS, not the aura's real cap, and the clamp is what turns
-    -- "or more" into "full" -- so a non-positive one has no fired state at all.
+    -- `max` is the number past which nothing more can be said -- for Demonic Core that IS the
+    -- aura's real cap ("Maximum 4 stacks") -- and the clamp is what turns "or more" into "full",
+    -- so a non-positive one has no fired state at all.
     local broken = H.copy(demo)
     marker(broken, "db_core_charge").display.max = 0
     assert.is_truthy(H.checks(ns.Catalog.Check(broken)).display)

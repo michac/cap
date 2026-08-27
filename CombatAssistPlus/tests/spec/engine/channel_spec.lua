@@ -175,7 +175,7 @@ describe("engine / channel bands", function()
       end
     end
 
-    local count = ns.Channel.ContainerPlan(marker("implosion_imps_short"), declared)
+    local count = ns.Channel.ContainerPlan(marker("implosion_imps_aoe"), declared)
     assert.equal("SetApplicationCount", count.sink)
     assert.equal(296553, count.spell)
     assert.equal("player", count.unit)
@@ -184,6 +184,14 @@ describe("engine / channel bands", function()
     local bar = ns.Channel.ContainerPlan(marker("db_core_charge"), declared)
     assert.equal("SetApplicationBar", bar.sink)
     assert.equal(4, bar.max)
+    -- ⚠ THE PLAN CARRIES NO `full`. V18's whole-bar red flip follows from the KIND -- `Arm`
+    -- adds its slot on `plan.kind == "sealed-count-bar"` alone -- so the catalog key that used to
+    -- ride here controlled nothing while being cited in prose as though it fired the flip. A
+    -- field that reads as a switch and switches nothing is worse than no field.
+    assert.is_nil(bar.full)
+    assert.is_nil(ns.Channel.BarPlan(
+      { id = "m", display = { kind = "sealed-count-bar", ability = "core", max = 0 } },
+      { core = { spell = 1, unit = "player" } }), "max must be positive")
 
     -- The pandemic window is the one sink whose PREDICATE is the client's, so its plan carries no
     -- threshold of any kind -- and the unit comes from the ability, because Doom is a debuff.

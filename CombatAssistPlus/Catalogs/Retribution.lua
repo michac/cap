@@ -31,24 +31,6 @@ ns.Catalog.Register{
     { id = "judgment", spell = 20271, alt = { 24275 } },
     { id = "crusader_strike", spell = 35395, alt = { 407480 } },
     { id = "expurgation", spell = 383346, family = "auras", unit = "target" },
-    -- The STACKING aura, and it is NOT the id the review named. `425518` is the Templar hero
-    -- TALENT — `CumulativeAura = 0`, and its SpellEffect 0 is a PROC_TRIGGER_SPELL whose
-    -- `EffectTriggerSpell` is 433674. `433674` carries `CumulativeAura = 60`, which is the same
-    -- 60 the spell text names, and it holds CooldownSet 901's Category-2 slot at OrderIndex 45
-    -- — a Tracked Buff row in Retribution's own set, which is the row the player was being
-    -- asked to watch [T1 DB2: SpellName / SpellEffect / SpellAuraOptions / CooldownSetSpell @
-    -- 12.1.0.69214]. ⚠ `family` is declared rather than defaulted BECAUSE a sealed display
-    -- whose subject does not resolve draws nothing at all and is indistinguishable from a
-    -- client refusal — the Destruction bug. **The stack HOLDS at 60, and the mark is therefore
-    -- a resting state rather than a flicker.** `CumulativeAura = 60` caps it and alone could
-    -- not have answered this; the spell text does: *"**While Wake of Ashes and Hammer of Light
-    -- are unavailable**, you consume 60 stacks…"* The consumption is CONDITIONAL, not automatic
-    -- — for as long as either button is available the counter sits at 60 and stays there, so
-    -- there is no fill-and-empty race for the band to lose. And nothing auto-casts: the payoff
-    -- is *"empowering yourself to cast Hammer of Light an additional time for free"*, which the
-    -- player still presses. That is exactly why the band is worth drawing — it says a free
-    -- Hammer is banked and waiting.
-    { id = "lights_deliverance", spell = 433674, family = "auras", unit = "player" },
   },
 
   -- Node + entry from `knowledge/classes/paladin/retribution/ability-inventory.tsv`. ⚠
@@ -216,36 +198,6 @@ ns.Catalog.Register{
             { "ready", "wake_of_ashes" },
             { "talent", "execution_sentence" },
             { "ready", "execution_sentence" },
-          },
-        },
-        -- V16 · silent until armed. `draw = "none"` below 60 is the whole resting state — the
-        -- row is unchanged and the player is not being asked to read a counter — and at 60 one
-        -- positive mark meaning A FREE HAMMER OF LIGHT IS BANKED AND WAITING FOR YOU, on the
-        -- row that will display it and on a button you still have to press. The 60 is a RESTING
-        -- state, not a threshold the counter crosses and leaves: the spell text conditions the
-        -- consumption on Wake of Ashes and Hammer of Light both being unavailable, so while
-        -- either is available the stack sits at 60 and stays there. `mark` and not `count`:
-        -- "how many more" stops being the live question the moment the answer is none. cap
-        -- authors the 60 and the client evaluates it against a secret; cap never learns which
-        -- side the count fell on. ⚠ This narrows the finishers-2 defeat and does not close it —
-        -- the four clip conditions are buff-REMAINING comparisons and still have no S-form. ⚠ A
-        -- count band CLAIMS A CORNER by declaration (`Catalog.CORNER_DISPLAYS`), so this row's
-        -- cue badges start below it whether or not anything is drawing.
-        { id = "woa_lights_deliverance",
-          display = {
-            ability = "lights_deliverance",
-            bands = {
-              {
-                draw = "none",
-                threshold = 0,
-              },
-              {
-                draw = "mark",
-                polarity = "positive",
-                threshold = 60,
-              },
-            },
-            kind = "sealed-count-bands",
           },
         },
       },

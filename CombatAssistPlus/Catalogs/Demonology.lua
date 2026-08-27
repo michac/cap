@@ -150,11 +150,55 @@ ns.Catalog.Register{
           cue = "blocked",
           when = { { "aura", "wild_imp", negate = true } },
         },
-        -- The NUMERAL, not the mark: `how many more` is exactly the live question below six,
-        -- and the hatch beside it already carries `ruled out`. At six the count RECOLORS
-        -- instead of clearing — same numeral, opposite polarity, no hatch, because hue carries
-        -- polarity and only polarity (V5.1) and a positive band may not hatch.
-        { id = "implosion_imps_short",
+        -- Rung 9's readable half GATES its sealed half, and that is the whole of this pair. The
+        -- band's upper polarity is cap's positive ink — `count.rgb` is byte-identical to the
+        -- `priority` and `capped` cue hues — so under V5.1 a gold numeral is cap saying `press
+        -- this`. Ungated it said so in single target with To Hell and Back untalented, where
+        -- rung 9 cannot fire at all and `implosion_st_only` is simultaneously ruling the row
+        -- out: cap's own promotion ink on a button the priority list has closed. `when` is AND-
+        -- only, so the disjunction `active_enemies>2|talent.to_hell_and_back` is two markers;
+        -- the gates are written MUTUALLY EXCLUSIVE rather than as a plain OR because each
+        -- corner display claims its own stack slot by declaration, so two live at once would
+        -- draw two numerals at two corners. This is the AoE-toggle half. The NUMERAL, not the
+        -- mark: `how many more` is exactly the live question below six, and the hatch beside it
+        -- already carries `ruled out`. At six the count RECOLORS instead of clearing — same
+        -- numeral, opposite polarity, no hatch, because a positive band may not wear one.
+        { id = "implosion_imps_aoe",
+          when = { { "aoe" } },
+          display = {
+            ability = "wild_imp",
+            bands = {
+              {
+                draw = "count",
+                hatch = true,
+                polarity = "negative",
+                threshold = 0,
+              },
+              {
+                draw = "count",
+                polarity = "positive",
+                threshold = 6,
+              },
+            },
+            kind = "sealed-count-bands",
+          },
+        },
+        -- Rung 9's readable half GATES its sealed half, and that is the whole of this pair. The
+        -- band's upper polarity is cap's positive ink — `count.rgb` is byte-identical to the
+        -- `priority` and `capped` cue hues — so under V5.1 a gold numeral is cap saying `press
+        -- this`. Ungated it said so in single target with To Hell and Back untalented, where
+        -- rung 9 cannot fire at all and `implosion_st_only` is simultaneously ruling the row
+        -- out: cap's own promotion ink on a button the priority list has closed. `when` is AND-
+        -- only, so the disjunction `active_enemies>2|talent.to_hell_and_back` is two markers;
+        -- the gates are written MUTUALLY EXCLUSIVE rather than as a plain OR because each
+        -- corner display claims its own stack slot by declaration, so two live at once would
+        -- draw two numerals at two corners. This is the To Hell and Back half: the talent makes
+        -- Implosion a single-target press, so the count is live with the AoE toggle OFF. `!aoe`
+        -- is what keeps it disjoint from `implosion_imps_aoe`. A refused `talent` read is
+        -- UNKNOWN, and a gate reads a blind term as withheld (`Signal.Evaluate`), so this fails
+        -- dark rather than painting on a build cap could not resolve.
+        { id = "implosion_imps_thab",
+          when = { { "aoe", negate = true }, { "talent", "to_hell_and_back" } },
           display = {
             ability = "wild_imp",
             bands = {
@@ -250,13 +294,21 @@ ns.Catalog.Register{
           cue = "blocked",
           when = { { "identity", "shadow_bolt", "transformed" }, { "resource", "<=", 2 } },
         },
-        -- V18 · how many Cores, as a shape. max = 4 is the number that MATTERS rather than the
-        -- aura's real cap: SetValue clamps, so four and above reads FULL and the fired state is
-        -- always the complete arc.
+        -- V18 · how many Cores, as a shape. `max = 4` is Demonic Core's REAL cap — *"Maximum 4
+        -- stacks"* (`knowledge/classes/warlock/demonology/ability-inventory.md:555`, Tier 1) —
+        -- and SetValue clamps, so the fired state is always the complete shape. ⚠ THE WHOLE-BAR
+        -- RED FLIP AT FOUR IS AUTHORED PAST THE PRIORITY LIST, and that is stated rather than
+        -- implied. No `actions.diabolist` rung reads Demonic Core at a HIGH threshold: rung 1
+        -- reads `buff.demonic_core.stack<=1` (Power Siphon, the LOW direction) and rungs 13 and
+        -- 14 read `buff.demonic_core.react`, a boolean. What the flip says is the Tier-1 game
+        -- fact the list leaves unsaid — at four stacks the next proc is lost. It is a true
+        -- NEGATIVE statement beside cue B's, not a second reading of it: cue B fires on four
+        -- SOUL SHARDS, the flip on four DEMONIC CORES. Two costs, both real; the elimination
+        -- walk still names the button. The flip itself is V18's, unconditional and declared in
+        -- the shelf — a catalog names no pixels and carries no switch for it.
         { id = "db_core_charge",
           display = {
             ability = "demonic_core",
-            full = true,
             kind = "sealed-count-bar",
             max = 4,
           },

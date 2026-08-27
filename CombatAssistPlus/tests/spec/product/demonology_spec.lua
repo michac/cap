@@ -123,19 +123,26 @@ describe("product characterization / Demonology", function()
   -- render-shelf V16/V17. Both counts are SEALED: cap hands the client a rule and never learns
   -- which band fired, so what is asserted here is the authored table and nothing else.
   it("puts both stack counts on the client, and both polarities on Implosion's numeral", function()
-    local imps = marker("implosion_imps_short").display
-    assert.equal("sealed-count-bands", imps.kind)
-    assert.equal("wild_imp", imps.ability)
-    -- ⚠ TWO POLARITIES, one numeral: below six the count is red with the hatch (Implosion is
-    -- literally a damage loss — the first sealed fact in any catalog to enter elimination),
-    -- and at six it RECOLORS gold instead of clearing (2026-08-25): banked, the press is
-    -- loaded. A positive band may not hatch, and hue alone carries the verdict.
-    assert.is_true(imps.bands[1].hatch)
-    assert.equal("negative", imps.bands[1].polarity)
-    assert.equal(6, imps.bands[2].threshold)
-    assert.equal("count", imps.bands[2].draw)
-    assert.equal("positive", imps.bands[2].polarity)
-    assert.is_nil(imps.bands[2].hatch)
+    -- ⚠ TWO MARKERS, ONE STATEMENT. Rung 9's readable half is a DISJUNCTION
+    -- (`active_enemies>2|talent.to_hell_and_back`) and `when` is AND-only, so the gate is two
+    -- markers carrying the same table. They are written mutually exclusive rather than as a
+    -- plain OR because each corner display claims its own stack slot by declaration: two live
+    -- at once would draw the same count as two numerals on two corners.
+    for _, id in ipairs({ "implosion_imps_aoe", "implosion_imps_thab" }) do
+      local imps = marker(id).display
+      assert.equal("sealed-count-bands", imps.kind)
+      assert.equal("wild_imp", imps.ability)
+      -- ⚠ TWO POLARITIES, one numeral: below six the count is red with the hatch (Implosion is
+      -- literally a damage loss — the first sealed fact in any catalog to enter elimination),
+      -- and at six it RECOLORS gold instead of clearing (2026-08-25): banked, the press is
+      -- loaded. A positive band may not hatch, and hue alone carries the verdict.
+      assert.is_true(imps.bands[1].hatch)
+      assert.equal("negative", imps.bands[1].polarity)
+      assert.equal(6, imps.bands[2].threshold)
+      assert.equal("count", imps.bands[2].draw)
+      assert.equal("positive", imps.bands[2].polarity)
+      assert.is_nil(imps.bands[2].hatch)
+    end
 
     -- Power Siphon runs the ordinary direction: silent while the row is a candidate, ruled out
     -- at two Cores, which is `buff.demonic_core.stack<=1` read as a hold.
@@ -143,6 +150,38 @@ describe("product characterization / Demonology", function()
     assert.equal("none", cores.bands[1].draw)
     assert.equal(2, cores.bands[2].threshold)
     assert.is_true(cores.bands[2].hatch)
+  end)
+
+  -- ⚠ THE GOLD BAND IS GATED ON RUNG 9'S READABLE HALF, and this is what that buys.
+  -- `count.rgb` is byte-identical to the `priority` and `capped` cue hues, so under V5.1 a gold
+  -- numeral is cap saying "press this" in its own promotion ink. Ungated it said so in single
+  -- target with To Hell and Back untalented — where rung 9 cannot fire at all and
+  -- `implosion_st_only` is simultaneously ruling the row out.
+  it("licenses Implosion's count only where rung 9 can actually fire", function()
+    local function at(aoe, talent)
+      return ns.Signal.Evaluate(resolved,
+        H.world{ ready = H.map(true), aoe = aoe, talent = H.map(talent) }).byEntry.implosion
+    end
+
+    local aoe = at(true, false)
+    assert.is_true(aoe.gates.implosion_imps_aoe)
+    assert.is_false(aoe.gates.implosion_imps_thab, "the two gates must never both hold")
+
+    local thab = at(false, true)
+    assert.is_false(thab.gates.implosion_imps_aoe)
+    assert.is_true(thab.gates.implosion_imps_thab)
+
+    -- The state the pair exists for: single target, no To Hell and Back. Cue G rules the row
+    -- out, and NEITHER band may paint beside it.
+    local st = at(false, false)
+    assert.is_false(st.gates.implosion_imps_aoe)
+    assert.is_false(st.gates.implosion_imps_thab)
+    assert.same({ "implosion_st_only" }, st.markers)
+
+    -- A refused talent read is UNKNOWN, and a gate reads a blind term as withheld — so a build
+    -- cap could not resolve fails dark rather than painting.
+    local blind = at(false, nil)
+    assert.is_false(blind.gates.implosion_imps_thab)
   end)
 
   it("gates the pandemic window on the talent that makes its fact exist", function()

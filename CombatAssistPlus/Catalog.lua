@@ -286,19 +286,23 @@ function Catalog.Check(cat)
             end
           end
         elseif display.kind == "sealed-count-bar" then
-          -- render-shelf.md V18. The same sealed count as a FILL. `max` is the client's
-          -- `maxApplications`, and it is authored as "the number that matters" rather than as the
-          -- aura's real cap: SetValue clamps, so the threshold becomes `full` and the fired state
-          -- is always the complete shape.
+          -- render-shelf.md V18. The same sealed count as a FILL. `max` reaches the client as
+          -- `maxApplications` and SetValue clamps into [0, max], so it is authored as the number
+          -- past which nothing more can be said -- usually the aura's real cap, and on an aura
+          -- with a higher one, the number that matters. The whole-bar red flip at that value is
+          -- V18's own, unconditional: a catalog names no pixels and carries no switch for it.
+          --
+          -- (A `full = true` key lived here until 2026-08-26. It was inert -- `BarPlan` copied it
+          -- to `plan.full` and nothing ever read it, while `Channel.Arm` armed the flip slot on
+          -- the KIND alone -- and it had been cited in prose as though it fired the flip. A field
+          -- that reads as a switch and switches nothing is worse than no field, so it is gone
+          -- rather than wired: the shelf owns the flip.)
           if not abilities[display.ability] then
             fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
               .. tostring(display.ability))
           end
           if type(display.max) ~= "number" or display.max <= 0 or display.max % 1 ~= 0 then
             fail("display", entry.id, "sealed-count-bar needs a positive whole max")
-          end
-          if display.full ~= nil and type(display.full) ~= "boolean" then
-            fail("display", entry.id, "sealed-count-bar full must be boolean")
           end
         elseif display.kind == "sealed-pandemic" then
           -- render-shelf.md V19. The WINDOW carries no authored threshold — the client computes
