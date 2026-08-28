@@ -49,6 +49,7 @@ describe("engine / style", function()
   end)
 
   it("derives badge geometry from the icon, and the stack steps clear of itself", function()
+    -- No host is the shelf's nominal: the same answer an unpinned frame and a secret width get.
     local S, g = ns.Style, ns.Paint.Geometry()
     assert.equal(S.badges.diameter_pct / 100 * S.surfaces.icon_px, g.diameter)
     assert.equal(g.diameter + S.badges.padding_px, g.step)
@@ -57,13 +58,46 @@ describe("engine / style", function()
 
     -- The stack FLOWS down the right edge: index 0 hangs off the corner, and each further
     -- badge keeps the same x and steps one `step` lower. No fixed slots, so no ceiling.
-    local x0, y0 = ns.Paint.StackOffset(0)
-    local x1, y1 = ns.Paint.StackOffset(1)
-    local x4, y4 = ns.Paint.StackOffset(4)
+    local x0, y0 = ns.Paint.StackOffset(nil, 0)
+    local x1, y1 = ns.Paint.StackOffset(nil, 1)
+    local x4, y4 = ns.Paint.StackOffset(nil, 4)
     assert.equal(x0, x1)
     assert.equal(x0, x4)
     assert.equal(y0 - g.step, y1)
     assert.equal(y0 - g.step * 4, y4)
+  end)
+
+  -- The defect this arithmetic exists to stop: every badge dimension was computed once against
+  -- the shelf's nominal, so on any other icon size the whole row drew the wrong size.
+  it("scales every badge dimension with the icon rather than freezing at the nominal", function()
+    local S = ns.Style
+    local nominal = ns.Paint.Ratios(S.surfaces.icon_px)
+    local double = ns.Paint.Ratios(S.surfaces.icon_px * 2)
+    assert.equal(nominal.diameter * 2, double.diameter)
+    assert.equal(nominal.plate * 2, double.plate)
+    assert.equal(nominal.sprite * 2, double.sprite)
+    -- The overhang is a shelf constant and does NOT scale: it is how far the stack hangs past
+    -- the corner, which is a gap the row layout owns rather than a fraction of the icon.
+    assert.equal(nominal.overhang, double.overhang)
+  end)
+
+  -- The three escape sizes were tokens frozen at a 56px icon. They are arithmetic now, and the
+  -- proof is that they still land on the numbers the tokens carried.
+  it("derives the band's escape sizes from the measured width", function()
+    local S = ns.Style
+    local g = ns.Channel.CountGeometry(S.surfaces.icon_px)
+    assert.equal(S.surfaces.icon_px, g.hatch)
+    assert.equal(ns.Paint.Ratios(S.surfaces.icon_px).plate, g.plate)
+    assert.equal(ns.Paint.Ratios(S.surfaces.icon_px).sprite, g.mark)
+
+    local wide = ns.Channel.CountGeometry(S.surfaces.icon_px * 2)
+    assert.equal(g.hatch * 2, wide.hatch)
+    assert.equal(g.plate * 2, wide.plate)
+    assert.equal(g.mark * 2, wide.mark)
+
+    -- An unreadable width is the nominal, never nothing: an escape needs a literal.
+    assert.same(g, ns.Channel.CountGeometry(nil))
+    assert.same(g, ns.Channel.CountGeometry(0))
   end)
 
   it("overhangs less than the row gap, so a badge cannot land on the next icon", function()

@@ -7,7 +7,7 @@
 local ADDON, ns = ...
 
 ns.LabStyle = {
-  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ ONE entry. `duration_band` is the leftover of the eight-entry intake whose other seven were promoted (V16-V19) or deleted — it bands a CLOCK rather than a count, which is why no composite needed it; its SECONDS form has since been promoted as V19's outside-window hatch, leaving the RemainingPercent route as its open half. `segment_bar` (L8) left same-day for V18 — the ledger has the row. Its cells draw the `RemainingPercent` route, which is a SOURCE READ and has never been flown — the flown route (a bare `textFormatter`) gives thresholds in seconds. So every percentage in it is a proposal about a mechanism, clearly labelled, exactly as `count_bar` was before its flight settled it.",
+  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ ONE entry. `duration_band` (L7) was CLEARED 2026-08-27 — the ledger has the row: its cells had drifted out of agreement with its own `asks`, drawing the RemainingPercent route as though the question were still open after V19 promoted the seconds form. An entry whose cells no longer draw its question is decoration, which Part 7 says to delete rather than repair. `ring_collision` (L9) replaces it and is a LOOK question, not a capability one: every pixel in it is already shipped, so there is nothing to fly — what is unsettled is whether the composition reads as one statement or two.",
   _sheet = {
     direction = "down",
     duty = 0.5,
@@ -16,145 +16,29 @@ ns.LabStyle = {
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
   },
-  duration_band = {
-    alt_rgb = { 0.95, 0.3, 0.3 },
-    asks = "`SetDurationText` takes a `textFormatter` of type NumericFormatter — the same object the count sink takes — bound to a DurationTextBindingProperty such as RemainingPercent. If a rule formatter is accepted there, every band shape L5 and L6 draw becomes available on a DoT's remaining time, INCLUDING the inversion `AddPandemicRegion` structurally cannot express. What does that cost, and is it worth authoring the threshold the pandemic sink computes for you?",
+  ring_collision = {
+    asks = "Part 3 records this as an OPEN DESIGN QUESTION and Part 4 as a settled rule, and they do not agree. A row wearing a negative cue is `scan: true` — the verdicts carrying `blocked` all are — so it draws V13's yellow edge AND cap's half of V11's red hatch, which say opposite things about the same button. Today GEOMETRY keeps them apart rather than order: `hatch.skip.overhang_px` holds the red 2px OUTSIDE the icon rect, so the rings are adjacent at −2 and 0 and never overlap. Part 4 nonetheless asserts that an eliminating mark draws over an including one and that THE FRAME LEVEL SAYS SO — and neither `Paint.Border` nor `Paint.Hatch` calls `SetFrameLevel`, so nothing declares it and construction order decides. Drawn side by side: does the double ring read as ONE statement or two, and if two, is the answer the overlap (drop the overhang and let red cover yellow), suppression (no edge on a ruled-out row), or the adjacency we already have?",
     cells = {
       {
         ability = "Immolation Aura",
-        bands = {
-          {
-            format = "%d",
-            threshold = 0,
-          },
-        },
-        caption = "<b>control — the sink's own job</b>. `SetDurationText` normally draws a countdown, and with no rule it is Blizzard's seconds formatter. Everything to the right replaces that text with a rule cap wrote.",
-        place = "centre",
-        remaining_pct = 80,
+        caption = "<b>control — in the scan, nothing against it.</b> V13's yellow edge alone, at the shipped 2px and alpha. This is what the red has to argue with; rule 2 says an entry needing a comparison draws its own control, since the declared style is no longer one scroll away.",
         verdict = "open",
       },
       {
         ability = "Immolation Aura",
-        bands = {
-          {
-            format = "|A:fire:15:15|a",
-            threshold = 0,
-          },
-          {
-            format = "",
-            threshold = 31,
-          },
-        },
-        caption = "<b>the pandemic mark, re-created</b> — a mark only in the last 30 %. Same picture as L3's badge, and ⚠ NOT the same fact: this threshold is cap's guess, where L3's is the client computing `GetRefreshExtendedDuration − GetAuraBaseDuration` per spell.",
-        composited = true,
-        place = "badge",
-        remaining_pct = 20,
-        verdict = "open",
+        caption = "<b>control — ruled out with NO contradiction.</b> `cd` is the one verdict that is `scan: false`, so V11's cooldown half draws and no edge competes with it. One statement, and the only ruled-out row in the vocabulary that gets to be unambiguous.",
+        verdict = "cd",
       },
       {
         ability = "Immolation Aura",
-        bands = {
-          {
-            format = "|A:fire:15:15|a",
-            threshold = 0,
-          },
-          {
-            format = "",
-            threshold = 31,
-          },
+        caption = "<b>THE SUBJECT — both at once.</b> Yellow edge (in the scan), red hatch with its own red border (ruled out), and the red `blocked` badge saying why. Three marks, two of which disagree. The badge is the only one carrying a REASON; the other two carry verdicts, and one of those verdicts is wrong about this row.",
+        cues = {
+          "blocked",
         },
-        caption = "<b>the same rule, early in the DoT</b> — clear, because 80 % takes the upper band. The pair to its left is the whole of L3's behaviour reproduced out of two breakpoints.",
-        composited = true,
-        place = "badge",
-        remaining_pct = 80,
-        verdict = "open",
-      },
-      {
-        ability = "Immolation Aura",
-        bands = {
-          {
-            format = "",
-            threshold = 0,
-          },
-          {
-            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t",
-            threshold = 31,
-          },
-        },
-        caption = "<b>THE INVERSION</b> — hatched while there is plenty left, which is `do not refresh yet`. This is the direction `AddPandemicRegion` cannot express at all: it calls `SetShown(inWindow)` with no rule to flip.",
-        place = "badge",
-        remaining_pct = 80,
-        verdict = "open",
-      },
-      {
-        ability = "Immolation Aura",
-        bands = {
-          {
-            format = "",
-            threshold = 0,
-          },
-          {
-            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t",
-            threshold = 31,
-          },
-        },
-        caption = "<b>the inversion, refreshable</b> — the hatch clears as the DoT enters the last 30 %, so the row becomes a live candidate exactly when refreshing it stops clipping. Read it against the cell to its left.",
-        place = "badge",
-        remaining_pct = 20,
-        verdict = "press",
-      },
-      {
-        ability = "Immolation Aura",
-        alt_hue = true,
-        bands = {
-          {
-            format = "",
-            threshold = 0,
-          },
-          {
-            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t|A:fire:15:15:20:-18|a",
-            threshold = 31,
-          },
-        },
-        caption = "<b>hatch and badge, inverted</b> — two escapes, one band, the second offset onto the corner. Identical machinery to L6's imp shape; the only difference is which sealed number the client feeds the formatter.",
-        composited = true,
-        place = "badge",
-        remaining_pct = 80,
-        verdict = "open",
-      },
-      {
-        ability = "Immolation Aura",
-        bands = {
-          {
-            format = "|A:fire:15:15|a",
-            threshold = 0,
-          },
-          {
-            format = "",
-            threshold = 31,
-          },
-          {
-            format = "|TInterface/AddOns/CombatAssistPlus/Media/stripes:56:56|t",
-            threshold = 61,
-          },
-        },
-        caption = "<b>three bands, mid-DoT</b> — hatched above 60 %, SILENT between 30 and 60, marked below 30. The quiet middle is the shape only a band table can draw: neither `do not` nor `now`, which is most of a DoT's life.",
-        composited = true,
-        place = "badge",
-        remaining_pct = 45,
         verdict = "open",
       },
     },
-    draws = "duration",
-    flown = "2026-08-21",
-    form = "S12",
-    pulse = {
-      alpha = { 0.72, 1.00 },
-      duration_s = 1.9,
-      scale = 1.1,
-    },
-    rgb = { 0.45, 0.86, 0.85 },
-    size_px = 15,
-    title = "L7 · duration_band — the same bands, on the DoT's CLOCK instead of a count",
+    draws = "composition",
+    title = "L9 · ring_collision — a row that is IN the scan and RULED OUT at the same time",
   },
 }

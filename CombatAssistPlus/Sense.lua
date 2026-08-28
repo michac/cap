@@ -450,8 +450,8 @@ local function buildReads()
       if infoOf[cid] == nil then infoOf[cid] = readInfo(cid) or false end
     end
     local info = infoOf[cid] or nil
-    -- `row.primary` froze at bind and `Bind.resolve` refuses to run in combat, so a demon-form
-    -- flip moves the live id underneath it. Charges and usability are asked about the LIVE one.
+    -- `row.primary` froze at bind, so a demon-form flip moves the live id underneath it
+    -- until the next resolve lands. Charges and usability are asked about the LIVE one.
     local live = (info and info.override) or item.row.primary
 
     if needs.proc then proc[id] = readProc(item.row.primary) end

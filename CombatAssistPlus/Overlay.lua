@@ -15,11 +15,19 @@ local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false }
 --- One pooled frame per row, carrying every primitive the shelf declares — a badge per cue
 --- key, built once. Acquisition happens out of combat (Bind.resolve refuses to run in it), so
 --- the in-combat path is only Show/Hide/SetVertexColor/SetAlpha.
+-- Forward-declared so `acquire` can pin before it builds; defined with the rest of the
+-- anchoring below.
+local anchor
+
 local function acquire(cid)
   local f = pool[cid]
   if f then return f end
   f = CreateFrame("Frame", nil, UIParent)
   f:Hide()
+  -- ⚠ PINNED BEFORE ANY PRIMITIVE IS BUILT. Every badge dimension is a ratio of the host's
+  -- drawn width, and a frame with no points measures nothing — so a builder run first sizes
+  -- the whole row against the shelf's nominal icon and stays that size.
+  anchor(f, cid)
   f.border = ns.Paint.Border(f)
   -- The overlay frame is the item's own rect: the scan edge sits ON the icon (tokens.ready) and
   -- the hatch is a statement about the icon face, so neither needs room outside it. Only the
@@ -125,8 +133,7 @@ local function configure(f, item, declared)
     if gradedPlan then
       f.gradedPlans[marker.id] = gradedPlan
       -- One instance per MARKER, so a two-band union stacks rather than overwrites. Built here
-      -- because the marker set is not known at acquire time; `configure` runs on the bind path,
-      -- which `Bind.resolve` refuses to run in combat.
+      -- because the marker set is not known at acquire time.
       f.gradedBadges[marker.id] = f.gradedBadges[marker.id] or ns.Paint.Badge(f, marker.cue)
     -- ⚠ A CONTAINER DISPLAY MAY CARRY A READABLE GATE, and until 2026-08-22 one silently armed
     -- nothing: this branch tested `not marker.when`, so a marker with both a `when` and a
@@ -199,7 +206,7 @@ local function lift(f, item)
   return base
 end
 
-local function anchor(f, cid)
+function anchor(f, cid)
   local item, confirmed = ns.Bind.ItemFrame(cid)
   if not item then f.anchoredTo = nil; return nil, false end
   if f.anchoredTo ~= item then
@@ -258,7 +265,7 @@ local function graded(f, verdict)
     if badge then
       local plan = f.gradedPlans[id]
       local at = plan and order[plan.cue] or depth
-      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(at))
+      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(f, at))
       -- ONE SECRET, MANY READABLE GATES. The curve reads the secret; readable terms beside it
       -- decide whether the client may paint the result at all. `false` is a deliberate
       -- withholding, reported as its own status rather than as a refusal — nothing failed.
@@ -312,7 +319,7 @@ local function paint(f, verdict, item)
   for key, badge in pairs(f.badges) do
     local at = wanted[key]
     if at then
-      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(at))
+      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(f, at))
       badge.frame:SetAlpha(1)
       badge:Show()
     else
@@ -409,7 +416,13 @@ local function rebuild(bound)
   for cid, f in pairs(pool) do if not live[cid] then quiet(f); f:Hide() end end
   for _, id in ipairs(state.order) do
     local item = state.itemOf[id]
-    configure(acquire(item.row.cooldownID), item, bound.declared)
+    local cid = item.row.cooldownID
+    local f = acquire(cid)
+    -- Re-pinned before configure, not only at acquire: a pooled frame may have been anchored
+    -- onto an item the viewer has since re-issued, and every size configure bakes is measured
+    -- off whatever this is pointing at now.
+    anchor(f, cid)
+    configure(f, item, bound.declared)
   end
 end
 
@@ -423,9 +436,10 @@ local function draw(out, bound, edge)
     local verdict = out.byEntry[id]
     local cid = state.rowOf[id]
     local f = acquire(cid)
-    -- A combat-time acquisition refusal gets one honest retry after restriction lifts.
+    -- Two retryable statuses, and they are different problems: "refused" is the combat
+    -- restriction lifting, "deferred" is a host that had no rect to measure when the arm ran.
     for _, status in pairs(f.channelStatus) do
-      if status == "refused" and not InCombatLockdown() then
+      if (status == "refused" or status == "deferred") and not InCombatLockdown() then
         configure(f, state.itemOf[id], bound.declared)
         break
       end

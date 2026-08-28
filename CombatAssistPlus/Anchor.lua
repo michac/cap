@@ -21,6 +21,12 @@ local TOLERANCE = 0.5
 -- anything later had no observed cause and is reported as contention instead.
 local ATTRIBUTION_WINDOW = 1.0
 local DEFAULT_GAP = 4
+-- A foreign placement read inside the call that made it is only the row's new home for as
+-- long as the apply it provokes takes to run, which is one frame.
+local FOREIGN_WINDOW = 1.0
+-- Where a parked frame goes: far enough off the anchor that no UI scale brings it back, and
+-- expressed as an offset so it travels with the anchor instead of pinning to a screen corner.
+local PARK_X, PARK_Y = -10000, 10000
 -- The viewer builds its frames on its own schedule, so the first arm waits rather than
 -- racing it. A failed arm retries on the next event anyway; this only avoids the noise.
 local SETTLE = 1.0
@@ -91,10 +97,12 @@ function Anchor.Render(snap)
   local a = {
     "n:" .. num(snap.n), "named:" .. num(snap.named),
     "extra:" .. num(snap.extra), "miss:" .. num(snap.missing),
+    "parked:" .. num(snap.parkedNow),
   }
   local s = {
     "stomp:" .. num(snap.stomps), "icombat:" .. num(snap.stompsCombat),
     "disp:" .. num(snap.displaced), "cont:" .. num(snap.contended),
+    "reassert:" .. num(snap.reasserts), "park:" .. num(snap.parks),
     "stale:" .. num(snap.staleSeen), "strike:" .. num(snap.strikes),
   }
   -- STALE outranks a position mismatch: the order the other terms report is about the
@@ -134,18 +142,19 @@ end
 -- Pure: what a displacement means, and what to do about it
 -- ---------------------------------------------------------------------------
 
---- Judges one displacement, with the clock and counters supplied so it is decidable
---- without a client. `attributed` is a move just after one of our own hooks fired —
---- Blizzard's layout engine, which cap re-asserts against. Anything else is contention,
---- counted rather than obeyed: only a run of strikes may stop the row, and stopping it
---- means asking.
+--- Judges one displacement the SAMPLER still sees — that is, one the per-frame re-assert
+--- did not already correct. `handledAt` is the last time cap re-placed a frame itself, so
+--- `attributed` means the layout engine is still settling around a move cap has answered.
+--- A displacement standing with no recent answer of ours reached the frame by a route the
+--- re-assert cannot see, and is contention: counted rather than obeyed, and only a run of
+--- strikes may stop the row, which means asking.
 function Anchor.Judge(s)
   s = s or {}
   local now = s.now or 0
   local strikes, strikeAt = s.strikes or 0, s.strikeAt
   local action, attributed
 
-  if s.lastCauseAt ~= nil and (now - s.lastCauseAt) <= ATTRIBUTION_WINDOW then
+  if s.handledAt ~= nil and (now - s.handledAt) <= ATTRIBUTION_WINDOW then
     attributed, action = true, "reassert"
   else
     attributed = false
@@ -161,10 +170,8 @@ function Anchor.Judge(s)
     end
   end
 
-  -- cap cannot write geometry in a pull, so a re-assert waits; a question is held, and
-  -- the caller opens it leaving combat.
-  if s.combat and action == "reassert" then action = "hold" end
-
+  -- A re-assert is a SetPoint on an unprotected frame, so combat does not change the
+  -- verdict. Only the question is held, and the caller opens it leaving combat.
   return { action = action, attributed = attributed, strikes = strikes, strikeAt = strikeAt }
 end
 
@@ -177,13 +184,25 @@ local P = {
   combat = false,
   plan = nil,
   tracked = {},
-  expected = {},
+  -- Frame -> where that frame belongs, for every frame cap currently holds a position for:
+  -- the placed ones and the parked ones alike. The re-assert hook reads only this.
+  wantOf = {},
+  -- Every frame cap has MOVED, whether or not the plan still names it. `tracked` is rebuilt on
+  -- every adopt; this is not, because a frame cap displaced and then stopped tracking is still
+  -- cap's to answer for — restoring it is what `disarm` owes.
+  claimed = {},
+  -- Claimed frames the plan no longer places. They are held off the row rather than left in it.
+  parked = {},
+  parks = 0,
+  parkPending = 0,
   planned = {},
   stomps = 0,
   stompsCombat = 0,
   displaced = 0,
   contended = 0,
-  lastCauseAt = nil,
+  reasserts = 0,
+  foreign = nil,
+  handledAt = nil,
   staleSeen = 0,
   strikes = 0,
   strikeAt = nil,
@@ -232,6 +251,12 @@ end
 -- Writing
 -- ---------------------------------------------------------------------------
 
+local function countParked()
+  local n = 0
+  for _ in pairs(P.parked) do n = n + 1 end
+  return n
+end
+
 local function snapshot(drawn, match, stale)
   return {
     n = P.plan and #P.plan.order or 0,
@@ -248,6 +273,9 @@ local function snapshot(drawn, match, stale)
     stompsCombat = P.stompsCombat,
     displaced = P.displaced,
     contended = P.contended,
+    reasserts = P.reasserts,
+    parks = P.parks,
+    parkedNow = countParked(),
   }
 end
 
@@ -332,6 +360,68 @@ local function ensureAnchor()
   return P.anchor
 end
 
+-- Puts one frame where cap wants it — in the row, or off it. EVERY write cap makes to an item
+-- frame goes through here, which is what makes the anchor a reliable own-write signature, and
+-- what makes `claimed` a complete list of what `disarm` owes the player back.
+--
+-- ⚠ ONE ANCHOR KEYWORD FOR BOTH. A same-keyword `SetPoint` replaces; a different one would
+-- accumulate a second, conflicting anchor, so a parked frame would be pulled between the two
+-- rather than leaving the row.
+local function place(frame, want)
+  frame:ClearAllPoints()
+  frame:SetPoint("TOPLEFT", P.anchor, "TOPLEFT", want.x, want.y)
+  P.claimed[frame] = true
+end
+
+--- Where a frame goes when cap has claimed it but the plan no longer says where it belongs.
+--- `left`/`top` follow the offsets so a later drift read describes the parked position rather
+--- than reporting the park itself as a displacement.
+local function parkWant(left, top)
+  return { x = PARK_X, y = PARK_Y, left = (left or 0) + PARK_X, top = (top or 0) + PARK_Y }
+end
+
+--- Corrects a frame inside the call that moved it, so a foreign placement never draws.
+--- The discriminator is the anchor: everything cap writes is relative to its own frame,
+--- so a point relative to anything else — including a bare offset, which resolves against
+--- the parent — came from outside. This catches movers that expose no hook of their own.
+local function onFramePoint(frame, _, relativeTo)
+  if not P.armed or P.anchor == nil or relativeTo == P.anchor then return end
+  local want = P.wantOf[frame]
+  if not want then return end
+  -- ⚠ READ BEFORE THE CORRECTION, because the correction destroys the evidence. Blizzard's
+  -- Layout re-places every item frame relative to the viewer's item container
+  -- *[T1 src @12.1.0: Blizzard_SharedXML/LayoutFrame.lua — LayoutMixin:Layout, LayoutChildren]*,
+  -- and correcting inside that call means no later read can see where the row was being moved
+  -- to. Without this the row would hold its first origin forever and stop following the
+  -- Cooldown Manager's own placement.
+  local now = GetTime()
+  local left, top = geometry(frame)
+  if left then
+    local f = P.foreign
+    if f == nil or (now - f.at) > FOREIGN_WINDOW then
+      P.foreign = { left = left, top = top, at = now }
+    else
+      if left < f.left then f.left = left end
+      if top > f.top then f.top = top end
+      f.at = now
+    end
+  end
+  place(frame, want)
+  P.reasserts = P.reasserts + 1
+  P.handledAt = now
+end
+
+-- `hooksecurefunc` cannot be removed, so the flag is per frame and permanent; every
+-- callback is gated on `armed` and on the frame still being one the plan owns. Weak keys
+-- so a frame the viewer drops is not held alive by the record of having been hooked.
+local hookedFrames = setmetatable({}, { __mode = "k" })
+
+local function armFrame(frame)
+  if hookedFrames[frame] or type(frame.SetPoint) ~= "function" then return end
+  hookedFrames[frame] = true
+  hooksecurefunc(frame, "SetPoint", onFramePoint)
+end
+
 -- Read off the frames before any of them move, so the re-anchored row keeps the CDM's own
 -- metrics: origin is the drawn row's top-left corner and the gap is its narrowest column
 -- spacing. Scale is matched to the item frames so a SetPoint offset means the same distance
@@ -359,13 +449,24 @@ local function metrics(frames)
 end
 
 local function apply(why)
-  if InCombatLockdown() or not P.armed or not P.plan then return false end
+  if not P.armed or not P.plan then return false end
   local frames = {}
   for _, t in ipairs(P.tracked) do frames[#frames + 1] = t.frame end
   if #frames == 0 then return false end
 
   local w, gap, left, top = metrics(frames)
   if not w then return false end
+
+  -- ⚠ WHOSE ORIGIN THIS IS, and the answer is not "whoever moved it last". A layout pass gets
+  -- to move the row: `why` names an event, and the position read inside it is where the
+  -- Cooldown Manager wants the row to sit. A DISPLACEMENT does not: adopting the origin there
+  -- would let a competitor drag the row by losing to cap repeatedly. Consumed either way, so a
+  -- reading never outlives the pass that took it.
+  local foreign = P.foreign
+  P.foreign = nil
+  if foreign and why ~= "displaced" and (GetTime() - foreign.at) <= FOREIGN_WINDOW then
+    left, top = foreign.left, foreign.top
+  end
 
   local pitch = w + gap
   local anchor = ensureAnchor()
@@ -374,14 +475,30 @@ local function apply(why)
   anchor:ClearAllPoints()
   anchor:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
 
-  P.expected = {}
+  -- Stamped before the write, not after: `onFramePoint` fires synchronously inside the
+  -- SetPoint below, and a stale expectation there would undo the move being made.
+  P.wantOf = {}
   for i, t in ipairs(P.tracked) do
     local x = (i - 1) * pitch
-    t.frame:ClearAllPoints()
-    t.frame:SetPoint("TOPLEFT", anchor, "TOPLEFT", x, 0)
-    P.expected[t.cooldownID] = { left = left + x, top = top }
+    local want = { x = x, y = 0, left = left + x, top = top }
+    P.wantOf[t.frame] = want
+    place(t.frame, want)
   end
+  -- Parked frames are re-asserted on the same pass. They are held by the same hook as the
+  -- placed ones, so an omission here would not leave them parked — it would hand them back to
+  -- Blizzard's next layout pass, which is the state parking exists to prevent.
+  for frame in pairs(P.parked) do
+    local want = parkWant(left, top)
+    P.wantOf[frame] = want
+    place(frame, want)
+  end
+  P.handledAt = GetTime()
   P.dirty = false
+  if P.parkPending > 0 then
+    P.parks = P.parks + P.parkPending
+    mark(("# parked n=%d combat=%s"):format(P.parkPending, bit(P.combat)))
+    P.parkPending = 0
+  end
   mark("# reapply why=" .. why)
   stampMeta()
   return true
@@ -405,13 +522,20 @@ local function scheduleRearm(why)
   if not P.armed or P.rearmPending then return end
   P.rearmPending = true
   C_Timer.After(REARM_DELAY, function()
-    P.rearmPending = false
+    -- Cleared AFTER the call: while a rearm is running it is still pending, so a stomp
+    -- it provokes coalesces into it rather than queuing a second one behind it.
     if P.armed then rearm(why) end
+    P.rearmPending = false
   end)
 end
 
 -- ---------------------------------------------------------------------------
--- The sampler
+-- The auditor
+--
+-- The re-assert does not wait for this: `onFramePoint` corrects a move inside the call
+-- that made it. What survives to be seen here arrived by a route SetPoint does not carry,
+-- so this measures drift, feeds Judge and raises the question — and re-places as a
+-- backstop for exactly those routes.
 -- ---------------------------------------------------------------------------
 
 local ask
@@ -429,10 +553,10 @@ local function sample()
     P.staleLatched = true
     P.staleSeen, P.dirty = P.staleSeen + 1, false
     mark(("# stale n=%d combat=%s"):format(stale, bit(P.combat)))
-    -- `lastCauseAt` is deliberately withheld: a re-pool is a re-pool whoever caused it,
+    -- `handledAt` is deliberately withheld: a re-pool is a re-pool whoever caused it,
     -- and attributing it would re-arm against the same frames forever.
     local verdict = Anchor.Judge{
-      now = GetTime(), combat = InCombatLockdown(),
+      now = GetTime(),
       strikes = P.strikes, strikeAt = P.strikeAt, askedAt = P.askedAt,
     }
     P.strikes, P.strikeAt = verdict.strikes, verdict.strikeAt
@@ -444,7 +568,7 @@ local function sample()
 
   local moved = 0
   for _, t in ipairs(P.tracked) do
-    local want = P.expected[t.cooldownID]
+    local want = P.wantOf[t.frame]
     local left, top = geometry(t.frame)
     if want and left then
       if math.abs(left - want.left) > TOLERANCE or math.abs(top - want.top) > TOLERANCE then
@@ -452,14 +576,14 @@ local function sample()
       end
     end
   end
-  -- One mark per displacement, not one per tick: in combat cap cannot re-place the frames,
-  -- so an unlatched sampler would repeat the same finding twice a second for the whole pull.
+  -- One mark per displacement, not one per tick: a mover that keeps winning would
+  -- otherwise repeat the same finding twice a second for the whole pull.
   if moved == 0 then P.dirty = false; return end
   if P.dirty then return end
   P.dirty = true
 
   local verdict = Anchor.Judge{
-    now = GetTime(), lastCauseAt = P.lastCauseAt, combat = InCombatLockdown(),
+    now = GetTime(), handledAt = P.handledAt,
     strikes = P.strikes, strikeAt = P.strikeAt, askedAt = P.askedAt,
   }
   P.strikes, P.strikeAt = verdict.strikes, verdict.strikeAt
@@ -483,11 +607,15 @@ end
 local function onStomp(source, destructive)
   if not P.armed then return end
   P.stomps = P.stomps + 1
-  P.lastCauseAt = GetTime()
   if P.combat then P.stompsCombat = P.stompsCombat + 1 end
   mark(("# stomp %s destructive=%s combat=%s"):format(source, bit(destructive), bit(P.combat)))
   if destructive then
-    P.expected = {}
+    -- ⚠ THE CLAIM DIES WITH THE POOL, and a park that outlived it would be a bug with teeth.
+    -- `RefreshLayout` releases every item frame and re-acquires it against a fresh row, so cap
+    -- neither owes these frames a restore nor may keep holding one off the row: the same frame
+    -- object comes back serving a different ability, and a stale park would make that ability
+    -- silently invisible.
+    P.wantOf, P.parked, P.claimed, P.parkPending = {}, {}, {}, 0
     scheduleRearm(source)
   else
     schedule(source)
@@ -542,6 +670,10 @@ end
 function Anchor.Status()
   if not Anchor.Enabled() then return "off" end
   if not P.armed then return "on, not applied" end
+  local parkedNow = countParked()
+  if parkedNow > 0 then
+    return ("applied to %d row(s), %d held off the row"):format(#P.planned, parkedNow)
+  end
   return ("applied to %d row(s)"):format(#P.planned)
 end
 
@@ -553,30 +685,60 @@ end
 
 --- Takes the plan's frames as the ones cap owns, stamping the generation with them so a
 --- later row change is distinguishable from a frame re-issue.
+---
+--- ⚠ It also decides what is PARKED, which is the half a plain rebuild used to drop. A frame
+--- cap moved and the new plan does not name is not "no longer our problem": it is sitting at
+--- cap's coordinates, inside a row that reads as a priority scan, in nobody's order. The
+--- commonest way in is a live `GetCooldownID()` that stopped matching, which takes the row out
+--- of `Bind`'s list without taking the icon off the screen.
 local function adopt(rows, entries)
   P.plan = Anchor.Plan(rows, entries)
   P.tracked, P.planned = {}, {}
+  local inPlan = {}
   for i, item in ipairs(P.plan.order) do
     P.tracked[i] = { cooldownID = item.cooldownID, frame = item.row.frame }
     P.planned[i] = item.cooldownID
+    inPlan[item.row.frame] = true
+    -- A frame returning to the plan stops being parked; `apply` places it on this pass.
+    P.parked[item.row.frame] = nil
+    armFrame(item.row.frame)
   end
+
+  -- Counted here, REPORTED by `apply`, because `apply` is what actually moves them. An adopt
+  -- that is followed by a failed apply has parked nothing, and a capture line saying otherwise
+  -- would be the instrument describing a move it never made.
+  for frame in pairs(P.claimed) do
+    if not inPlan[frame] and not P.parked[frame] then
+      P.parked[frame] = true
+      P.parkPending = P.parkPending + 1
+    end
+  end
+
   P.generation = ns.Bind.Generation and ns.Bind.Generation() or nil
   P.staleLatched = false
 end
 
+--- Hands every frame cap moved back to Blizzard and lets its layout place them.
+---
+--- ⚠ It walks `claimed`, not `tracked`. A parked frame is by definition absent from the plan,
+--- so restoring only the tracked ones would turn ordering off and leave the parked icons
+--- offscreen — cap's last act would be to hide a row permanently.
 local function disarm()
   P.armed = false
   if P.ticker then P.ticker:Cancel(); P.ticker = nil end
-  local orphans = 0
-  for _, t in ipairs(P.tracked) do t.frame:ClearAllPoints() end
+  local restoring, orphans = {}, 0
+  for frame in pairs(P.claimed) do restoring[#restoring + 1] = frame end
+  for _, frame in ipairs(restoring) do frame:ClearAllPoints() end
   local v = viewer()
   if v and type(v.Layout) == "function" then pcall(v.Layout, v) end
-  for _, t in ipairs(P.tracked) do
-    local ok, points = pcall(t.frame.GetNumPoints, t.frame)
+  for _, frame in ipairs(restoring) do
+    local ok, points = pcall(frame.GetNumPoints, frame)
     if not ok or not plain(points) or points == 0 then orphans = orphans + 1 end
   end
-  mark("# restored orphans=" .. orphans)
-  P.tracked, P.expected, P.planned, P.plan = {}, {}, {}, nil
+  mark(("# restored n=%d orphans=%d"):format(#restoring, orphans))
+  P.tracked, P.wantOf, P.planned, P.plan = {}, {}, {}, nil
+  P.claimed, P.parked, P.parkPending = {}, {}, 0
+  P.foreign = nil
   P.strikes, P.strikeAt, P.dirty, P.generation = 0, nil, false, nil
   return orphans
 end
@@ -602,9 +764,6 @@ local function arm()
   installHooks()
   mark("# armed")
   stampMeta()
-  -- The first placement is itself a cause: without it the next displacement has no
-  -- preceding event and reads as another addon by construction.
-  P.lastCauseAt = GetTime()
   if not apply("armed") then
     P.armed = false
     tell("no-geometry", "could not read the Cooldown Manager's geometry — the row keeps "
@@ -619,7 +778,7 @@ end
 --- Rebuilds the plan against the frames the viewer holds NOW. Re-binding first is the
 --- point: Bind's rows carry frames taken before the teardown.
 function rearm(why)
-  if not P.armed or InCombatLockdown() then return false end
+  if not P.armed then return false end
   if ns.Bind.Resolve then ns.Bind.Resolve("anchor-" .. why) end
   local rows = viewerRows()
   local entries, cat = authored(rows)
@@ -633,7 +792,6 @@ function rearm(why)
   P.dirty = false
   mark("# rearmed why=" .. why)
   stampMeta()
-  P.lastCauseAt = GetTime()
   return apply("rearmed")
 end
 
@@ -694,7 +852,7 @@ end
 local function refresh()
   if not Anchor.Enabled() then return end
   if P.asking and not asking() then P.asking = false end
-  if P.asking or InCombatLockdown() then return end
+  if P.asking then return end
   if not P.armed then arm(); return end
   if P.generation ~= (ns.Bind.Generation and ns.Bind.Generation() or nil) then
     scheduleRearm("generation")
@@ -757,8 +915,14 @@ local function statusLine()
   local drawn, match, stale = Anchor.Drawn()
   ns.Emit(("ordering %d rows on %s — drawn order %s the authored one."):format(
     #drawn, VIEWER, match and "matches" or "DIFFERS from"))
-  ns.Emit(("layout rebuilds %d (%d in combat), displaced %d, contended %d, re-pooled %d."):format(
-    P.stomps, P.stompsCombat, P.displaced, P.contended, P.staleSeen))
+  ns.Emit(("layout rebuilds %d (%d in combat), re-asserted %d, displaced %d, contended %d, "
+    .. "re-pooled %d, parked %d."):format(
+    P.stomps, P.stompsCombat, P.reasserts, P.displaced, P.contended, P.staleSeen, P.parks))
+  local parkedNow = countParked()
+  if parkedNow > 0 then
+    ns.Emit(("  %d icon(s) held off the row — cap moved them and can no longer say where they "
+      .. "belong. /cap anchor off returns them."):format(parkedNow))
+  end
   if stale > 0 then
     ns.Emit(("  %d frames are serving other rows right now — rebuilding."):format(stale))
   end

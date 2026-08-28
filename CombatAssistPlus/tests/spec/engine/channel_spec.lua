@@ -8,9 +8,9 @@ local H = require("CombatAssistPlus.tests.mock_ns")
 local STYLE = {
   texture_root = "BADGES\\",
   hatch_root = "MEDIA\\",
-  hatch = "stripes", hatch_px = 56,
-  plate = "plate", plate_px = 25, plate_offset_px = { 20, -18 },
-  mark = "glyph", mark_px = 15, mark_offset_px = { 20, -18 },
+  hatch = "stripes",
+  plate = "plate", plate_offset_px = { 20, -18 },
+  mark = "glyph", mark_offset_px = { 20, -18 },
   rgb = { 1, 0.5, 0 },
   low_rgb = { 1, 0, 0 },
 }

@@ -306,6 +306,46 @@ local function drawCountGlyph(key, entry)
   y = y + icon() + CAPTION_H + 6
 end
 
+--- L9 · a whole row's treatment at once, rather than one primitive in isolation.
+---
+--- ⚠ IT DECIDES NOTHING ITSELF. The cell names a verdict and its cues; what those MEAN is read
+--- from `ns.Style.verdicts` and resolved by `ns.Treatment.For` — the same function the live
+--- overlay calls. A drawer that re-derived "edge here, hatch there" would be answering the
+--- entry's question with the gallery's own opinion, and the whole point of L9 is to look at
+--- what actually ships.
+local function drawComposition(key, entry)
+  local badges = {}
+  local x = PAD
+  for _, cell in ipairs(entry.cells or {}) do
+    local host = labSwatch(cell, x, cell.state or cell.verdict or cell.ability)
+    local v = ns.Style.verdicts[cell.verdict] or {}
+    local t = ns.Treatment.For{ member = v.scan, oncd = v.hatch, cues = cell.cues }
+
+    if t.scan then ns.Paint.Border(host):SetShown(true) end
+    -- Two hatches, two different claims, and L9 exists because a row can wear the edge and the
+    -- second one together: `hatch` is Blizzard's readiness latch, `skip` is cap saying ruled out.
+    if t.hatch then
+      local hatch = ns.Paint.Hatch(host, 0)
+      if hatch then hatch:SetShown(true) end
+    end
+    if t.skip then
+      local skip = ns.Paint.Hatch(host, nil, (ns.Style.hatch or {}).skip)
+      if skip then skip:SetShown(true) end
+    end
+    for i, cue in ipairs(t.cues or {}) do
+      local badge = ns.Paint.Badge(host, cue)
+      if badge then
+        badge:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(host, i - 1))
+        badge:Show()
+        badges[#badges + 1] = badge
+      end
+    end
+    x = x + icon() + SPREAD
+  end
+  y = y + icon() + CAPTION_H + 6
+  return badges
+end
+
 -- The gallery draws what the lab HOLDS, and the lab holds one entry. The fifteen handlers the
 -- arrival, readiness, stripes and composite intakes needed went with those intakes: seven were
 -- promoted into Parts 1-6 (V16-V20), the rest were judged and deleted, and a handler with no
@@ -313,6 +353,7 @@ end
 local DRAWS = {
   ["count-glyph"] = drawCountGlyph,
   ["duration"] = drawCountGlyph,
+  ["composition"] = drawComposition,
 }
 
 --- Whether the gallery can actually draw an entry. A Part 7 entry nothing can draw is invisible
@@ -393,7 +434,7 @@ local function buildSealed()
 
   section("V18 · sealed bar  ·  V19 · pandemic window  ·  V20 · proc bar")
   x = PAD
-  local A, g = ns.Style.bar, ns.Paint.Geometry()
+  local A = ns.Style.bar
   for _, at in ipairs({ 0, 2, 4 }) do
     local host = swatch(x, y, SAMPLE[4].spell, at .. " of 4")
     local bar = ns.Paint.CountBar(host, {
@@ -422,8 +463,9 @@ local function buildSealed()
   local P, b = ns.Style.pandemic, ns.Style.badges
   local host = swatch(x, y, SAMPLE[4].spell, "in window")
   local slot = CreateFrame("Frame", nil, host)
+  local g = ns.Paint.Geometry(host)
   slot:SetSize(g.diameter, g.diameter)
-  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(0))
+  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(host, 0))
   local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
   plate:SetTexture(b.texture_root .. b.plate.texture .. ".tga", nil, nil, "TRILINEAR")
   plate:SetVertexColor(b.plate.rgb[1], b.plate.rgb[2], b.plate.rgb[3])

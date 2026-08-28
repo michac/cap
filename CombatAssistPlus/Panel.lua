@@ -241,7 +241,7 @@ local function paint(icon, desc)
   for key, badge in pairs(icon.badges) do
     local at = wanted[key]
     if at then
-      badge:SetPoint("TOPRIGHT", icon.frame, "TOPRIGHT", ns.Paint.StackOffset(at))
+      badge:SetPoint("TOPRIGHT", icon.frame, "TOPRIGHT", ns.Paint.StackOffset(icon.frame, at))
       badge.frame:SetAlpha(1)
       badge:Show()
     else

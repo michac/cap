@@ -1,9 +1,9 @@
 -- Bind.lua — which Cooldown Manager icon is which ability, kept correct across
 -- spec, talent and hero-tree changes.
 --
--- Identity resolves out of combat only. A value that reads secret or throws is
--- "no answer", never "no ability": the pass is reported partial and the row is
--- absent from it. See knowledge/addon-dev/cooldown-manager.md rules 2, 9, 15.
+-- Identity resolves in combat as well as out: the reads are all getters. A value that
+-- reads secret or throws is "no answer", never "no ability": the pass is reported partial
+-- and the row is absent from it. See knowledge/addon-dev/cooldown-manager.md rules 2, 9, 15.
 --
 -- State and a read API only — it registers no commands and never edits Core.lua.
 local ADDON, ns = ...
@@ -46,7 +46,6 @@ local state = {
 
 local listeners = {}
 local watchers = {}
-local combatFlag = false
 local resolveTimerArmed = false
 local graceStarted = false
 
@@ -67,10 +66,6 @@ local function readField(obj, method)
   if v == nil then return nil, "empty" end
   if issecretvalue(v) then return nil, "secret" end
   return v, "plain"
-end
-
-local function inCombat()
-  return combatFlag or InCombatLockdown()
 end
 
 -- ---------------------------------------------------------------------------
@@ -199,14 +194,11 @@ local function evaluate(why)
   return health
 end
 
+-- Runs in combat too, deliberately: every client call on this path is a pcall'd getter, so
+-- there is nothing here a lockdown protects, and the viewer releases its whole item-frame
+-- pool mid-pull. A resolve that waited for regen would leave every consumer holding frames
+-- that now serve other rows. `state.deferred` counts refusals and should read 0.
 local function resolve(reason)
-  if inCombat() then
-    state.pending = true
-    state.pendingReason = reason
-    state.deferred = state.deferred + 1
-    return "queued"
-  end
-
   local rows, order = {}, {}
   local frames, viewersSeen, unreadable, complete = 0, 0, 0, true
   local viewersShown = 0
@@ -298,15 +290,9 @@ end
 
 local watcher = CreateFrame("Frame")
 watcher:SetScript("OnEvent", function(_, event)
-  if event == "PLAYER_REGEN_DISABLED" then
-    combatFlag = true
-    return
-  end
-  if event == "PLAYER_REGEN_ENABLED" then
-    combatFlag = false
-    -- Unconditional, because every in-combat resolve returns early: a pull that
-    -- queued nothing would otherwise produce no resolve at either edge, and a
-    -- post-combat reading identical to the pre-combat one would prove nothing.
+  if event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
+    -- Both edges resolve. A pull that changed nothing produces two identical readings,
+    -- which is the point: identical is a finding, and absent is not.
     schedule(state.pendingReason or event)
     return
   end
@@ -315,7 +301,6 @@ watcher:SetScript("OnEvent", function(_, event)
   -- not any other event happens to land.
   if event == "PLAYER_ENTERING_WORLD" and not graceStarted then
     graceStarted = true
-    combatFlag = InCombatLockdown()
     C_Timer.After(LOGIN_GRACE, function()
       evaluate("login-grace")
     end)
@@ -363,6 +348,10 @@ function Bind.ItemFrame(cooldownID)
   local live, class = readField(row.frame, "GetCooldownID")
   if class == "plain" then
     if live == cooldownID then return row.frame, true end
+    -- Drop it, don't just decline to return it: `Bind.Rows()` hands the same table to
+    -- Sense, Anchor and Overlay, and a frame confirmed to be serving another row is
+    -- wrong for all of them until the rebind lands.
+    row.frame = nil
     schedule("frame-repooled")
     return nil, false
   end

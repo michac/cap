@@ -39,7 +39,22 @@ end
 --- are optional; without them the mark sits where the text would.
 local function escape(root, name, size, dx, dy)
   local where = (dx and dy) and (":" .. dx .. ":" .. dy) or ""
-  return ("|T%s%s:%d:%d%s|t"):format(root, name, size, size, where)
+  -- Rounded, not truncated: every size here is a ratio of a measured width, so it arrives
+  -- as a float and `%d` would drop a pixel off each one at every icon size.
+  local px = math.floor(size + 0.5)
+  return ("|T%s%s:%d:%d%s|t"):format(root, name, px, px, where)
+end
+
+--- The three escape sizes for an icon width. An escape's size is a LITERAL baked into the band
+--- string when the sink is armed, so it is arithmetic on the width the row actually draws at —
+--- a frozen number is right at one icon size and wrong at every other. Falls back to the shelf's
+--- nominal, which is what `Paint.Extent` hands back for a width that reads secret.
+function Channel.CountGeometry(width)
+  local nominal = ((ns.Style or {}).surfaces or {}).icon_px
+  local w = (type(width) == "number" and width > 0) and width or nominal
+  if not (w and ns.Paint and ns.Paint.Ratios) then return nil end
+  local r = ns.Paint.Ratios(w)
+  return { hatch = w, plate = r.plate, mark = r.sprite }
 end
 
 --- `|cAARRGGBB…|r` from a shelf triple. Used for TEXT ONLY.
@@ -84,9 +99,11 @@ end
 --- count FontString per button, so a hatch across the face, a plate, a mark on the corner and a
 --- numeral all have to come out of one string — and the band above the threshold clears every
 --- one of them together.
-function Channel.CountRules(bands, style, size, element)
+function Channel.CountRules(bands, style, geom, element)
   style = style or (ns.Style or {}).count
   if not style or type(bands) ~= "table" or #bands == 0 then return nil end
+  geom = geom or Channel.CountGeometry()
+  if not geom then return nil end
   local root = style.texture_root or ""
   local out, floor = {}, nil
   for _, band in ipairs(bands) do
@@ -113,21 +130,20 @@ function Channel.CountRules(bands, style, size, element)
       if band.hatch then
         -- ⚠ A DIFFERENT ROOT: V11's sheet lives under `Media/`, the badge art under
         -- `Media/badges/`. Both names are injected by `capart export lua`.
-        body = escape(style.hatch_root or root, hued(style.hatch, band.polarity),
-          size or style.hatch_px)
+        body = escape(style.hatch_root or root, hued(style.hatch, band.polarity), geom.hatch)
       end
     elseif element == "mark" then
       if wantsMark then
         -- The plate carries no polarity — its job is contrast, not polarity — so it is one
         -- pre-tinted file rather than a pair.
-        if plate then body = body .. escape(root, style.plate, style.plate_px) end
-        body = body .. escape(root, hued(style.mark, band.polarity), style.mark_px)
+        if plate then body = body .. escape(root, style.plate, geom.plate) end
+        body = body .. escape(root, hued(style.mark, band.polarity), geom.mark)
       end
     elseif element == "plate" then
       -- The numeral's plate, as its OWN element with the numeral's thresholds: a plate escape
       -- cannot sit under text within one string (the first escape flows, a later one paints
       -- over), so it rides its own slot, built before the numeral's (render-shelf.md V16).
-      if wantsCount and plate then body = escape(root, style.plate, style.plate_px) end
+      if wantsCount and plate then body = escape(root, style.plate, geom.plate) end
     elseif element == "count" then
       -- The numeral is the ONE thing a colour escape still reaches, because it is text.
       if wantsCount then body = tint(rgb, "%d") end
@@ -498,10 +514,10 @@ local function countSink(button, host, plan, style, element, slot)
   count:SetTextColor(style.rgb[1], style.rgb[2], style.rgb[3])
 
   -- ⚠ Sized in the FONTSTRING'S coordinate space, which is the host's — not screen pixels, and
-  -- not the shelf's nominal icon. `hatch_px` is the fallback for a width that reads secret.
+  -- not the shelf's nominal icon. Every escape size below is a ratio of this one measurement.
   local w = ns.Paint.Extent(host)
-  local nudge = Channel.BandOverride()
-  local size = (nudge and nudge.size) or w
+  local geom = Channel.CountGeometry(w)
+  if not geom then return false end
 
   -- ⚠ GEOMETRY IS RECORDED, NOT ASSUMED. Two flights were spent nudging an offset that no log
   -- could describe, because nothing wrote down what any of these numbers actually were at the
@@ -528,7 +544,7 @@ local function countSink(button, host, plan, style, element, slot)
     ns.Log.Mark(("geom %s/%s host:%sx%s hs:%s btn:%sx%s bs:%s size:%s"):format(
       tostring(plan.spell), tostring(element),
       n(okH and hostW), n(okHh and hostH), n(okHs and hostS),
-      n(okBw and btnW), n(okBh and btnH), n(okBs and btnS), n(size)))
+      n(okBw and btnW), n(okBh and btnH), n(okBs and btnS), n(geom.hatch)))
   end
   end)
 
@@ -540,13 +556,13 @@ local function countSink(button, host, plan, style, element, slot)
     -- The corner stack slot this marker CLAIMED by declaration (render-shelf.md Part 2.5's
     -- cession rule). `count` sits over `mark` because the plate is the mark's and the numeral
     -- belongs on it — all three share the marker's one slot.
-    count:SetPoint("CENTER", host, "TOPRIGHT", ns.Paint.BadgeCentre(slot))
+    count:SetPoint("CENTER", host, "TOPRIGHT", ns.Paint.BadgeCentre(host, slot))
   end
 
   local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
     and C_StringUtil.CreateNumericRuleFormatter()
   if not formatter then return false end
-  local rules = Channel.CountRules(plan.bands, style, size, element)
+  local rules = Channel.CountRules(plan.bands, style, geom, element)
   if not rules then return false end
   formatter:SetBreakpoints(rules)
   button:SetApplicationCount(count, { formatter = formatter })
@@ -692,9 +708,9 @@ end
 
 local function windowSink(button, style, badges, slot)
   local region = CreateFrame("Frame", nil, button)
-  local d = (badges.diameter_pct / 100) * ns.Style.surfaces.icon_px
+  local d = ns.Paint.Geometry(button).diameter
   region:SetSize(d, d)
-  region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(slot or 0))
+  region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(button, slot or 0))
 
   -- The FULL positive-cue treatment: V14's promotion ring around the badge, and the halo
   -- under the plate. This badge is a client-decided promotion and must read as bright as one.
@@ -760,6 +776,12 @@ end
 function Channel.Arm(host, marker, abilities, cornerSlot, lift)
   local plan = Channel.ContainerPlan(marker, abilities)
   if not plan or not host or InCombatLockdown() then return nil, "refused" end
+  -- ⚠ AN UNPINNED HOST HAS NO RECT, AND EVERY SIZE BELOW IS A RATIO OF ONE. An escape's size is
+  -- a literal baked into the band string at arm time and never revisited, so arming against a
+  -- 0x0 host bakes the shelf's nominal icon into every element for the life of the frame.
+  -- "deferred" is not a failure: the caller retries on the next draw, by which time it is pinned.
+  local okRect, valid = pcall(host.IsRectValid, host)
+  if not okRect or valid ~= true then return nil, "deferred" end
   if not (C_AddOns and C_AddOns.LoadAddOn) then return nil, "refused" end
 
   local okLoad = pcall(C_AddOns.LoadAddOn, "Blizzard_AuraContainer")
@@ -867,7 +889,7 @@ end
 -- The band nudge — a FLIGHT INSTRUMENT, not a setting
 -- ---------------------------------------------------------------------------
 
---- `/cap band [x y [size]]` — move and resize the band's hatch while looking at it.
+--- `/cap band [x y]` — move the band's hatch while looking at it.
 ---
 --- ⚠ THIS IS NOT A PLAYER SETTING AND MUST NOT BECOME ONE. `render-shelf.md` owns every number
 --- cap draws with, and the shelf is regenerated into `Style.lua` — an override that survived a
@@ -875,9 +897,13 @@ end
 --- exact failure the generation pipeline exists to prevent. So it lives in memory only, it
 --- prints the value to paste back into Part 6, and a `/reload` forgets it.
 ---
---- It exists because the alternative is a release per guess. An inline escape sits on the text
---- baseline and cannot tile, so its placement is arithmetic nobody has done before — three
---- numbers, judged by eye, in a client. One flight with a nudge beats five flights without.
+--- ⚠ IT NUDGES THE OFFSET AND NOTHING ELSE. Size is not an opinion: every escape is a ratio of
+--- the row's measured width, and a by-eye number pasted into a shelf shared by every icon size
+--- is how the whole primitive came to be frozen at one. The no-argument readout is the
+--- instrument that replaces it — drawn diameter against the shelf's ratio, measured, not typed.
+---
+--- The offset stays nudgeable because an inline escape sits on the text baseline and its
+--- placement is arithmetic nobody has done before: two numbers, judged by eye, in a client.
 local override
 
 function Channel.BandOverride()
@@ -892,14 +918,13 @@ function Channel.BandStyle()
   local out = {}
   for k, v in pairs(base) do out[k] = v end
   out.hatch_offset_px = { override.x, override.y }
-  out.hatch_px = override.size or base.hatch_px
   return out
 end
 
 if ns.RegisterCommand then
   ns.RegisterCommand{
-    name = "band", order = 46, args = "[x y [size]] | off",
-    desc = "Nudge the sealed band's hatch while looking at it (flight instrument, not saved)",
+    name = "band", order = 46, args = "[x y] | off",
+    desc = "Nudge the sealed band's hatch offset while looking at it (flight instrument, not saved)",
     handler = function(rest)
       local arg = (rest or ""):lower()
       local base = (ns.Style or {}).count
@@ -910,39 +935,43 @@ if ns.RegisterCommand then
         return
       end
       if arg == "" then
-        local o = override or { x = base.hatch_offset_px[1], y = base.hatch_offset_px[2],
-                                size = base.hatch_px }
-        ns.Emit(("band hatch: x=%d y=%d size=%d%s"):format(
-          o.x, o.y, o.size or base.hatch_px, override and "  (nudged)" or "  (the shelf's)"))
-        -- ⚠ MEASURED, NOT REASONED ABOUT. An escape's size literal lives in the FontString's own
-        -- coordinate space and the shelf's `icon_px` is a screen-pixel intent, so the two differ
-        -- by the effective scale — which is why a mark authored at the icon's screenshot size
-        -- overhangs it. Printing all three ends the guessing: local × scale should equal the
-        -- number a screenshot measures.
+        local o = override or { x = base.hatch_offset_px[1], y = base.hatch_offset_px[2] }
+        ns.Emit(("band hatch offset: x=%d y=%d%s"):format(
+          o.x, o.y, override and "  (nudged)" or "  (the shelf's)"))
+        -- ⚠ MEASURED, NOT REASONED ABOUT — and this readout is now the ASSERTION rather than an
+        -- input. An escape's size literal lives in the FontString's own coordinate space and the
+        -- shelf's `icon_px` is a screen-pixel intent, so the two differ by the effective scale.
+        -- The sizes are derived from the local width, so the drawn diameter must equal
+        -- `diameter_pct` of it; if it does not, the row was measured before it was pinned.
         local row = ns.Overlay and ns.Overlay.AnyHost and ns.Overlay.AnyHost()
         if row then
           local w = ns.Paint.Extent(row)
           local scale = row.GetEffectiveScale and row:GetEffectiveScale() or 1
           ns.Emit(("row: local %.1f × effective scale %.3f = %.1f screen px  (shelf nominal %d)")
             :format(w, scale, w * scale, ns.Style.surfaces.icon_px))
+          local g = Channel.CountGeometry(w)
+          if g then
+            ns.Emit(("escapes: hatch %.1f  plate %.1f  mark %.1f  (badge diameter %.1f = %d%% of "
+              .. "%.1f)"):format(g.hatch, g.plate, g.mark,
+              ns.Paint.Ratios(w).diameter, ns.Style.badges.diameter_pct, w))
+          end
         else
           ns.Emit("no row anchored yet — the measurement needs a drawn Cooldown Manager row.")
         end
-        ns.Emit("usage: /cap band <x> <y> [size]   ·   /cap band off")
+        ns.Emit("usage: /cap band <x> <y>   ·   /cap band off")
         return
       end
-      local x, y, size = arg:match("^(-?%d+)%s+(-?%d+)%s*(%d*)$")
+      local x, y = arg:match("^(-?%d+)%s+(-?%d+)$")
       if not x then
-        return ns.Emit("usage: /cap band <x> <y> [size]   ·   /cap band off")
+        return ns.Emit("usage: /cap band <x> <y>   ·   /cap band off")
       end
       if InCombatLockdown() then
         return ns.Emit("the band re-arms out of combat only.")
       end
-      override = { x = tonumber(x), y = tonumber(y), size = tonumber(size) }
-      ns.Emit(("band hatch → x=%d y=%d size=%d. Paste into render-shelf.md Part 6 as "
-        .. "count.hatch_offset_px = [%d, %d] and count.hatch_px = %d once it looks right.")
-        :format(override.x, override.y, override.size or base.hatch_px,
-                override.x, override.y, override.size or base.hatch_px))
+      override = { x = tonumber(x), y = tonumber(y) }
+      ns.Emit(("band hatch offset → x=%d y=%d. Paste into render-tokens.json as "
+        .. "count.hatch_offset_px = [%d, %d] once it looks right.")
+        :format(override.x, override.y, override.x, override.y))
       if ns.Overlay and ns.Overlay.Rearm then ns.Overlay.Rearm() end
     end,
   }

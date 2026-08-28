@@ -81,19 +81,21 @@ describe("Anchor.Render", function()
   local snap = {
     n = 3, named = 2, extra = 1, missing = 1,
     planned = { 30, 10, 20 }, drawn = { 30, 10, 20 }, match = true, stale = 0,
-    stomps = 4, stompsCombat = 1, displaced = 2, contended = 0, staleSeen = 0, strikes = 0,
+    stomps = 4, stompsCombat = 1, displaced = 2, contended = 0, reasserts = 7,
+    parks = 0, parkedNow = 0, staleSeen = 0, strikes = 0,
   }
 
   it("is deterministic for a given snapshot", function()
     assert.equal(Anchor.Render(snap), Anchor.Render(snap))
-    assert.equal("A{n:3 named:2 extra:1 miss:1} P{30,10,20} D{30,10,20} X{ok}"
-      .. " S{stomp:4 icombat:1 disp:2 cont:0 stale:0 strike:0}", Anchor.Render(snap))
+    assert.equal("A{n:3 named:2 extra:1 miss:1 parked:0} P{30,10,20} D{30,10,20} X{ok}"
+      .. " S{stomp:4 icombat:1 disp:2 cont:0 reassert:7 park:0 stale:0 strike:0}",
+      Anchor.Render(snap))
   end)
 
   it("renders an absent count as ? and an empty order as -, never as 0", function()
     local body = Anchor.Render{ named = 0, planned = {}, drawn = {} }
-    assert.equal("A{n:? named:0 extra:? miss:?} P{-} D{-} X{MISMATCH}"
-      .. " S{stomp:? icombat:? disp:? cont:? stale:? strike:?}", body)
+    assert.equal("A{n:? named:0 extra:? miss:? parked:?} P{-} D{-} X{MISMATCH}"
+      .. " S{stomp:? icombat:? disp:? cont:? reassert:? park:? stale:? strike:?}", body)
   end)
 
   -- The defect this term exists to catch: the position terms agree while the frames are
@@ -109,17 +111,17 @@ end)
 describe("Anchor.Judge", function()
   local function judge(t) return Anchor.Judge(t) end
 
-  it("re-asserts against Blizzard's layout engine, which is not contention", function()
-    local v = judge{ now = 100, lastCauseAt = 99.5 }
+  it("treats drift right after one of its own re-asserts as settling, not contention", function()
+    local v = judge{ now = 100, handledAt = 99.5 }
     assert.is_true(v.attributed)
     assert.equal("reassert", v.action)
     assert.equal(0, v.strikes)
   end)
 
-  -- The stuck-row defect: at arm time nothing had fired yet, so the first displacement was
-  -- classified as another addon and the row stopped for the rest of the session.
+  -- A first unattributable displacement is ordinary; asking on it stops the row for the
+  -- rest of the session over one move.
   it("does not ask on a first unattributable displacement", function()
-    local v = judge{ now = 100, lastCauseAt = nil }
+    local v = judge{ now = 100, handledAt = nil }
     assert.is_false(v.attributed)
     assert.equal("reassert", v.action)
     assert.equal(1, v.strikes)
@@ -153,9 +155,10 @@ describe("Anchor.Judge", function()
     assert.equal("ask", v.action)
   end)
 
-  -- cap cannot write geometry in a pull, but a question is held rather than dropped.
-  it("holds a re-assert in combat and still raises a question", function()
-    assert.equal("hold", (judge{ now = 100, lastCauseAt = 99.5, combat = true }).action)
+  -- The item frames are unprotected, so a re-assert is legal in a pull and the verdict
+  -- does not read combat at all. Deferring one leaves Blizzard's order on screen.
+  it("re-asserts in combat exactly as it does out of it", function()
+    assert.equal("reassert", (judge{ now = 100, handledAt = 99.5, combat = true }).action)
     assert.equal("ask", (judge{ now = 100, strikes = 2, strikeAt = 99, combat = true }).action)
   end)
 

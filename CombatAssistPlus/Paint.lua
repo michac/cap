@@ -18,12 +18,11 @@ ns.Paint = Paint
 -- Pure geometry — the same arithmetic the artifact's generated CSS does
 -- ---------------------------------------------------------------------------
 
---- Badge sizes measured against the shelf's nominal icon, never against the host: a CDM item's
---- own width is a game read that can come back secret, and a badge that silently sized to nil
---- would draw nothing.
-function Paint.Geometry()
+--- Badge sizes for an icon width, as pure arithmetic on the shelf's ratios. Separate from
+--- `Paint.Geometry` because the band builder needs the same numbers with no host to measure.
+function Paint.Ratios(width)
   local b = ns.Style.badges
-  local d = b.diameter_pct / 100 * ns.Style.surfaces.icon_px
+  local d = b.diameter_pct / 100 * width
   return {
     diameter = d,
     step = d + b.padding_px,
@@ -33,19 +32,32 @@ function Paint.Geometry()
   }
 end
 
+--- Badge sizes for one host, as ratios of ITS drawn width. The shelf's `icon_px` is a nominal,
+--- not a promise: an Edit Mode icon size makes every badge on the row the wrong size if the
+--- arithmetic is done against the nominal instead. `Paint.Extent` is what makes the host safe
+--- to read — a width that comes back secret or unset falls back to the nominal there.
+function Paint.Geometry(host)
+  return Paint.Ratios(Paint.Extent(host))
+end
+
 --- Offsets from the host's TOPRIGHT for the Nth badge's own TOPRIGHT, `index` 0-based.
 ---
 --- The stack FLOWS down the right edge (render-shelf.md Part 1, V5): index 0 hangs off the
 --- corner and each further badge steps one diameter+padding below it. There are no fixed slots,
 --- so a badge's position depends on how many lower-ranked cues are showing beside it — which is
 --- why this is called on every update rather than once at creation.
-function Paint.StackOffset(index)
-  local g = Paint.Geometry()
+function Paint.StackOffset(host, index)
+  local g = Paint.Geometry(host)
   return g.overhang, g.overhang - g.step * (index or 0)
 end
 
 --- The drawn extent of a host, guarded against a secret or unset width. See `extent` below.
+---
+--- Three things collapse to the shelf's nominal icon and they are the same answer: no host at
+--- all, a host not yet pinned, and a width that reads secret. In every one of them the drawn
+--- width is not knowable, and the nominal is what the shelf was authored against.
 function Paint.Extent(host)
+  if host == nil then return ns.Style.surfaces.icon_px, ns.Style.surfaces.icon_px end
   local w, h = host:GetWidth(), host:GetHeight()
   if type(w) ~= "number" or type(h) ~= "number" or issecretvalue(w) or issecretvalue(h)
     or w <= 0 or h <= 0 then
@@ -56,9 +68,9 @@ end
 
 --- The offset from a host's TOPRIGHT to the CENTRE of the first badge in the stack. `StackOffset`
 --- gives a badge frame's own TOPRIGHT; a FontString centres on a point, so it needs the middle.
-function Paint.BadgeCentre(index)
-  local x, y = Paint.StackOffset(index or 0)
-  local d = Paint.Geometry().diameter
+function Paint.BadgeCentre(host, index)
+  local x, y = Paint.StackOffset(host, index or 0)
+  local d = Paint.Geometry(host).diameter
   return x - d / 2, y - d / 2
 end
 
@@ -285,7 +297,7 @@ function Paint.PromotionRing(host)
   if not p then return nil end
 
   local layer = CreateFrame("Frame", nil, host)
-  local d = Paint.Geometry().diameter * p.spread
+  local d = Paint.Geometry(host).diameter * p.spread
   layer:SetSize(d, d)
   layer:SetPoint("CENTER", host, "CENTER", 0, 0)
   layer:SetFrameLevel(math.max(host:GetFrameLevel() - 1, 0))
@@ -336,19 +348,19 @@ end
 function Paint.Badge(host, key)
   local cue = ns.Style.cues[key]
   if not cue then return nil end
-  local b, g = ns.Style.badges, Paint.Geometry()
+  local b, g = ns.Style.badges, Paint.Geometry(host)
   local tint = cue.rgb or b.rgb
 
   local slot = CreateFrame("Frame", nil, host)
   slot:SetSize(g.diameter, g.diameter)
   -- Anchored at the corner to start; Overlay re-anchors on every update, because the position
   -- is a function of the whole shown set rather than of this cue alone.
-  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(0))
+  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(host, 0))
   slot:Hide()
 
   local halo
   if cue.glow then
-    halo = Paint.Glow(slot, key)
+    halo = Paint.Glow(slot, key, host)
   end
 
   local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -419,12 +431,14 @@ end
 
 --- The halo, drawn under the plate so it reads as light escaping from behind the badge. It is
 --- the only looping motion in the style, and it carries no information — the glyph does.
-function Paint.Glow(slot, key)
+function Paint.Glow(slot, key, host)
   local cue = ns.Style.cues[key]
   local glow = cue and cue.glow
   if not glow then return nil end
   local tint = cue.rgb or ns.Style.badges.rgb
-  local g = Paint.Geometry()
+  -- Sized against the ROW, not the slot it lives on: the slot is already one diameter wide,
+  -- so measuring it would compound the ratio instead of applying it.
+  local g = Paint.Geometry(host or slot)
 
   local t = slot:CreateTexture(nil, "OVERLAY", nil, 5)
   setArt(t, ns.Style.badges.halo_texture)
@@ -581,10 +595,10 @@ end
 --- banded numeral draws at every value including the ones the band blanks. The way to make a
 --- plate ride the band is to bake it into the art the escape names, not to draw one here.
 function Paint.CountPlate(host, index)
-  local b, g = ns.Style.badges, Paint.Geometry()
+  local b, g = ns.Style.badges, Paint.Geometry(host)
   local slot = CreateFrame("Frame", nil, host)
   slot:SetSize(g.diameter, g.diameter)
-  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(index or 0))
+  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(host, index or 0))
   slot:SetFrameLevel(host:GetFrameLevel() + 4)
 
   local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -619,9 +633,9 @@ function Paint.CountString(host, o)
   if o.rgb then fs:SetTextColor(o.rgb[1], o.rgb[2], o.rgb[3]) end
 
   if o.place == "badge" then
-    local g = Paint.Geometry()
+    local g = Paint.Geometry(host)
     layer:SetSize(g.diameter, g.diameter)
-    layer:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(o.index or 0))
+    layer:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(host, o.index or 0))
     fs:SetPoint("CENTER", layer, "CENTER", 0, 0)
   else
     layer:SetAllPoints(host)
