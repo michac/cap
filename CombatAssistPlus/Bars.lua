@@ -26,6 +26,11 @@ local REMAINING = 1   -- TimerDirection.RemainingTime
 -- Cap's own mark where it has no number. NEVER a stand-in for zero: that answer is the client's.
 local NO_NUMBER = "--"
 
+-- The duration seam is `Channel`'s: one place fetches the object and one place formats it, so
+-- the panel and the row's dial cannot disagree about `ignoreGCD` or about which modifier the
+-- countdown is written in.
+local durationOf, timeText = ns.Channel.Duration, ns.Channel.RemainingText
+
 ns.Bars = ns.Bars or {}
 local Bars = ns.Bars
 
@@ -62,21 +67,6 @@ end
 -- ---------------------------------------------------------------------------
 -- The frames
 -- ---------------------------------------------------------------------------
-
-local formatter
-
---- Built once and kept. `false` records that the route is unavailable, so the probe below
---- can say so rather than re-asking on every pass.
-local function secondsFormatter()
-  if formatter ~= nil then return formatter or nil end
-  if not (C_StringUtil and C_StringUtil.CreateSecondsFormatter) then
-    formatter = false
-    return nil
-  end
-  local ok, f = pcall(C_StringUtil.CreateSecondsFormatter)
-  formatter = (ok and f ~= nil) and f or false
-  return formatter or nil
-end
 
 -- The returned bool is `SetFont`'s only failure signal and is discarded almost everywhere;
 -- a refusal leaves the string on the template's font, silently and unreadably small.
@@ -128,7 +118,7 @@ local function buildRow()
 
   if probe == nil then
     probe = (textured and "tex" or "notex")
-      .. "/" .. (secondsFormatter() and "fmt" or "nofmt")
+      .. "/" .. (ns.Channel.SecondsFormatter() and "fmt" or "nofmt")
       .. "/" .. (sized and "font" or "nofont")
   end
 
@@ -156,16 +146,6 @@ end
 local REFUSED = "refused"   -- the read refused: the call was absent, or it threw
 local UNARMED = "unarmed"   -- the sinks refused it: SetMinMaxValues / SetTimerDuration raised
 
---- The duration object, or nil plus the reason. Nil with no reason is a spell with nothing
---- remaining: `MayReturnNothing` is an answer here, not a failure. ignoreGCD, or every bar
---- fills for 1.5 s after every cast.
-local function durationOf(spellID)
-  if not (C_Spell and C_Spell.GetSpellCooldownDuration) then return nil, REFUSED end
-  local ok, d = pcall(C_Spell.GetSpellCooldownDuration, spellID, true)
-  if not ok then return nil, REFUSED end
-  return d
-end
-
 --- ⚠ ORDER IS THE WHOLE FUNCTION (§4.8.1 finding 3): the range goes in BEFORE the timer, or
 --- a correct duration draws at 0 % width. `SetToTargetValue` is finding 5 and is FIRST SHOW
 --- ONLY — on every pass it would snap out an interpolation the client is midway through.
@@ -181,20 +161,6 @@ local function armTimer(r, d)
     r.snapped = true
   end
   return true
-end
-
---- The countdown string, written EVERY pass a bar is armed: it is secret, so cap can neither
---- read it back nor dedup on it. Nil means cap could not build one — never that the
---- remaining time is zero, an answer that belongs to the client and does not come back.
-local function timeText(d)
-  local fmt = secondsFormatter()
-  if not fmt then return nil end
-  -- `modifier` is `Nilable = false` WITH a `Default`, so it goes in explicitly (§4.6).
-  local mod = Enum and Enum.DurationTimeModifier and Enum.DurationTimeModifier.RealTime
-  if mod == nil then return nil end
-  local ok, s = pcall(function() return d:FormatRemainingDuration(fmt, mod) end)
-  if not ok or s == nil then return nil end
-  return s
 end
 
 -- ---------------------------------------------------------------------------

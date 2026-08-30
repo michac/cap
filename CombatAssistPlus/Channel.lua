@@ -8,6 +8,65 @@ local issecretvalue = issecretvalue
 ns.Channel = ns.Channel or {}
 local Channel = ns.Channel
 
+-- `SetTimerDuration(d, interpolation, direction)`. ⚠ `Enum.StatusBarInterpolation.None` is NOT
+-- in the generated enum — only `Immediate` and `ExponentialEaseOut` — so nothing here reaches
+-- for it; the literals are the values cooldown-manager.md §7's recipe names.
+local IMMEDIATE = (Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate)
+  or 0
+local REMAINING = 1   -- TimerDirection.RemainingTime
+
+-- Cap's own mark where it has no number. NEVER a stand-in for zero: that answer is the client's.
+local NO_NUMBER = "--"
+
+-- ---------------------------------------------------------------------------
+-- The duration seam — one object, two client sinks, no readback
+-- ---------------------------------------------------------------------------
+
+-- Named apart from the `formatter` locals the band sinks build: those are per-slot
+-- NumericRuleFormatters, this is the one shared seconds formatter.
+local secondsFmt
+
+--- Built once and kept. `false` records that the route is unavailable, so a caller can say so
+--- rather than re-asking on every pass.
+function Channel.SecondsFormatter()
+  if secondsFmt ~= nil then return secondsFmt or nil end
+  if not (C_StringUtil and C_StringUtil.CreateSecondsFormatter) then
+    secondsFmt = false
+    return nil
+  end
+  local ok, f = pcall(C_StringUtil.CreateSecondsFormatter)
+  secondsFmt = (ok and f ~= nil) and f or false
+  return secondsFmt or nil
+end
+
+--- A spell's duration object, or nil plus the reason. Nil with NO reason is a spell with
+--- nothing remaining: `MayReturnNothing` is an answer here, not a failure — and it is the
+--- client's answer, so nothing compares it to a number.
+---
+--- ⚠ `ignoreGCD` is TRUE, and it is load-bearing: with false every bar fills for 1.5 s after
+--- every cast. (The API takes the flag either way; this is the addon's use of it.)
+function Channel.Duration(spellID)
+  if not (C_Spell and C_Spell.GetSpellCooldownDuration) then return nil, "refused" end
+  if type(spellID) ~= "number" then return nil, "refused" end
+  local ok, d = pcall(C_Spell.GetSpellCooldownDuration, spellID, true)
+  if not ok then return nil, "refused" end
+  return d
+end
+
+--- The countdown string. It is SECRET, so cap can neither read it back nor dedup on it: this is
+--- written on every pass a display is armed. Nil means cap could not build one — never that the
+--- remaining time is zero, an answer that belongs to the client and does not come back.
+function Channel.RemainingText(d)
+  local fmt = Channel.SecondsFormatter()
+  if not fmt then return nil end
+  -- `modifier` is `Nilable = false` WITH a `Default`, so it goes in explicitly (§4.6).
+  local mod = Enum and Enum.DurationTimeModifier and Enum.DurationTimeModifier.RealTime
+  if mod == nil then return nil end
+  local ok, s = pcall(function() return d:FormatRemainingDuration(fmt, mod) end)
+  if not ok or s == nil then return nil end
+  return s
+end
+
 --- Pure dependency binding for the BANDED COUNT (render-shelf.md V16/V17). The returned plan is
 --- deliberately display vocabulary, not a Signal term; tests use this same path as the live armer.
 ---
@@ -255,13 +314,55 @@ function Channel.ProcBarPlan(marker, abilities)
   return { kind = display.kind, spell = ability.spell, unit = ability.unit or "player" }
 end
 
---- The CONTAINER seam, the sibling of `GradedPlan`: four sinks that all need an AuraContainer
+--- The AURA-REMAINING plan (render-shelf.md V21, third supplier): how long an aura has left, as
+--- the badge a readable cue would otherwise wear a still clock for. The subject is the ability
+--- the MARKER names, not the bound row's — a container's aura always is (`Channel.Plan` and
+--- every sibling resolve `abilities[display.ability]`), so this reaches ACROSS ROWS with no new
+--- mechanism: Demonbolt's hold on an armed Infernal Bolt draws the Art's own clock.
+---
+--- ⚠ IT NEEDS A CUE, and that is what separates it from V20's proc bar over the same aura. The
+--- bar is a quantity on the bottom edge; this IS the verdict, in the badge's own place, so it
+--- takes the cue's hue and level and the sprite for it is not drawn. Without a cue there would be
+--- nothing for it to stand in for.
+function Channel.AuraRemainingPlan(marker, abilities)
+  local display = marker and marker.display
+  local ability = display and abilities and abilities[display.ability]
+  if not (display and display.kind == "sealed-aura-remaining" and marker.cue
+      and ability and type(ability.spell) == "number") then
+    return nil
+  end
+  return { kind = display.kind, spell = ability.spell, unit = ability.unit or "player",
+    cue = marker.cue }
+end
+
+--- V21's plan: the row's BASE spell cooldown, on a row whose button is something else. While a
+--- Grimoire is talented its row spends the whole 120 s wearing the dispel it becomes, and the
+--- swipe on it is that dispel's 15 s — `GetSpellCooldownInfo` resolves the display identity
+--- first (`cooldown-manager.md` §3.1.1), so the cooldown the reader wants is drawn nowhere.
+---
+--- ⚠ THE SPELL IS THE BOUND ROW'S `base`, NOT THE DECLARATION'S `spell`, which is why this takes
+--- a row where every other plan takes the declared abilities. An entry covering both halves of a
+--- choice node binds through `alt` (Imp Lord / Fel Ravager), and the declaration's id is then the
+--- wrong half. The declared `ability` still names the SUBJECT, for the reader and for the
+--- provenance gate; it is not what gets read.
+function Channel.BaseCooldownPlan(marker, row)
+  local display = marker and marker.display
+  if not (display and display.kind == "sealed-base-cooldown") then return nil end
+  local base = row and row.base
+  if type(base) ~= "number" then return nil end
+  return { kind = display.kind, spell = base }
+end
+
+--- The CONTAINER seam, the sibling of `GradedPlan`: five sinks that all need an AuraContainer
 --- slot, against the two graded ones that need only a curve. A marker is at most one of them.
+--- ⚠ V21 is in NEITHER: it has no aura to filter on and no curve to evaluate, so it is armed
+--- straight off its own plan by `Overlay`.
 function Channel.ContainerPlan(marker, abilities)
   return Channel.Plan(marker, abilities)
     or Channel.BarPlan(marker, abilities)
     or Channel.WindowPlan(marker, abilities)
     or Channel.ProcBarPlan(marker, abilities)
+    or Channel.AuraRemainingPlan(marker, abilities)
 end
 
 -- ---------------------------------------------------------------------------
@@ -504,7 +605,7 @@ end
 --- nothing else, so placement stays cap's — and anchoring to cap's own row frame means the mark
 --- lands correctly however the container chose to lay its button out. `host` is the row, so a
 --- full-icon mark is sized from it and a corner mark hangs off its corner.
-local function countSink(button, host, plan, style, element, slot)
+local function countSink(button, host, plan, style, element)
   local count = button:CreateFontString(nil, "OVERLAY")
   if not count:SetFont("Fonts\\" .. style.font, style.size, style.outline) then
     count:SetFontObject("NumberFontNormal")
@@ -553,10 +654,10 @@ local function countSink(button, host, plan, style, element, slot)
     if style.hatch_offset_px then ox, oy = style.hatch_offset_px[1], style.hatch_offset_px[2] end
     count:SetPoint("CENTER", host, "CENTER", ox, oy)
   else
-    -- The corner stack slot this marker CLAIMED by declaration (render-shelf.md Part 2.5's
-    -- cession rule). `count` sits over `mark` because the plate is the mark's and the numeral
-    -- belongs on it — all three share the marker's one slot.
-    count:SetPoint("CENTER", host, "TOPRIGHT", ns.Paint.BadgeCentre(host, slot))
+    -- The corner every badge shares (render-shelf.md Part 2.5): the stack is one pixel deep
+    -- and the container's frame level is what puts this under the cue badges. `count` sits over
+    -- `mark` because the plate is the mark's and the numeral belongs on it.
+    count:SetPoint("CENTER", host, "TOPRIGHT", ns.Paint.BadgeCentre(host, 0))
   end
 
   local formatter = C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
@@ -679,6 +780,120 @@ local function buildDial(parent, dial, who)
   return bar
 end
 
+--- The badge plate every corner display sits on: one pre-tinted disc, contrast rather than
+--- polarity, sized off the host the way every other escape on the row is.
+local function badgePlate(region, d)
+  local badges = ns.Style.badges
+  local plate = region:CreateTexture(nil, "OVERLAY", nil, 6)
+  plate:SetTexture(badges.texture_root .. badges.plate.texture .. ".tga", nil, nil, "TRILINEAR")
+  plate:SetVertexColor(badges.plate.rgb[1], badges.plate.rgb[2], badges.plate.rgb[3])
+  plate:SetAlpha(badges.plate.alpha)
+  plate:SetSize(d * badges.plate.scale, d * badges.plate.scale)
+  plate:SetPoint("CENTER")
+  return plate
+end
+
+--- V21 · a cooldown, as a client-drained dial with a legible numeral in it. ONE WIDGET, TWO
+--- SUPPLIERS: `sealed-base-cooldown` hands it this row's own base spell (hidden under a
+--- transform) and `sealed-cooldown-range` hands it another ability's, named by catalog key. The
+--- two resolve their spell differently and deliberately stay separate — see `BaseCooldownPlan`'s
+--- warning — and share only what is built here.
+---
+--- ⚠ NOT AN AURACONTAINER, AND IT CLAIMS NO SLOT OF ITS OWN. Every other sealed display rides an
+--- aura and appears and vanishes with it; there is no aura behind "the Grimoire's 120 s is
+--- running" — so the widget is cap's, and cap shows and hides it off a readable gate
+--- (`baseoncd`) or writes the client's own curve into its alpha (the band). What stays sealed is
+--- the NUMBER: every getter on the duration object is secret (§4.8.4), so the object goes
+--- straight into `SetTimerDuration` and `FormatRemainingDuration` and cap never learns a second
+--- of it.
+---
+--- ⚠ `level` is the FRAME-LEVEL OFFSET above the host, and the caller owns it: a dial whose
+--- marker declares a cue takes THAT CUE'S level (`Paint.CueLevel`) because it IS the badge for
+--- it; a dial with no cue takes a corner level below the badge stack.
+---
+--- ⚠ The FontString is a LEAF (§4.8.1 finding 10): `SetText` with a secret marks the string AND
+--- its dependent anchoring, so it is anchored TO the region and nothing is ever anchored to it.
+function Channel.ArmCooldownDial(host, level)
+  local style = ns.Style.basecd
+  if not (host and style) or InCombatLockdown() then return nil end
+  -- An unpinned host has no rect, and the diameter below is a ratio of one. `Overlay` retries.
+  local okRect, valid = pcall(host.IsRectValid, host)
+  if not okRect or valid ~= true then return nil end
+
+  local built
+  local region, bar, text
+  local ok = pcall(function()
+    local d = ns.Paint.Geometry(host).diameter
+    region = CreateFrame("Frame", nil, host)
+    region:SetSize(d, d)
+    region:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(host, 0))
+    ns.Paint.LevelAbove(region, host, level or ns.Paint.Z.corner)
+    badgePlate(region, d)
+
+    -- ⚠ THE RANGE GOES IN HERE, and `buildDial` is where it happens: it calls
+    -- `SetMinMaxValues(0, 1)` at build time, which is strictly before any `SetTimerDuration`
+    -- in `Update` below. ORDER IS THE WHOLE THING (§4.8.1 finding 3) — a correct duration on a
+    -- bar with no range draws at 0 % width, with no error and nothing downstream to say so.
+    -- There is exactly one such call on this bar and it is that one.
+    bar = buildDial(region, style.dial, "baseCooldownSink")
+
+    text = region:CreateFontString(nil, "OVERLAY")
+    if not text:SetFont("Fonts\\" .. style.font, style.size, style.outline) then
+      text:SetFontObject("NumberFontNormal")
+    end
+    text:SetTextColor(style.rgb[1], style.rgb[2], style.rgb[3])
+    text:SetPoint("CENTER", region, "CENTER", 0, 0)
+    built = true
+  end)
+  if not (ok and built) then
+    if region then region:Hide() end
+    return nil
+  end
+  region:Hide()
+
+  local dial = { frame = region, bar = bar, text = text }
+
+  --- One draw pass. ⚠ Every branch cap takes is on its OWN readable terms — the gate, and
+  --- whether the call handed back an object at all. The remaining time is never one of them.
+  --- `SetToTargetValue` is FIRST SHOW ONLY (§4.8.1 finding 5): on every pass it would snap out
+  --- an interpolation the client is midway through.
+  ---
+  --- ⚠ `alpha` is the BAND's channel and it is SECRET: a `sealed-cooldown-range` marker evaluates
+  --- the client's own curve and the result is written here and forgotten, never compared, exactly
+  --- as a graded badge's is. `nil` means "cap decides, and it has decided yes" — the readable-gate
+  --- form. Whether the region is SHOWN stays readable either way; only how opaque it is may be
+  --- the client's.
+  function dial:Update(allowed, plan, alpha)
+    if not allowed then
+      self.snapped = false
+      return region:Hide()
+    end
+    local d = Channel.Duration(plan.spell)
+    if d == nil then
+      self.snapped = false
+      return region:Hide()
+    end
+    local armed, err = pcall(bar.SetTimerDuration, bar, d, IMMEDIATE, REMAINING)
+    if not armed then
+      self.snapped = false
+      region:Hide()
+      if ns.Log and ns.Log.Mark then
+        ns.Log.Mark("baseCooldownSink: SetTimerDuration refused — " .. tostring(err))
+      end
+      return
+    end
+    if not self.snapped then
+      pcall(bar.SetToTargetValue, bar)
+      self.snapped = true
+    end
+    text:SetText(Channel.RemainingText(d) or NO_NUMBER)
+    region:SetAlpha(alpha == nil and 1 or alpha)
+    region:Show()
+  end
+
+  return dial
+end
+
 --- V20 · the proc bar: the proc's remaining lifetime as a thin client-drained bar directly
 --- above V18's charge bar (`lift` px up from the bottom edge — computed by Overlay from the
 --- row's DECLARATIONS, because whether either bar is currently drawn is sealed). Linear
@@ -706,11 +921,13 @@ local function procBarSink(button, host, style, lift)
   return okSink == true
 end
 
-local function windowSink(button, style, badges, slot)
+local function windowSink(button, style, badges)
   local region = CreateFrame("Frame", nil, button)
   local d = ns.Paint.Geometry(button).diameter
   region:SetSize(d, d)
-  region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(button, slot or 0))
+  -- The corner, like every other badge: the stack is one pixel deep and the container's own
+  -- frame level is what puts this under the cue badges (`Paint.Z`).
+  region:SetPoint("TOPRIGHT", button, "TOPRIGHT", ns.Paint.StackOffset(button, 0))
 
   -- The FULL positive-cue treatment: V14's promotion ring around the badge, and the halo
   -- under the plate. This badge is a client-decided promotion and must read as bright as one.
@@ -737,12 +954,7 @@ local function windowSink(button, style, badges, slot)
     breathe:Play()
   end
 
-  local plate = region:CreateTexture(nil, "OVERLAY", nil, 6)
-  plate:SetTexture(badges.texture_root .. badges.plate.texture .. ".tga", nil, nil, "TRILINEAR")
-  plate:SetVertexColor(badges.plate.rgb[1], badges.plate.rgb[2], badges.plate.rgb[3])
-  plate:SetAlpha(badges.plate.alpha)
-  plate:SetSize(d * badges.plate.scale, d * badges.plate.scale)
-  plate:SetPoint("CENTER")
+  badgePlate(region, d)
 
   -- The dial: a radial StatusBar the CLIENT drains off the aura's own duration.
   -- `SetDurationBar` seals only `BarValue` and its whole apply path is
@@ -767,13 +979,48 @@ local function windowSink(button, style, badges, slot)
   return true
 end
 
+--- The AURA-REMAINING badge (render-shelf.md V21): a red radial on an aura's own remaining, in
+--- the badge's place, drawn by the client. `windowSink` minus its promotion ring and its halo,
+--- and in `basecd`'s red rather than `pandemic`'s gold — under V5.1 hue carries polarity and only
+--- polarity, and gold here would be cap promoting a row it is holding.
+---
+--- ⚠ NO NUMERAL, AND THAT IS A LIMIT RATHER THAN A CHOICE. V21's number comes from
+--- `FormatRemainingDuration` on a COOLDOWN duration object, which cap holds; the aura's duration
+--- object is the client's and never reaches cap. `SetDurationText` is the only aura-side text
+--- sink and its breakpoints emit fixed strings — `""` or a texture escape, never a `%d` over the
+--- remaining seconds (`outsideSink` is its one use). So this ships as the arc alone, which is
+--- still strictly more than a clock face frozen at 50 %. Give it a numeral the day a
+--- `SetDurationText` breakpoint is measured to interpolate a value.
+---
+--- ⚠ THE CONTAINER'S VISIBILITY IS THE GATE. The slot filters to the aura, so the badge exists
+--- exactly while the aura does; the marker's readable terms ride `verdict.gates` and reach the
+--- container's own `Shown`, the way every other container-with-a-`when` already does.
+local function auraRemainingSink(button, host, style)
+  local region = CreateFrame("Frame", nil, button)
+  local d = ns.Paint.Geometry(host).diameter
+  region:SetSize(d, d)
+  region:SetPoint("TOPRIGHT", host, "TOPRIGHT", ns.Paint.StackOffset(host, 0))
+  badgePlate(region, d)
+
+  local bar = buildDial(region, style.dial, "auraRemainingSink")
+  --@unverified a badge-corner SetDurationBar over an AURA duration has never been watched: the
+  --@unverified measured pairs are V19's window region and V20's edge bar, both on other geometry.
+  local okSink, sinkErr = pcall(button.SetDurationBar, button, bar, {
+    direction = Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime or 1,
+  })
+  if not okSink and ns.Log and ns.Log.Mark then
+    ns.Log.Mark("auraRemainingSink: SetDurationBar refused — " .. tostring(sinkErr))
+  end
+  return okSink == true
+end
+
 --- Acquire one sealed display while unrestricted. The only public states are the audit
 --- states: offered, armed, refused. None claims whether a secret-driven glyph appeared.
 ---
---- ⚠ THE SINK IS CHOSEN BY `plan.kind` AND BY NOTHING ELSE. Three kinds, three client objects,
+--- ⚠ THE SINK IS CHOSEN BY `plan.kind` AND BY NOTHING ELSE. Four kinds, four client objects,
 --- one acquisition path — because what varies between them is which widget the client is handed,
 --- not how the slot is built.
-function Channel.Arm(host, marker, abilities, cornerSlot, lift)
+function Channel.Arm(host, marker, abilities, cornerLevel, lift)
   local plan = Channel.ContainerPlan(marker, abilities)
   if not plan or not host or InCombatLockdown() then return nil, "refused" end
   -- ⚠ AN UNPINNED HOST HAS NO RECT, AND EVERY SIZE BELOW IS A RATIO OF ONE. An escape's size is
@@ -801,12 +1048,9 @@ function Channel.Arm(host, marker, abilities, cornerSlot, lift)
     -- edge and this container are siblings on cap's frame and neither declared a level, so the
     -- client resolved it by creation order and put the edge on top — the row then read as
     -- in-scan with a hatch scribbled through it, which is the two signals arguing. The hatch is
-    -- the later word, so it takes the higher level. Declared here rather than left to the
-    -- ordering of two unrelated constructors.
-    local okLevel, level = pcall(host.GetFrameLevel, host)
-    if okLevel and type(level) == "number" and not issecretvalue(level) then
-      pcall(container.SetFrameLevel, container, level + 2)
-    end
+    -- the later word, so it takes the higher level. `Paint.Z.corner` is that floor; a corner
+    -- claimer is handed its own level above it, which is what orders two of them.
+    ns.Paint.LevelAbove(container, host, cornerLevel or ns.Paint.Z.corner)
 
     -- ⚠ A BANDED COUNT TAKES ONE SLOT PER ELEMENT, and that is the whole reason it can draw more
     -- than one mark correctly. Every slot is offered every aura and filters independently
@@ -826,7 +1070,7 @@ function Channel.Arm(host, marker, abilities, cornerSlot, lift)
             -- that number in a different space and drew the hatch at the wrong scale, which is
             -- exactly the residual misalignment two flights could not tune away.
             button:SetAllPoints(container)
-            if not countSink(button, host, plan, Channel.BandStyle(), element, cornerSlot) then
+            if not countSink(button, host, plan, Channel.BandStyle(), element) then
               built = false
             end
           end,
@@ -840,9 +1084,11 @@ function Channel.Arm(host, marker, abilities, cornerSlot, lift)
         if plan.kind == "sealed-count-bar" then
           built = barSink(button, host, plan, ns.Style.bar)
         elseif plan.kind == "sealed-pandemic" then
-          built = windowSink(button, ns.Style.pandemic, ns.Style.badges, cornerSlot)
+          built = windowSink(button, ns.Style.pandemic, ns.Style.badges)
         elseif plan.kind == "sealed-proc-bar" then
           built = procBarSink(button, host, ns.Style.procbar, lift)
+        elseif plan.kind == "sealed-aura-remaining" then
+          built = auraRemainingSink(button, host, ns.Style.basecd)
         end
       end,
     })

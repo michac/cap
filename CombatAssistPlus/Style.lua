@@ -6,10 +6,9 @@ local ADDON, ns = ...
 ns.Style = {
   badges = {
     asset_root = "previews/assets/kenney",
-    diameter_pct = 40,
+    diameter_pct = 48,
     flow = {
       anchor = "top-right-corner",
-      direction = "down",
     },
     halo_falloff = 0.7,
     halo_texture = "halo",
@@ -40,6 +39,20 @@ ns.Style = {
     track_alpha = 0.55,
     track_rgb = { 0.00, 0.00, 0.00 },
   },
+  basecd = {
+    _comment = "V21, and since 2026-08-28 it is the LIVE `blocked` BADGE rather than a corner ornament beside one. A row held because a cooldown is running draws that cooldown: a red radial on the real remaining time with a white countdown numeral inside it, where the fixed clock glyph (timer_CW_50) used to sit. Two displays reach it — `sealed-base-cooldown`, this row's own base spell hidden under a transform (while a Grimoire is talented its Cooldown Manager row spends the whole 120 s wearing the dispel it becomes, and GetSpellCooldownInfo resolves the DISPLAY identity before reading, so the swipe on that row is the dispel's 15 s and the Grimoire's is drawn nowhere — cooldown-manager.md §3.1.1), and `sealed-cooldown-range`, another ability's cooldown named by catalog key. The two resolve their spell differently and deliberately stay separate; they share only this look. C_Spell.GetSpellCooldownDuration goes straight into SetTimerDuration (RemainingTime) and into FormatRemainingDuration, and cap never reads a second of it back — every getter on the duration object is secret (§4.8.4), while the isActive that GATES the base-cooldown form is NeverSecret and plain in restricted combat (cooldown-manager.md §7). ⚠ SetMinMaxValues(0, 1) goes in at BUILD time, before any SetTimerDuration, or a correct duration draws at 0 % width forever (§4.8.1 finding 3). RED arc over a dark red track, because this IS the negative cue and V5.1 gives hue to polarity and only polarity — it is not V19's or V20's gold, which is a quantity drawn beside a verdict rather than the verdict itself. The numeral is WHITE so the number reads against the arc it sits in, and it is a leaf FontString (§4.8.1 finding 10). ⚠ NO ART — the arc is a StatusBar fill and the numeral is text — so `tint` is a deliberate \"none\" rather than an omission: this group is named in the Part 4 tint guard and an absent key fails it.",
+    dial = {
+      rgb = { 0.95, 0.3, 0.3 },
+      size_px = 25,
+      track_alpha = 0.6,
+      track_rgb = { 0.24, 0.09, 0.09 },
+    },
+    font = "FRIZQT__.TTF",
+    outline = "OUTLINE",
+    rgb = { 1.00, 1.00, 1.00 },
+    size = 13,
+    tint = "none",
+  },
   count = {
     _comment = "V16/V17. A SEALED aura application count reaching a pixel. cap hands the Cooldown Manager a FontString and a NumericRuleFormatter it AUTHORED; the client evaluates the bands against the secret and calls SetText, and cap never learns which band fired. The sink seals `Text` and `Shown` and nothing else — which is why the hue below is reachable through a static SetTextColor as well as through a band's own escape, and why the FontString's animation channel is still cap's. `threshold` is the MINIMUM input a band applies to, so a value ON a threshold takes the UPPER band. Two rules added 2026-08-24: `hatch` is legal on NEGATIVE bands only (a hatch means ruled out; a positive band hatching the face is a contradiction wearing pixels), and the numeral sits on the badge PLATE — its own element/slot with the same thresholds, because a plate escape cannot sit under text within one string.",
     font = "FRIZQT__.TTF",
@@ -49,10 +62,8 @@ ns.Style = {
     hatch_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     low_rgb = { 0.95, 0.3, 0.3 },
     mark = "cards_stack_high",
-    mark_offset_px = { 20, -18 },
     outline = "OUTLINE",
     plate = "plate_ink",
-    plate_offset_px = { 20, -18 },
     pulse = {
       alpha = { 0.72, 1.00 },
       duration_s = 1.9,
@@ -78,7 +89,6 @@ ns.Style = {
     },
     blocked = {
       budgeted = true,
-      duration_s = 1.2,
       frames = {
         "timer_CW_50",
       },
@@ -196,10 +206,9 @@ ns.Style = {
     pitch_px = 16,
     rgb = { 0.00, 0.00, 0.00 },
     skip = {
-      alpha = 0.45,
+      alpha = 0.75,
       border = {
         alpha = 1.00,
-        line_px = 2,
         rgb = { 0.95, 0.3, 0.3 },
       },
       overhang_px = 2,
@@ -223,6 +232,15 @@ ns.Style = {
     outline = "THICKOUTLINE",
     rgb = { 0.92, 0.92, 0.9 },
     size = 16,
+  },
+  outline = {
+    _comment = "V13/V11 · THE ONE OUTLINE SHEET, white with the outline in the alpha channel, drawn as a NINE-SLICE so one file is a crisp `line_px` outline at any icon size: corners at native size, edges stretched along one axis only. ⚠ It is deliberately NOT called `ring`: `tokens.ring` was V2's arrival machinery, deleted 2026-08-25, and `style_spec` guards that name dead. This is a different thing. It replaced four `SetColorTexture` strips per outline on 2026-08-29 — see render-rationale.md. Two consumers tint it themselves and no hue is baked in: V13's scan edge takes `ready.rgb`, cap's ruled-out hatch takes `hatch.skip.border.rgb`. ⚠ `line_px` LIVES HERE AND NOWHERE ELSE, which is what makes `the red outline exactly overlays the yellow one` true by construction rather than by two numbers agreeing. `slice_px` is the nine-slice margin: it must exceed `line_px` so a corner region holds the whole corner, and two of them must fit inside the tile.",
+    line_px = 2,
+    slice_px = 4,
+    texture = "outline",
+    texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
+    tile_px = 32,
+    tint = "shelf",
   },
   pandemic = {
     _comment = "V19. The pandemic window, which is the ONE sealed display cap authors no threshold for: AddPandemicRegion takes any Region — a Frame with children included — seals its `Shown`, and drives it off the client's own GetRefreshExtendedDuration - GetAuraBaseDuration, per spell. So the whole badge — halo, plate and dial together — appears and vanishes on Blizzard's real window. ⚠ It carries an OnUpdate and Blizzard secretwraps even the enablement, so budget one per armed tile and do not attach speculatively. The badge holds cue-badge brightness exactly — plate at badges.plate.alpha, NO region pulse and NO numeral — and its centre is the DIAL: a radial StatusBar the CLIENT drains off the aura's own duration object (SetDurationBar -> SetTimerDuration, direction = RemainingTime; §3.5.2, T1), gold arc (`dial.rgb`) over a dark track (`dial.track_rgb`/`track_alpha`) on the plate. Cap reads nothing — the bar's value is sealed (`BarValue`) and the drain is the client's. ⚠ ApplyDurationBar never calls SetMinMaxValues, so the addon calls SetMinMaxValues(0, 1) at setup or the bar draws 0 % forever (§4.8.1 finding 3); Radial render mode is pcall'd with linear fallback. (Its predecessor glyphs are both retired: timer_CW_75, a static Kenney clock whose baked 75% wedge read as a live radial attached to nothing, and briefly `fire` — the dial is the wedge's claim made TRUE, an arc that actually is the DoT draining.) ⚠ The AddPandemicRegion + SetDurationBar one-button pair is UNFLOWN — each half measured alone (Part 5). Its motion is the FULL positive-cue treatment: V14's promotion ring (armed before the handover, FlipBook) plus `glow`, the SAME halo the positive cues wear (badges.halo art, radial falloff from badges.halo_falloff), breathing behind the plate, armed before the handover since that is the only motion that survives the in-combat forbidden-object seal (§3.5.3). The OUTSIDE-window state of the pair deliberately has no token group: it reuses the count vocabulary's positive hatch crop and this group's gold, and its threshold (outside_s, seconds) is the CATALOG's number, never the shelf's.",
@@ -275,7 +293,6 @@ ns.Style = {
     _comment = "IN THE SCAN. One treatment, no roles, no motion. An icon either participates in the read or it does not; rank comes from row order and elimination, not from a hue ladder. Full brightness on a restrained AREA, drawn ON the icon rect so it can never bleed into a neighbour at any row gap. `blend` is NORMAL and that is a correction: under additive the edge could not carry the hue declared right here. Adding rgb(1.00, 0.86, 0.45) to a destination saturates red unconditionally, green above 0.14 and blue above 0.55, so on any icon that is not near-black the line clipped to WHITE — measured on Demonology's purple roster [client 2026-08-23]. The declared colour was not reaching a pixel, so the blend mode gave way rather than the colour.",
     alpha = 1.00,
     blend = "BLEND",
-    line_px = 2,
     rgb = { 1.00, 0.86, 0.45 },
   },
   surfaces = {

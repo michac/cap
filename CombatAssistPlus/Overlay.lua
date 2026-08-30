@@ -36,7 +36,12 @@ local function acquire(cid)
   -- V11's second cause, its own layer: cap's "ruled out" in cap's colour and phase. Two layers
   -- rather than one re-tinted, so a row that is somehow both draws both and neither has to know
   -- about the other.
-  f.skip = ns.Paint.Hatch(f, nil, (ns.Style.hatch or {}).skip)
+  --
+  -- ⚠ AND IT TAKES A DECLARED LEVEL, ABOVE THE SCAN EDGE. An eliminating mark is the later word
+  -- than "this row is in the read", and every other eliminating mark on the row already says so
+  -- (`Channel.Arm` lifts the client's sealed hatch for the same reason). This one was left to
+  -- creation order and got a different answer in the client than in the preview.
+  f.skip = ns.Paint.Hatch(f, nil, (ns.Style.hatch or {}).skip, ns.Paint.Z.skip)
   f.promo = ns.Paint.PromotionRing(f)
   -- V15 · chrome. On CAP'S OWN row frame, which is anchored corner-to-corner onto the CDM item
   -- rect below, so a top-left anchor lands on the icon. ⚠ Never parented into Blizzard's pooled
@@ -54,6 +59,27 @@ local function acquire(cid)
   -- win. Stacked instances at the same slot do the OR in the compositor instead: either alpha
   -- being opaque makes the badge visible, and both being opaque draws the same glyph twice.
   f.gradedBadges = {}
+  -- V21's dials, keyed by marker. Cap's OWN frames rather than AuraContainers — there is no
+  -- aura behind a cooldown — so they are deliberately NOT in `f.channels` and carry their own
+  -- line in `quiet()` below.
+  --
+  -- ⚠ ONE TABLE, TWO SUPPLIERS. A `sealed-base-cooldown` marker drives its dial from a readable
+  -- gate (`f.basePlans` below); a `sealed-cooldown-range` marker drives the SAME widget from the
+  -- client's own curve, writing a secret alpha into it exactly as a graded badge does. They are
+  -- built, hidden and reported together because every one of those is about the widget, and they
+  -- are updated apart because only the sources differ.
+  f.dials, f.basePlans, f.dialStatus = {}, {}, {}
+  -- Which CUE KEYS this row draws as a dial rather than as a sprite, taken from the DECLARATION
+  -- (a marker carrying both a `cue` and a dial display). A `blocked` badge whose block is a
+  -- cooldown draws the cooldown; the frozen clock glyph is not drawn over it, because that is
+  -- one statement made twice and only one of the two is telling the time.
+  f.dialCues = {}
+  -- V22's numerals. TWO TABLES, and the split is the same one `f.channels` makes: `numeralPool`
+  -- is keyed `cue/value` and is never cleared, because a frame cannot be destroyed and a numeral's
+  -- text is baked at construction — so the same cue at a different value is a different frame.
+  -- `cueNumerals` is the LIVE map, cue → badge, rebuilt from the pool on every `configure`;
+  -- `paint` looks one up by the cue it stands in for, exactly as it does the sprite badges.
+  f.cueNumerals, f.numeralPool = {}, {}
   pool[cid] = f
   return f
 end
@@ -75,6 +101,15 @@ local function quiet(f)
   -- would leave a count or an arc floating over nothing. Added 2026-08-22 with V16–V19; before
   -- them there was one such display in one catalog and the omission never showed.
   for _, container in pairs(f.channels or {}) do container:Hide() end
+  -- ⚠ V21 NEEDS ITS OWN LINE, because it is not a channel. Its widget is cap's, built outside
+  -- `f.channels`, so the generic teardown above does not reach it — and under the z-stack an
+  -- un-hidden widget is worse than it used to be: a loser nobody took down is invisible until
+  -- the thing above it stops drawing, and then it shows its last state.
+  for _, dial in pairs(f.dials or {}) do dial.frame:Hide() end
+  -- ⚠ AND SO DOES V22, for the same reason: a numeral is cap's own frame, not a channel and not
+  -- a dial, so nothing above reaches it. Under the z-stack a widget nobody took down is invisible
+  -- until whatever covers it stops drawing, and then it shows its last state.
+  for _, numeral in pairs(f.numeralPool or {}) do numeral:Hide() end
 end
 
 --- Arm every graded cue this row declares and has not armed yet. Separate from the aura
@@ -97,10 +132,20 @@ local function configure(f, item, declared)
   -- Frames are kept and reused, but a badge belonging to a marker this catalog no longer
   -- declares would never be reached by `graded()` again and would sit lit forever.
   for _, badge in pairs(f.gradedBadges) do badge:Hide() end
-  -- Part 2.5's cession rule: corner sealed displays claim stack slots 0..n-1 BY DECLARATION,
-  -- in marker order, and the row's cue badges start at slot n. Static on purpose — whether the
-  -- client is showing any of them is sealed, so the stack cannot re-flow around them; a gated
-  -- or refused corner display keeps its claim and leaves a blank step.
+  -- Same reason, and V21's dials are cap's own: a marker this catalog no longer declares would
+  -- keep a dial armed under whatever draws above it.
+  for _, dial in pairs(f.dials) do dial.frame:Hide() end
+  f.basePlans, f.dialStatus, f.dialCues = {}, {}, {}
+  -- Same reason again, one table further: a numeral belonging to a marker this catalog no longer
+  -- declares would sit lit under whatever draws above it. The whole POOL goes down — the live map
+  -- is then rebuilt below from the markers that do declare one, so a cue whose numeral changed
+  -- value or went away cannot draw a stale number.
+  for _, numeral in pairs(f.numeralPool) do numeral:Hide() end
+  f.cueNumerals = {}
+  -- Part 2.5's cession rule: corner sealed displays take the stack's LOWEST levels BY
+  -- DECLARATION, in marker order, and the row's cue badges draw over them. Static on purpose —
+  -- whether the client is showing any of them is sealed, so nothing may re-order on it; a gated
+  -- or refused corner display keeps its place in the z-order.
   local cornerNext = 0
   f.cornerBase = 0
   -- V20's lift is the bottom edge's own static rule: a row that also declares V18's charge
@@ -122,19 +167,65 @@ local function configure(f, item, declared)
     -- sink, so nothing is drawn for it.
     local gradedPlan = ns.Channel.GradedPlan(marker)
     local containerPlan = not gradedPlan and ns.Channel.ContainerPlan(marker, declared)
-    -- This marker's corner claim, whether or not it arms this pass — the claim is the
-    -- declaration's, so a refusal or gate does not move its neighbours.
-    local cornerAt
+    -- This marker's place in the corner's z-order, whether or not it arms this pass — the claim
+    -- is the declaration's, so a refusal or gate does not move its neighbours.
+    local cornerLevel
     local kind = marker.display and marker.display.kind
     if kind and ns.Catalog.CORNER_DISPLAYS[kind] then
-      cornerAt = cornerNext
+      cornerLevel = ns.Paint.CornerLevel(cornerNext, f.cornerBase)
       cornerNext = cornerNext + 1
     end
-    if gradedPlan then
+    -- WHERE A DIAL SITS IN THE Z-STACK. A marker that declares a cue draws that cue AS the dial,
+    -- so it takes the cue's own level and the sprite for it is never shown; one that declares
+    -- none is an ornament and takes a corner level, below the badges. Declaration-driven, like
+    -- every other placement here — whether the client is drawing into it is sealed.
+    local dialLevel = cornerLevel
+    if marker.cue and kind and ns.Catalog.DIAL_DISPLAYS[kind] then
+      local cue = ns.Style.cues[marker.cue] or {}
+      dialLevel = ns.Paint.CueLevel(cue.polarity, cue.rank)
+      f.dialCues[marker.cue] = true
+    end
+    -- V22 · a numeral in place of the cue's sprite. Keyed by CUE, because `paint` drives both
+    -- from `d.badges`, which answers for cue keys. A cue can never be both a dial and a numeral
+    -- — one comes from a display and the other is refused on a display marker — but the two
+    -- tables stay apart because their visibility regimes differ: a dial owns its own through the
+    -- gate and the alpha, a numeral is shown and hidden by the badge loop.
+    if marker.badge and marker.cue then
+      local key = marker.cue .. "/" .. tostring(marker.badge.value)
+      f.numeralPool[key] = f.numeralPool[key]
+        or ns.Paint.Numeral(f, marker.cue, marker.badge.value)
+      f.cueNumerals[marker.cue] = f.numeralPool[key]
+    end
+    -- V21's base-cooldown dial, and it takes neither of the two paths below: it is not a curve
+    -- and it is not an AuraContainer slot. The spell it reads is the BOUND ROW's base, which is
+    -- why the plan takes the row rather than the declared abilities.
+    local basePlan = ns.Channel.BaseCooldownPlan(marker, item.row)
+    if basePlan then
+      f.basePlans[marker.id] = basePlan
+      local dial = f.dials[marker.id]
+      if not dial then
+        dial = ns.Channel.ArmCooldownDial(f, dialLevel)
+        if dial then f.dials[marker.id] = dial end
+      end
+      f.dialStatus[marker.id] = dial and "armed" or "refused"
+    elseif gradedPlan then
       f.gradedPlans[marker.id] = gradedPlan
-      -- One instance per MARKER, so a two-band union stacks rather than overwrites. Built here
-      -- because the marker set is not known at acquire time.
-      f.gradedBadges[marker.id] = f.gradedBadges[marker.id] or ns.Paint.Badge(f, marker.cue)
+      -- A COOLDOWN BAND DRAWS THE COOLDOWN. The band already resolves a duration object and
+      -- spends it on an alpha curve; the same object goes to the arc and the numeral, so the
+      -- badge is the countdown instead of a still clock beside it. The alpha is unchanged and
+      -- still the client's — it is written into the dial's frame rather than a badge's.
+      if gradedPlan.kind == "sealed-cooldown-range" and marker.cue then
+        local dial = f.dials[marker.id]
+        if not dial then
+          dial = ns.Channel.ArmCooldownDial(f, dialLevel)
+          if dial then f.dials[marker.id] = dial end
+        end
+        f.dialStatus[marker.id] = dial and "armed" or "refused"
+      else
+        -- One instance per MARKER, so a two-band union stacks rather than overwrites. Built here
+        -- because the marker set is not known at acquire time.
+        f.gradedBadges[marker.id] = f.gradedBadges[marker.id] or ns.Paint.Badge(f, marker.cue)
+      end
     -- ⚠ A CONTAINER DISPLAY MAY CARRY A READABLE GATE, and until 2026-08-22 one silently armed
     -- nothing: this branch tested `not marker.when`, so a marker with both a `when` and a
     -- `display` fell through to neither path. `Signal` has always computed `verdict.gates` for
@@ -150,7 +241,10 @@ local function configure(f, item, declared)
         container:Show()
         status = "armed"
       elseif not InCombatLockdown() then
-        container, status = ns.Channel.Arm(f, marker, declared, cornerAt, lift)
+        -- ⚠ `dialLevel`, NOT `cornerLevel`. For every corner display the two are the same value;
+        -- they differ only for a container that IS a cue's badge (`sealed-aura-remaining`), which
+        -- has to take that cue's own level rather than sit below the badge stack.
+        container, status = ns.Channel.Arm(f, marker, declared, dialLevel, lift)
         if container then f.channels[key] = container end
       else
         status = "refused"
@@ -255,17 +349,39 @@ local function graded(f, verdict)
     container:SetShown(allowed)
     f.channelStatus[id] = allowed and "armed" or "gated"
   end
-  -- Where a graded badge sits in the flowing stack. It shares its cue's place with the shared
-  -- badge of the same key -- two instances of one cue draw stacked on top of each other, which
-  -- is what the old fixed slots did too. A graded cue nobody else is wearing goes on the end.
-  local order, depth = f.cueOrder or {}, f.cornerBase or 0
-  for _ in pairs(order) do depth = depth + 1 end
+  -- A graded badge takes its cue's LEVEL in the z-stack, exactly as the readable one does — so
+  -- two instances of one cue land on the same level and the OR happens in the compositor, and a
+  -- graded negative draws over a readable positive without cap ever learning whether it did.
+  -- ⚠ It is not resolved into `Treatment`'s winner and cannot be: its visibility is an alpha the
+  -- CLIENT writes from a secret, so there is nothing here to compare.
   for id, armed in pairs(f.graded) do
+    -- THE BAND'S OWN DIAL. Same curve, same alpha, same secret: the value is written into the
+    -- dial's frame and forgotten, never compared. What changed is what the reader sees under it —
+    -- the cooldown the band is waiting on, drawn, instead of a still picture of a clock.
+    local dial = f.dials[id]
+    if dial then
+      if gates[id] == false then
+        dial:Update(false, armed)
+        f.gradedStatus[id] = "gated"
+        f.dialStatus[id] = "gated"
+      else
+        local ok, value = ns.Channel.GradedAlpha(armed)
+        -- An evaluation that threw is a refusal, not a dial left lit at its last remaining.
+        dial:Update(ok and true or false, armed, ok and value or nil)
+        f.gradedStatus[id] = ok and "armed" or "refused"
+        -- ⚠ `dialStatus` stays the BUILD status here and is not written on an evaluation
+        -- failure. It is what the retry loop in `draw` watches, and a per-draw "refused" would
+        -- drag `configure` — the frame-acquiring path — into every frame out of combat. The
+        -- evaluation's own outcome is `gradedStatus`, which retries nothing.
+        if ok then f.dialStatus[id] = "armed" end
+      end
+    end
     local badge = f.gradedBadges[id]
     if badge then
       local plan = f.gradedPlans[id]
-      local at = plan and order[plan.cue] or depth
-      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(f, at))
+      local cue = plan and ns.Style.cues[plan.cue] or {}
+      ns.Paint.LevelAbove(badge.frame, f, ns.Paint.CueLevel(cue.polarity, cue.rank))
+      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(f, 0))
       -- ONE SECRET, MANY READABLE GATES. The curve reads the secret; readable terms beside it
       -- decide whether the client may paint the result at all. `false` is a deliberate
       -- withholding, reported as its own status rather than as a refusal — nothing failed.
@@ -288,8 +404,8 @@ local function graded(f, verdict)
   end
 end
 
---- Compose one row: the cooldown hatch, the scan edge, then a badge per cue — the order
---- render-shelf.md Part 2.5 fixes, bottom to top.
+--- Compose one row: the cooldown hatch, the scan edge, then the ONE badge the z-stack's order
+--- leaves visible — the composition render-shelf.md Part 2.5 fixes, bottom to top.
 local function paint(f, verdict, item)
   local d = ns.Treatment.For(verdict)
   f.border:SetShown(d.scan)
@@ -306,42 +422,65 @@ local function paint(f, verdict, item)
   end
 
   -- The shared badges are the READABLE cues' and only theirs; graded cues own their own frames
-  -- now, so this no longer has to leave a key alone on their behalf. A cue carried by both (a
-  -- readable marker and a band naming one `blocked`) simply draws two stacked instances.
-  -- `d.cues` arrives in shelf-RANK order (Signal), so its index IS the badge's place in the
-  -- stack. Re-anchored every update: the same cue sits on the corner when it is alone and one
-  -- step down when a higher-ranked one is showing beside it.
-  -- Part 2.5's cession rule: slots 0..cornerBase-1 belong to the row's declared corner sealed
-  -- displays, so the readable badges start below them.
-  local base = f.cornerBase or 0
-  local wanted = {}
-  for i, key in ipairs(d.cues or {}) do wanted[key] = i - 1 + base end
+  -- now, so this no longer has to leave a key alone on their behalf. `d.badges` answers for
+  -- EVERY key in the vocabulary, so a badge the row has stopped wearing is taken down here
+  -- rather than left lit behind whatever is drawing over it.
   for key, badge in pairs(f.badges) do
-    local at = wanted[key]
-    if at then
-      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(f, at))
+    -- ⚠ A CUE THIS ROW DRAWS AS A DIAL GETS NO SPRITE. `f.dialCues` is declaration-driven, so the
+    -- sprite is withheld whether or not the dial's own gate is currently open — the same static
+    -- rule the corner cession follows, and for the same reason: what the client is drawing is
+    -- sealed, so nothing may re-order or reappear on it.
+    -- ⚠ AND A CUE THIS ROW DRAWS AS A NUMERAL GETS NO SPRITE EITHER (V22). The number and the
+    -- glyph are the same statement, and the glyph is the one that is not true: `timer_CW_50` is a
+    -- picture of a clock on a row where nothing is being waited out. The sprite is HIDDEN rather
+    -- than merely left unshown — pooled frames outlive their state.
+    local numeral = f.cueNumerals[key]
+    local shown = d.badges[key] and not f.dialCues[key]
+    if shown and numeral then
+      ns.Paint.LevelAbove(numeral.frame, f, ns.Paint.CueLevel(
+        (ns.Style.cues[key] or {}).polarity, (ns.Style.cues[key] or {}).rank))
+      numeral:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(f, 0))
+      numeral.frame:SetAlpha(1)
+      numeral:Show()
+      badge:Hide()
+    elseif shown then
+      local cue = ns.Style.cues[key] or {}
+      ns.Paint.LevelAbove(badge.frame, f, ns.Paint.CueLevel(cue.polarity, cue.rank))
+      badge:SetPoint("TOPRIGHT", f, "TOPRIGHT", ns.Paint.StackOffset(f, 0))
       badge.frame:SetAlpha(1)
       badge:Show()
     else
       badge:Hide()
+      if numeral then numeral:Hide() end
     end
   end
-  f.cueOrder = wanted
 
-  -- V14 rides the POSITIVE cue: shown exactly while one is worn, and centred on the BADGE that
-  -- carries it rather than on the row's corner, so it follows the badge down the stack when a
-  -- higher-ranked cue is showing beside it.
+  -- V14 rides the WINNER, not merely the presence of a positive cue: an occluded badge that
+  -- kept its ring would put a promotion's glow around a red disc, which is the two passes
+  -- arguing on one pixel.
   if f.promo then
-    local host
-    for key, badge in pairs(f.badges or {}) do
-      if wanted[key] and (ns.Style.cues[key] or {}).polarity == "positive" then host = badge end
-    end
+    local host = d.winner
+      and (ns.Style.cues[d.winner] or {}).polarity == "positive"
+      and f.badges[d.winner] or nil
     if host then
       f.promo.frame:ClearAllPoints()
       f.promo.frame:SetPoint("CENTER", host, "CENTER", 0, 0)
     end
     f.promo:SetShown(host ~= nil)
   end
+
+  -- V21 · the base spell's cooldown, on a row whose button is something else. Cap decides only
+  -- whether the readable gate allows the display; the remaining time goes straight into the
+  -- client's two sinks and is never read back.
+  local gates = (verdict or {}).gates or {}
+  for id, plan in pairs(f.basePlans) do
+    local dial = f.dials[id]
+    if dial then
+      dial:Update(gates[id] ~= false, plan)
+      f.dialStatus[id] = gates[id] == false and "gated" or "armed"
+    end
+  end
+
   graded(f, verdict)
   return d
 end
@@ -444,7 +583,18 @@ local function draw(out, bound, edge)
         break
       end
     end
+    -- V21 refuses for the same two reasons a channel does — combat, or a host with no rect to
+    -- measure — so it retries on the same edge.
+    for _, status in pairs(f.dialStatus) do
+      if status == "refused" and not InCombatLockdown() then
+        configure(f, state.itemOf[id], bound.declared)
+        break
+      end
+    end
     for marker, status in pairs(f.channelStatus) do
+      channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
+    end
+    for marker, status in pairs(f.dialStatus) do
       channels[#channels + 1] = id .. ":" .. marker .. ":" .. status
     end
     -- A graded cue can be armed under restriction, so it retries on every draw until it is.

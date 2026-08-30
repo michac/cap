@@ -7,7 +7,7 @@
 local ADDON, ns = ...
 
 ns.LabStyle = {
-  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ ONE entry. `duration_band` (L7) was CLEARED 2026-08-27 — the ledger has the row: its cells had drifted out of agreement with its own `asks`, drawing the RemainingPercent route as though the question were still open after V19 promoted the seconds form. An entry whose cells no longer draw its question is decoration, which Part 7 says to delete rather than repair. `ring_collision` (L9) replaces it and is a LOOK question, not a capability one: every pixel in it is already shipped, so there is nothing to fly — what is unsettled is whether the composition reads as one statement or two.",
+  _comment = "NO AUTHORITY. Part 7. Nothing in `verdicts` or `cues` may name anything in here; capart enforces it. A treatment leaves the lab by being MOVED into Parts 1-6, never by being cited from there. A new idea gets a `lab` key, an `asks`, and a section in Part 7. ⚠ EMPTY, which is a resting state and not a fault — Part 7 says an empty lab means every idea drawn here has been adopted or answered, not that nobody is trying anything. `duration_band` (L7) was CLEARED 2026-08-27: its cells had drifted out of agreement with its own `asks`, drawing the RemainingPercent route as though the question were still open after V19 promoted the seconds form. `ring_collision` (L9) was WITHDRAWN 2026-08-28 without an answer — the ledger has both rows. The collision it drew is still the open design question Part 3 records; what left was the lab entry, not the question.",
   _sheet = {
     direction = "down",
     duty = 0.5,
@@ -15,30 +15,5 @@ ns.LabStyle = {
     texture = "stripes",
     texture_root = "Interface\\AddOns\\CombatAssistPlus\\Media\\",
     tile_px = 128,
-  },
-  ring_collision = {
-    asks = "Part 3 records this as an OPEN DESIGN QUESTION and Part 4 as a settled rule, and they do not agree. A row wearing a negative cue is `scan: true` — the verdicts carrying `blocked` all are — so it draws V13's yellow edge AND cap's half of V11's red hatch, which say opposite things about the same button. Today GEOMETRY keeps them apart rather than order: `hatch.skip.overhang_px` holds the red 2px OUTSIDE the icon rect, so the rings are adjacent at −2 and 0 and never overlap. Part 4 nonetheless asserts that an eliminating mark draws over an including one and that THE FRAME LEVEL SAYS SO — and neither `Paint.Border` nor `Paint.Hatch` calls `SetFrameLevel`, so nothing declares it and construction order decides. Drawn side by side: does the double ring read as ONE statement or two, and if two, is the answer the overlap (drop the overhang and let red cover yellow), suppression (no edge on a ruled-out row), or the adjacency we already have?",
-    cells = {
-      {
-        ability = "Immolation Aura",
-        caption = "<b>control — in the scan, nothing against it.</b> V13's yellow edge alone, at the shipped 2px and alpha. This is what the red has to argue with; rule 2 says an entry needing a comparison draws its own control, since the declared style is no longer one scroll away.",
-        verdict = "open",
-      },
-      {
-        ability = "Immolation Aura",
-        caption = "<b>control — ruled out with NO contradiction.</b> `cd` is the one verdict that is `scan: false`, so V11's cooldown half draws and no edge competes with it. One statement, and the only ruled-out row in the vocabulary that gets to be unambiguous.",
-        verdict = "cd",
-      },
-      {
-        ability = "Immolation Aura",
-        caption = "<b>THE SUBJECT — both at once.</b> Yellow edge (in the scan), red hatch with its own red border (ruled out), and the red `blocked` badge saying why. Three marks, two of which disagree. The badge is the only one carrying a REASON; the other two carry verdicts, and one of those verdicts is wrong about this row.",
-        cues = {
-          "blocked",
-        },
-        verdict = "open",
-      },
-    },
-    draws = "composition",
-    title = "L9 · ring_collision — a row that is IN the scan and RULED OUT at the same time",
   },
 }

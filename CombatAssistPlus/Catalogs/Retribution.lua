@@ -55,14 +55,16 @@ ns.Catalog.Register{
   -- is defined and the rungs below merely test it. For a COMBINED state the tie is broken by
   -- the list itself: it cites the EARLIEST of its markers' rungs — the one the priority list
   -- reaches first, and so the one that actually eliminates this row. That is always the
-  -- citation of one of its single-marker siblings, never a third number. Worked:
-  -- `dt_overcap_and_wrath` cites `generators 1` over `generators 4`; `ds_aoe_only_and_blade`
-  -- and the two `tv_blade_*` states cite `generators 5` over `finishers 1`/`4`, because their
-  -- `resource <= 4` term means `generators` 1's conditional call into `finishers` cannot have
-  -- fired; `tv_aoe_and_empyrean` cites `finishers 1` because both its markers do. This is
-  -- DISPLAY-ONLY and deliberately UNGATED — `catalog_gate_holds` and
-  -- `catalog_gate_display_provenance` read these citations for their own purposes, and a gate
-  -- on the convention itself would freeze an editorial choice.
+  -- citation of one of its single-marker siblings, never a third number. Worked: `dt_overcap`
+  -- cites `generators 1` over `generators 4`; `ds_aoe_only_and_blade` and `tv_awaits_blade`
+  -- cite `generators 5` over `finishers 1`/`4`, because their `resource <= 4` term means
+  -- `generators` 1's conditional call into `finishers` cannot have fired; `tv_empyrean_power`
+  -- and `tv_divine_storm_aoe` cite `finishers 1`, which is where both their markers live. ⚠ The
+  -- four states this example used to name were marker-PAIR states, deleted 2026-08-29 into
+  -- `overlaps`; the citation convention is unchanged and is shown here on the single-marker
+  -- states that survived. This is DISPLAY-ONLY and deliberately UNGATED — `catalog_gate_holds`
+  -- and `catalog_gate_display_provenance` read these citations for their own purposes, and a
+  -- gate on the convention itself would freeze an editorial choice.
   entries = {
     -- 1 · execution_sentence. 1. A PLACED cooldown, not a press-on-cooldown one. FOUR markers,
     -- one cue key, so the AND-only band grammar unions them into a single badge.

@@ -78,13 +78,69 @@ ns.Catalog.Register{
         },
       },
     },
-    -- 2 · grimoire. A CHOICE NODE, not a transform: both ids have their own Essential row and
-    -- exactly one exists on a build, so the second goes in `alt` rather than through R7.
+    -- 2 · grimoire. A CHOICE NODE **and** the base of a transform — two independent facts, both
+    -- true. The choice: both ids have their own Essential row and exactly one exists on a
+    -- build, so the second goes in `alt` rather than through R7. The transform: whichever one
+    -- exists becomes a dispel while its OWN cooldown runs — Imp Lord `1276452` → Singe Magic
+    -- `132411` via override row `1276623`, Fel Ravager `1276467` → Devour Magic `388215` via
+    -- `1276610`, both `EffectAura` 333, misc-form. So this row is never swiped by the
+    -- Grimoire's 120 s: any swipe on it is the dispel's own 15 s. Cue K is what rules the row
+    -- out instead.
     { id = "grimoire", ability = "grimoire",
       markers = {
         { id = "grimoire_awaits_shards",
           cue = "building",
           when = { { "ready", "summon_demonic_tyrant" }, { "resource", "<=", 4 } },
+        },
+        -- Cue K, and it reads this row's OWN identity — `ha_banks_bulwark` and `star_counter`
+        -- are the shape, not cue D, which reads another row's. `overrideSpellID ~= spellID`
+        -- here means the Grimoire's cooldown is running and the button on the icon is the
+        -- dispel it becomes. cap's overlay reads the ROTATION; while the row is the dispel it
+        -- is not the rotation entry the reader is looking for, so `blocked` says *this is not
+        -- your Grimoire* — a statement about identity, never advice to avoid a castable button.
+        { id = "grimoire_shows_dispel",
+          cue = "blocked",
+          when = { { "identity", "grimoire", "transformed" } },
+        },
+        -- V21, and it is the fact cue K leaves out — so it says it in cue K's own badge rather
+        -- than beside it. Cue K rules this row out on identity; it says nothing about WHEN the
+        -- row stops being the dispel, which is what a ramp is waiting for. Since 2026-08-28 the
+        -- two are one statement: this marker declares `blocked`, and a `blocked` badge whose
+        -- block is a cooldown draws that cooldown live — a red radial on the real remaining
+        -- with a white countdown in it — instead of `timer_CW_50`, a picture of a clock face
+        -- frozen at 50 % on a row where the real remaining exists and is reachable. `baseoncd`
+        -- is the readable half — `C_Spell.GetSpellCooldown(baseID).isActive`, NeverSecret and
+        -- plain in restricted combat — and it gates a badge whose arc and numeral the CLIENT
+        -- draws off the base spell's own duration object, which cap hands over and never reads.
+        -- ⚠ The dial reads the BOUND ROW's base id, not this declaration's `spell`: the entry
+        -- covers both halves of a choice node through `alt`, so on a Fel Ravager build the
+        -- declared id is the wrong half. The `ability` here names the subject, not the spell
+        -- that is read.
+        { id = "grimoire_base_cooldown",
+          cue = "blocked",
+          when = { { "baseoncd", "grimoire" } },
+          display = {
+            ability = "grimoire",
+            kind = "sealed-base-cooldown",
+          },
+        },
+        -- The band that makes the Grimoire's own hold legible, and the second display on this
+        -- row to draw as a live dial. While the Grimoire is READY and Tyrant's cooldown is
+        -- inside (3, 10), the client paints `blocked` and the badge is Tyrant's remaining — the
+        -- thing the reader is actually waiting on. ⚠ The `!baseoncd` term is load-bearing and
+        -- not decoration: this row is never swiped (the button on it is the dispel, with its
+        -- own 15 s), so without it the band would arm while the Grimoire itself is on cooldown
+        -- and two dials would claim the same badge. `baseoncd` is the one readable term that
+        -- says which of the two is the live question.
+        { id = "grimoire_awaits_tyrant",
+          cue = "blocked",
+          when = { { "talent", "reign_of_tyranny" }, { "baseoncd", "grimoire", negate = true } },
+          display = {
+            ability = "summon_demonic_tyrant",
+            beyond = 3,
+            kind = "sealed-cooldown-range",
+            within = 10,
+          },
         },
       },
     },
@@ -145,10 +201,19 @@ ns.Catalog.Register{
         -- Wild Imp at all there is no aura, so the client hides the whole button and every sink
         -- on it draws nothing. The `aura` predicate is readable and an unbound row reads
         -- UNKNOWN rather than false, so this stays dark rather than asserting the imps are
-        -- gone.
+        -- gone. ⚠ THE `0` IS CAP'S OWN LITERAL (V22), and this marker's own `when` is what
+        -- licenses it: `!aura(wild_imp)` MEANS zero, so the numeral asserts nothing cap did not
+        -- already establish readably. Everywhere else on this row the count is the client's,
+        -- out of an AuraContainer FontString cap never reads back — which is exactly why the
+        -- zero could not come from there, and why it was drawn as a frozen clock glyph until
+        -- 2026-08-28. The row is one grammar now: 0 → red 1-5 → gold 6+.
         { id = "implosion_no_imps",
           cue = "blocked",
           when = { { "aura", "wild_imp", negate = true } },
+          badge = {
+            kind = "numeral",
+            value = 0,
+          },
         },
         -- Rung 9's readable half GATES its sealed half, and that is the whole of this pair. The
         -- band's upper polarity is cap's positive ink — `count.rgb` is byte-identical to the
@@ -230,7 +295,7 @@ ns.Catalog.Register{
         -- which is none — on the transformed row and three shards on the base one. One marker,
         -- both lives, correct in each.
         { id = "hog_starved",
-          cue = "starved",
+          cue = "building",
           when = { { "affordable", "hand_of_guldan", negate = true } },
         },
         -- The catalog's only sealed band on a spender, and the mirror of the Tyrant hold:
@@ -289,10 +354,39 @@ ns.Catalog.Register{
           when = { { "proc", "demonbolt" }, { "resource", ">=", 4 } },
         },
         -- The first marker in any catalog that reads ANOTHER ROW'S identity. Rung 12 puts an
-        -- armed Infernal Bolt above Demonbolt, and only below three shards.
+        -- armed Infernal Bolt above Demonbolt, and only below three shards. ⚠ It stays
+        -- READABLE-ONLY, and `db_yields_window` beside it carries the clock — the Grimoire
+        -- row's shape (`grimoire_shows_dispel` + `grimoire_base_cooldown`), and the reason is
+        -- that a cue is the thing that HATCHES the row. A display marker never contributes a
+        -- cue (`Signal.markersOf` routes it to `verdict.gates`), so folding the display into
+        -- this marker would have traded cap's readable elimination for a picture: the badge
+        -- would still draw, and the red skip hatch under it would not.
         { id = "db_yields_to_infernal_bolt",
           cue = "blocked",
           when = { { "identity", "shadow_bolt", "transformed" }, { "resource", "<=", 2 } },
+        },
+        -- V21's THIRD SUPPLIER: cue D's badge is the armed Art's own remaining — a red radial
+        -- the client drains off the aura's duration — instead of `timer_CW_50`, a picture of a
+        -- clock face frozen at 50 % beside a hold whose whole content is *how long*. ⚠ ITS
+        -- `when` IS CUE D's, TERM FOR TERM, and both terms are needed: the aura filter alone
+        -- would paint the clock at three or more shards, where the row is not held at all. They
+        -- ride `verdict.gates` and reach the container's own `Shown`; the slot's filter then
+        -- scopes it to the armed Art. ⚠ NO NUMERAL, and that is a limit rather than a choice:
+        -- V21's number comes from `FormatRemainingDuration` on a COOLDOWN object cap holds,
+        -- while the only aura-side text sink (`SetDurationText`) emits fixed strings, never a
+        -- value over remaining seconds. The arc alone is still strictly more than a still
+        -- clock. ⚠ SECOND CONSUMER OF AURA ID `432794`, which is TIER-3-SOURCED and dies
+        -- SILENT: a wrong id matches nothing forever and is indistinguishable from a refusal
+        -- (the cast-id/aura-id trap). `ib_art_clock` already carries an `@verify-ingame` on
+        -- that id; a second consumer doubles what one wrong number costs and does not clear it.
+        -- @verify-ingame
+        { id = "db_yields_window",
+          cue = "blocked",
+          when = { { "identity", "shadow_bolt", "transformed" }, { "resource", "<=", 2 } },
+          display = {
+            ability = "art_mother_of_chaos",
+            kind = "sealed-aura-remaining",
+          },
         },
         -- V18 · how many Cores, as a shape. `max = 4` is Demonic Core's REAL cap — *"Maximum 4
         -- stacks"* (`knowledge/classes/warlock/demonology/ability-inventory.md:555`, Tier 1) —

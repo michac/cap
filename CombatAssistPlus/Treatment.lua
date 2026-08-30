@@ -37,12 +37,49 @@ Treatment.BAR = {
 ---
 --- ⚠ This is Part 0.5's pass 2 drawn: *skip what the swipe ran down, and what wears a red cue.*
 --- Until 2026-08-19 only the first half was visible.
+--- Which of two badges draws on top. Negatives occlude positives; within a polarity the
+--- shelf's rank decides; and the key breaks a tie so two rows wearing the same pair always
+--- resolve the same way.
+local function outranks(a, b)
+  if a.band ~= b.band then return a.band < b.band end
+  if a.rank ~= b.rank then return a.rank < b.rank end
+  return a.key < b.key
+end
+
+--- THE Z-STACK'S WINNER, and the show/hide state of every badge on the row.
+---
+--- The corner is one pixel deep: every badge draws at the same place and only the top of this
+--- order is visible (render-shelf.md Part 2.5, `Paint.Z`). The order is Part 0.5's reading
+--- model rather than the cue rank, because the two failure directions are not symmetric — a
+--- negative hidden behind a positive makes a HELD row look pressable and costs the press.
+---
+--- ⚠ IT ANSWERS FOR EVERY KEY IN THE VOCABULARY, not only the winner. A badge is a pooled frame
+--- that outlives the verdict that raised it, and under a z-stack a loser nobody hid is invisible
+--- right up until it becomes the winner and draws its last state instead of this one. So the map
+--- is total and `Overlay` drives Show/Hide straight off it.
+function Treatment.Stack(cues)
+  local shelf = ns.Style.cues or {}
+  local best
+  for _, key in ipairs(cues or {}) do
+    local cue = shelf[key] or {}
+    -- An undeclared polarity reads NEGATIVE, the same reading the hatch gives it below.
+    local it = { key = key, band = (cue.polarity == "positive") and 1 or 0,
+                 rank = cue.rank or math.huge }
+    if best == nil or outranks(it, best) then best = it end
+  end
+  local badges = {}
+  for key in pairs(shelf) do badges[key] = false end
+  if best then badges[best.key] = true end
+  return best and best.key or nil, badges
+end
+
 function Treatment.For(verdict)
   local cues = (verdict or {}).cues or {}
   local skip = false
   for _, key in ipairs(cues) do
     if (ns.Style.cues[key] or {}).polarity ~= "positive" then skip = true end
   end
+  local winner, badges = Treatment.Stack(cues)
   local scan = (verdict and verdict.member) == true
   -- ⚠ V12 INVERTS THE UNKNOWN, and this branch is the whole of it. A CDM row's hatch is
   -- Blizzard's readiness latch, and an unknown draws bare because absence of a hatch asserts
@@ -60,5 +97,7 @@ function Treatment.For(verdict)
     cues = cues,
     hatch = hatch,
     skip = skip,
+    winner = winner,
+    badges = badges,
   }
 end

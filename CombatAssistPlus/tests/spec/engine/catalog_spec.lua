@@ -334,6 +334,42 @@ describe("engine / catalog", function()
   -- one hand-named roster. `Check` is the schema, so running it over what is actually registered
   -- is the gate — and it covers the next catalog the day it is added, not the day someone
   -- remembers to write it a product spec.
+  -- render-shelf.md V22 · a badge whose face is a NUMBER cap authored. The whole licence is that
+  -- the marker's own `when` fixes the value, so the checks below are about keeping a numeral
+  -- attached to something that draws and to something that established it.
+  it("accepts a numeral badge only on a readable marker that declares a cue", function()
+    local function withBadge(badge, mutate)
+      local broken = H.copy(cat)
+      local m = broken.entries[1].markers[1]
+      m.badge = badge
+      if mutate then mutate(m) end
+      return H.checks(ns.Catalog.Check(broken))
+    end
+    -- The shipped shape passes: a readable marker, a cue, a non-negative whole value.
+    local ok = H.copy(cat)
+    ok.entries[1].markers[1].badge = { kind = "numeral", value = 0 }
+    ok.entries[1].markers[1].cue = ok.entries[1].markers[1].cue or "blocked"
+    assert.same({}, ns.Catalog.Check(ok))
+
+    -- Closed vocabulary, one kind.
+    assert.is_truthy(withBadge({ kind = "glyph", value = 0 }).badge)
+    assert.is_truthy(withBadge("numeral").badge)
+    -- A value that is not a non-negative whole number is not a count of anything.
+    assert.is_truthy(withBadge({ kind = "numeral", value = -1 }).badge)
+    assert.is_truthy(withBadge({ kind = "numeral", value = 1.5 }).badge)
+    assert.is_truthy(withBadge({ kind = "numeral" }).badge)
+    -- No cue: `Overlay.paint` looks a numeral up BY CUE KEY, so one without a cue builds and
+    -- never draws.
+    assert.is_truthy(withBadge({ kind = "numeral", value = 0 },
+      function(m) m.cue = nil end).badge)
+    -- ⚠ AND THE SILENT ONE. `Signal.markersOf` routes a marker carrying a `display` to
+    -- `verdict.gates` and it never contributes a cue — so a numeral on a display marker would
+    -- pass every other gate, arm nothing, and be invisible for the life of the session.
+    assert.is_truthy(withBadge({ kind = "numeral", value = 0 }, function(m)
+      m.display = { kind = "sealed-count-bar", ability = "demonic_core", max = 4 }
+    end).badge)
+  end)
+
   it("validates every catalog the addon actually registers", function()
     local all = ns.Catalog.All()
     assert.is_true(#all > 1, "the registry did not load")

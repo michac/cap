@@ -11,6 +11,9 @@ local function subject(term, world)
   if name == "proc" then return (world.proc or {})[id] end
   if name == "capped" then return (world.capped or {})[id] end
   if name == "affordable" then return (world.affordable or {})[id] end
+  -- Is the row's BASE spell on cooldown while the row is wearing a different one? UNKNOWN on an
+  -- untransformed row, where the question does not arise and `ready` already answers.
+  if name == "baseoncd" then return (world.baseoncd or {})[id] end
   -- Aura up/down, from Track's latch. UNKNOWN until something says otherwise, which is what
   -- keeps a marker dark on a setup where the tracked-buff row was never enabled.
   if name == "aura" then return (world.aura or {})[id] end

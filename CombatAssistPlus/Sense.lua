@@ -129,7 +129,10 @@ local function readResource()
   return have, max
 end
 
---- Readiness out of combat only — `C_Spell.GetSpellCooldown` is secret in combat.
+--- Readiness out of combat only, and the reason is narrower than "the call is secret": the STRUCT
+--- seals PER MEMBER, and `startTime` / `duration` — the two this reads — are the sealed ones in
+--- restricted combat. `isActive` on the same struct is NeverSecret and plain, which is what
+--- `readBaseOnCooldown` below is built on.
 local function readCooldown(spellID)
   if not (C_Spell and C_Spell.GetSpellCooldown) then return nil end
   local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
@@ -139,6 +142,28 @@ local function readCooldown(spellID)
   if type(start) ~= "number" or type(duration) ~= "number" then return nil end
   if duration <= GCD_FLOOR then return true end
   return (start + duration - GetTime()) <= 0
+end
+
+--- Is the row's BASE spell on cooldown, on a row that is currently wearing a different one?
+---
+--- `isActive` is NeverSecret and reads PLAIN in restricted combat — 90 of 90 in-combat samples,
+--- false ×71 / true ×19 (`cooldown-manager.md` §7 `[client 2026-08-09]`) — unlike this same
+--- struct's `startTime` / `duration` / `modRate`, which is why `readCooldown` above is
+--- out-of-combat only. It discriminates, so it is a predicate and not a constant.
+---
+--- ⚠ ONLY ON A TRANSFORMED ROW, and `nil` everywhere else. Untransformed, the base IS the
+--- display: `onCooldown` already answers off the row's own dial, and a second supplier for one
+--- fact is a second thing to disagree. This asks about the cooldown the row is NOT drawing.
+local function readBaseCooldown(info, spellID)
+  if info == nil or info.base == nil or info.override == nil then return nil end
+  if info.override == info.base then return nil end
+  if type(spellID) ~= "number" then return nil end
+  if not (C_Spell and C_Spell.GetSpellCooldown) then return nil end
+  local ok, cd = pcall(C_Spell.GetSpellCooldown, spellID)
+  if not ok then return nil end
+  local active = field(cd, "isActive")
+  if type(active) ~= "boolean" then return nil end
+  return active
 end
 
 --- "Is this row's own cooldown running?" — true / false / nil, where **nil means the dial is
@@ -332,7 +357,7 @@ local function pair(t)
 end
 
 local PREDICATE_ORDER = {
-  "ready", "proc", "identity", "capped", "affordable", "resource", "talent", "aoe",
+  "ready", "proc", "identity", "capped", "affordable", "baseoncd", "resource", "talent", "aoe",
 }
 
 --- The body a line carries. No clock, no game reads, no `pairs()` over anything whose
@@ -440,13 +465,14 @@ end
 
 local function buildReads()
   local proc, identity, capped, affordable, onCooldown, flags = {}, {}, {}, {}, {}, {}
+  local baseoncd = {}
   local byAbility = (state.reads or {}).byAbility or {}
   local infoOf = {}
 
   for _, item in ipairs(state.bound.abilities) do
     local id, needs = item.ability.id, byAbility[item.ability.id] or {}
     local cid = item.row.cooldownID
-    if needs.identity or needs.capped or needs.affordable then
+    if needs.identity or needs.capped or needs.affordable or needs.baseoncd then
       if infoOf[cid] == nil then infoOf[cid] = readInfo(cid) or false end
     end
     local info = infoOf[cid] or nil
@@ -465,6 +491,9 @@ local function buildReads()
     end
     if needs.capped then capped[id] = readCapped(live) end
     if needs.affordable then affordable[id] = readAffordable(live) end
+    -- The row's BASE id, frozen at bind — not `live`, which under a transform IS the spell
+    -- whose cooldown this predicate exists to look past.
+    if needs.baseoncd then baseoncd[id] = readBaseCooldown(info, item.row.base) end
   end
 
   local have, max = readResource()
@@ -475,6 +504,7 @@ local function buildReads()
   if reads.aoe then aoe = ns.Mode.IsAoE() and true or false end
   return {
     proc = proc, identity = identity, capped = capped, affordable = affordable,
+    baseoncd = baseoncd,
     onCooldown = onCooldown, cooldownFlags = flags,
     resource = have, resourceMax = max,
     needsResource = reads.resource,

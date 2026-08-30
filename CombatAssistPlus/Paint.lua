@@ -42,13 +42,75 @@ end
 
 --- Offsets from the host's TOPRIGHT for the Nth badge's own TOPRIGHT, `index` 0-based.
 ---
---- The stack FLOWS down the right edge (render-shelf.md Part 1, V5): index 0 hangs off the
---- corner and each further badge steps one diameter+padding below it. There are no fixed slots,
---- so a badge's position depends on how many lower-ranked cues are showing beside it — which is
---- why this is called on every update rather than once at creation.
+--- Index 0 hangs off the corner and each further index steps one diameter+padding below it.
+---
+--- ⚠ THE LIVE ROW NO LONGER STEPS. Every corner widget on a Cooldown Manager row asks for index
+--- 0 and they are separated by LEVEL instead (`Paint.CueLevel` / `Paint.CornerLevel`, and
+--- render-shelf.md Part 2.5). The flow survives here because the `/cap style` gallery lays its
+--- swatches out with it — a page of primitives has no winner and wants them all visible at once.
 function Paint.StackOffset(host, index)
   local g = Paint.Geometry(host)
   return g.overhang, g.overhang - g.step * (index or 0)
+end
+
+-- ---------------------------------------------------------------------------
+-- The badge Z-STACK — one corner, many levels
+-- ---------------------------------------------------------------------------
+
+--- The stack's bands, as frame levels above the row's own.
+---
+--- ⚠ THE ORDER IS PART 0.5'S READING MODEL, NOT THE CUE RANK. **Negatives occlude positives;
+--- within a polarity rank decides; a sealed corner display loses to every negative and wins
+--- against nothing else.** Ranking by `rank` alone would put gold over red on the one state that
+--- declares both (`havoc/ia_pre_meta_and_skip`), and the two failure directions are not
+--- symmetric: a negative hidden behind a positive makes a HELD row look pressable, which costs
+--- the press; a positive hidden behind a negative makes a PRESSABLE row look held, which costs a
+--- beat. Only the second is survivable, so the negatives are on top.
+---
+--- ⚠ It is also what dissolves the sealed display's problem. Whether the client is drawing into
+--- one is exactly the fact cap may not read — which is why the corner claim is unconditional —
+--- and under this order cap never has to. A row wearing a negative is out, so whatever is
+--- painting underneath is information about a row nobody is pressing; a row wearing none has
+--- nothing over the display at all.
+---
+--- ⚠ **AN ELIMINATING MARK DRAWS OVER THE SCAN EDGE**, and the three lowest bands exist to say so
+--- by declaration rather than by creation order. A scan edge says *this row is in the read* and an
+--- eliminating mark says *this row is out*; a row wearing a negative cue wears BOTH, so the
+--- contradiction is the normal case and something has to arbitrate it. The later word wins.
+---
+--- The rule was already half-applied: `Channel.Arm` lifts a client-drawn sealed hatch to `corner`
+--- for exactly this reason, and cap's OWN hatch — V11's second cause — was left at whatever
+--- creation order happened to give it, which put the yellow edge on top of it in the preview and
+--- under it in the client. `edge` and `skip` are that asymmetry closed (2026-08-29): the two are
+--- one statement apart and neither may be decided by the order two frames were built in.
+Paint.Z = { edge = 1, skip = 2, corner = 3, positive = 14, negative = 24, ranks = 10 }
+
+--- Where the Nth corner sealed display sits, given how many the row DECLARES. First declared is
+--- highest and the last sits on the floor, so declaration order is the z-order tiebreak the
+--- flowing stack used to spend a y-step on.
+function Paint.CornerLevel(index, count)
+  return Paint.Z.corner + math.max(0, (count or 1) - 1 - (index or 0))
+end
+
+--- Where one cue's badge sits. ⚠ A cue with no declared polarity reads NEGATIVE, the same
+--- reading `Treatment.For` gives it for the hatch — the one that can only be stricter.
+function Paint.CueLevel(polarity, rank)
+  local band = (polarity == "positive") and Paint.Z.positive or Paint.Z.negative
+  local r = (type(rank) == "number" and rank >= 1 and rank <= Paint.Z.ranks)
+    and rank or Paint.Z.ranks
+  return band + (Paint.Z.ranks - r)
+end
+
+--- Put `frame` that many levels above `host`, or leave it where it is.
+---
+--- ⚠ `GetFrameLevel` CAN COME BACK SECRET (`Overlay.lift` guards the same read), and the wrong
+--- failure here is loud: resolving an unreadable level to zero would drop the whole badge stack
+--- under the icon it is drawn on. Abstaining leaves the frame at its parent's level, which is
+--- where it sat before any of this existed.
+function Paint.LevelAbove(frame, host, offset)
+  local ok, level = pcall(host.GetFrameLevel, host)
+  if not ok or type(level) ~= "number" or issecretvalue(level) then return false end
+  return pcall(frame.SetFrameLevel, frame, level + offset) and true or false
 end
 
 --- The drawn extent of a host, guarded against a secret or unset width. See `extent` below.
@@ -111,28 +173,44 @@ local function fit(edge, host)
   end
 end
 
---- Four colour strips forming a ring on the host's own rect. Also the subject of Part 7's arrival
---- variants, which ask how the client scales this construction — so it is built once, here.
-local function buildRing(host, thickness)
-  local parts = {}
-  local function part(a, b, horizontal)
-    local t = host:CreateTexture(nil, "OVERLAY")
-    t:SetColorTexture(1, 1, 1, 1)
-    if horizontal then
-      t:SetPoint(a); t:SetPoint(b); t:SetHeight(thickness)
-    else
-      t:SetPoint(a, host, a, 0, -thickness)
-      t:SetPoint(b, host, b, 0, thickness)
-      t:SetWidth(thickness)
-    end
-    t:Hide()
-    parts[#parts + 1] = t
+--- ONE OUTLINE, as a NINE-SLICED TEXTURE on the host's own rect.
+---
+--- ⚠ Not called `ring`: `tokens.ring` was V2's arrival machinery and `style_spec` guards that
+--- name dead. This is a different thing that happens to be the same shape.
+---
+--- It was four `SetColorTexture` strips until 2026-08-29. The strips cost no art, but they are a
+--- DRAWN ARTIFACT in a stack of texture layers, and cap composes by layering textures — which is
+--- what the preview's own outline proved by being clipped to dashes when it sat inside the stripe
+--- sheet's mask. One sheet through the one pipeline gets the tint guard, the byte gate and a
+--- flipbook path back, and it costs one texture per outline instead of four.
+---
+--- ⚠ **THE SLICE IS WHAT KEEPS THE LINE A HAIRLINE.** Stretched whole, a sheet authored against a
+--- 56 px icon draws a fatter, filtered line on any larger one — the same defect frozen escape
+--- sizes had before `Paint.Ratios`, arriving through the art. Sliced, the corners draw at native
+--- size and each edge stretches along one axis only.
+---
+--@unverified `SetTextureSliceMargins` / `SetTextureSliceMode` are a SOURCE READ — the signature
+--@unverified and `Enum.UITextureSliceMode` are Tier 1 (frames-textures-animation.md §7), and
+--@unverified Blizzard's own UI is built on nine-slice borders, but cap has never watched one
+--@unverified draw. If the client refuses, the guard below leaves a STRETCHED ring rather than
+--@unverified none: the line thickens off the nominal icon size, which is wrong but visible,
+--@unverified not a silent blank.
+local function buildOutline(host)
+  local outline = ns.Style.outline
+  if not outline then return {} end
+  local t = host:CreateTexture(nil, "OVERLAY")
+  t:SetTexture(outline.texture_root .. outline.texture .. ".tga", nil, nil, "TRILINEAR")
+  t:SetAllPoints(host)
+  local m = outline.slice_px
+  if t.SetTextureSliceMargins and Enum and Enum.UITextureSliceMode then
+    pcall(t.SetTextureSliceMargins, t, m, m, m, m)
+    pcall(t.SetTextureSliceMode, t, Enum.UITextureSliceMode.Stretched)
   end
-  part("TOPLEFT", "TOPRIGHT", true)
-  part("BOTTOMLEFT", "BOTTOMRIGHT", true)
-  part("TOPLEFT", "BOTTOMLEFT", false)
-  part("TOPRIGHT", "BOTTOMRIGHT", false)
-  return parts
+  t:Hide()
+  -- A LIST OF ONE, because both callers tint and show a set of parts and neither should have to
+  -- know how many there are. `thickness` is the sheet's, baked into the alpha — the argument is
+  -- kept out of the signature rather than accepted and ignored.
+  return { t }
 end
 
 --- ONE border per host, and one treatment: the row is IN THE SCAN or it is not. Switching is
@@ -149,12 +227,20 @@ function Paint.Border(host)
   local edge = CreateFrame("Frame", nil, host)
   edge:SetPoint("CENTER", host, "CENTER", 0, 0)
   fit(edge, host)
+  -- ⚠ DECLARED, not inherited. `Paint.Z.edge` is the level a parented frame would have taken by
+  -- default anyway, so this moves nothing — what it buys is that the eliminating layers above it
+  -- are ABOVE it because the shelf says so, rather than because of the order `acquire` happens to
+  -- build in. An order nobody declared is one nobody can rely on.
+  Paint.LevelAbove(edge, host, Paint.Z.edge)
   edge:Hide()
 
   local ready = ns.Style.ready
-  local parts = buildRing(edge, ready.line_px)
+  local parts = buildOutline(edge)
   for _, t in ipairs(parts) do
-    t:SetColorTexture(ready.rgb[1], ready.rgb[2], ready.rgb[3], ready.alpha)
+    -- The sheet is white with the outline in its alpha, so the hue is a MULTIPLY at draw time
+    -- and none is baked in — the same contract V11's stripe sheet has.
+    t:SetVertexColor(ready.rgb[1], ready.rgb[2], ready.rgb[3])
+    t:SetAlpha(ready.alpha)
     t:SetBlendMode(ready.blend or "BLEND")
     t:Show()
   end
@@ -194,19 +280,41 @@ end
 --- V11's hatch. `look` overrides colour and phase without touching the GEOMETRY, which is
 --- shared: one sheet, one pitch, two verdicts. Blizzard's "on cooldown" uses the defaults;
 --- cap's own "ruled out" passes `ns.Style.hatch.skip`.
-function Paint.Hatch(host, inset, look)
+---
+--- ⚠ `level` LIFTS THE WHOLE LAYER ONTO ITS OWN FRAME, and only cap's half asks for one. Draw
+--- order across frames is decided by frame level and not by draw layer, so a texture on `host`
+--- can never beat a child frame however high its layer — and V13's scan edge is a child frame.
+--- Passing `Paint.Z.skip` is what puts the red over the yellow (render-shelf.md Part 2.5).
+---
+--- Blizzard's half passes nothing and stays a texture on the host, deliberately: `cd` is the only
+--- verdict carrying `hatch`, and it is `scan: false`, so that half and the scan edge CANNOT
+--- co-occur. There is no order between them to declare, and giving it a level would be inventing
+--- a relationship to fix a contradiction it never has.
+function Paint.Hatch(host, inset, look, level)
   local h = ns.Style.hatch
   if not h then return nil end
   look = look or h
   inset = inset or 0
 
   -- A NEGATIVE inset is an overhang. cap's half of V11 is drawn `overhang_px` OUTSIDE the icon
-  -- rect so its red covers V13's yellow scan edge: a ruled-out row should not also be wearing
-  -- the "in the scan" line, and the yellow reads louder than the stripes because it is a hard
-  -- line against a wash.
+  -- rect, so its red ring sits AROUND V13's yellow scan edge rather than replacing it — the two
+  -- are adjacent bands, red at -2 and yellow at 0. What decides the pixels they share is the
+  -- level, not the geometry: `level` is what stops the yellow drawing on top of the stripes.
+  -- The icon rect, kept before the overhang is applied: the STRIPES overhang, the OUTLINE does
+  -- not — it has to land exactly where V13's scan edge lands.
+  local base = inset
   inset = inset - (look.overhang_px or 0)
 
-  local t = host:CreateTexture(nil, "ARTWORK")
+  -- The layer everything below is parented to. Without a `level` that is the host itself, which
+  -- is exactly what it has always been.
+  local layer = host
+  if level then
+    layer = CreateFrame("Frame", nil, host)
+    layer:SetAllPoints(host)
+    Paint.LevelAbove(layer, host, level)
+  end
+
+  local t = layer:CreateTexture(nil, "ARTWORK")
   t:SetTexture(ns.Style.hatch.texture_root .. h.texture .. ".tga", "REPEAT", "REPEAT",
     "TRILINEAR")
   t:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -inset)
@@ -215,17 +323,22 @@ function Paint.Hatch(host, inset, look)
   t:SetAlpha(look.alpha)
   t:Hide()
 
-  -- Its own border, at V13's weight, on a frame sized to the overhung rect. Only cap's half
-  -- carries one: Blizzard's cause already has the swipe underneath it saying the same thing.
+  -- ⚠ ITS OWN OUTLINE, ON THE ICON RECT — `base`, not the overhung rect the stripes use. It is
+  -- the SAME ring sheet at the SAME place as V13's scan edge, so the red covers the yellow
+  -- exactly rather than ringing it: one outline, one statement, and a ruled-out row does not also
+  -- wear the "in the scan" line. What still overhangs is the STRIPES, which is the part that
+  -- reads as the hatch spilling past the button. Only cap's half carries an outline at all —
+  -- Blizzard's cause has the swipe underneath it saying the same thing.
   local edgeFrame, edgeParts
   local edge = look.border
   if edge then
-    edgeFrame = CreateFrame("Frame", nil, host)
-    edgeFrame:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -inset)
-    edgeFrame:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -inset, inset)
-    edgeParts = buildRing(edgeFrame, edge.line_px)
+    edgeFrame = CreateFrame("Frame", nil, layer)
+    edgeFrame:SetPoint("TOPLEFT", host, "TOPLEFT", base, -base)
+    edgeFrame:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -base, base)
+    edgeParts = buildOutline(edgeFrame)
     for _, part in ipairs(edgeParts) do
-      part:SetColorTexture(edge.rgb[1], edge.rgb[2], edge.rgb[3], edge.alpha)
+      part:SetVertexColor(edge.rgb[1], edge.rgb[2], edge.rgb[3])
+      part:SetAlpha(edge.alpha)
       part:Show()
     end
     edgeFrame:Hide()
@@ -355,6 +468,8 @@ function Paint.Badge(host, key)
   slot:SetSize(g.diameter, g.diameter)
   -- Anchored at the corner to start; Overlay re-anchors on every update, because the position
   -- is a function of the whole shown set rather than of this cue alone.
+  -- Anchored at the corner, which is where every badge draws; `Overlay` re-anchors and levels
+  -- it on each update, because which one is VISIBLE is a function of the whole worn set.
   slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(host, 0))
   slot:Hide()
 
@@ -403,9 +518,9 @@ function Paint.Badge(host, key)
     if anim and not anim:IsPlaying() then anim:Play() end
   end
 
-  --- Move the badge to its place in the flowing stack. There are no fixed slots — a cue's
-  --- position is a function of how many lower-ranked cues are showing beside it — so Overlay
-  --- calls this on every update rather than once at creation.
+  --- Move the badge to the corner every badge shares. There are no slots and no flow: what
+  --- separates two badges is frame level (`Paint.CueLevel`), and Overlay writes both on every
+  --- update rather than once at creation.
   ---
   --- ⚠ IT MUST EXIST. `Paint.Badge` returns a plain TABLE, not a frame, so a method Overlay
   --- calls and Paint does not define is a nil call that takes the whole `paint()` down — every
@@ -425,6 +540,66 @@ function Paint.Badge(host, key)
     if halo then halo:Stop() end
     if anim then anim:Stop() end
   end
+
+  return badge
+end
+
+--- A NUMERAL badge: the same plate, with a number cap authored where the glyph would be.
+---
+--- ⚠ THE NUMBER IS CAP'S OWN LITERAL, and that is the whole licence for it. Everywhere else in
+--- this project a count is the CLIENT's — a FontString in an AuraContainer slot whose text
+--- Blizzard writes from a rule cap handed over (V16) — and cap never learns it. This one is a
+--- constant a readable term has already established: `!aura(wild_imp)` means zero imps, so the
+--- marker may say `0` without reading anything. A numeral whose value is not fixed by the
+--- marker's own `when` would be cap asserting a count it does not hold, which is the one thing
+--- this must never become.
+---
+--- ⚠ NO PLATE-AND-GLYPH VARIANT AND NO HALO. It stands in for a badge that a cue already ranks,
+--- so it takes that cue's hue and level from the caller and adds nothing of its own. It returns
+--- `Paint.Badge`'s interface — `frame` / `Show` / `Hide` / `SetPoint` — because `Overlay.paint`
+--- drives the two through one loop and a missing method there takes the whole row down.
+function Paint.Numeral(host, key, value)
+  local cue = ns.Style.cues[key]
+  if not (cue and type(value) == "number") then return nil end
+  local b, c, g = ns.Style.badges, ns.Style.count, Paint.Geometry(host)
+  -- The NEGATIVE count hue, which is byte-identical to `badges.rgb`: a zero and a one are the
+  -- same statement about the same row, and they must not be two reds. A positive numeral would
+  -- take `count.rgb`, the gold V16 recolours to — no cue asks for one yet.
+  local tint = (cue.polarity == "positive") and c.rgb or c.low_rgb
+
+  local slot = CreateFrame("Frame", nil, host)
+  slot:SetSize(g.diameter, g.diameter)
+  slot:SetPoint("TOPRIGHT", host, "TOPRIGHT", Paint.StackOffset(host, 0))
+  slot:Hide()
+
+  local plate = slot:CreateTexture(nil, "OVERLAY", nil, 6)
+  setArt(plate, b.plate.texture)
+  plate:SetVertexColor(b.plate.rgb[1], b.plate.rgb[2], b.plate.rgb[3])
+  plate:SetAlpha(b.plate.alpha)
+  plate:SetSize(g.plate, g.plate)
+  plate:SetPoint("CENTER")
+
+  local text = slot:CreateFontString(nil, "OVERLAY")
+  if not text:SetFont("Fonts\\" .. c.font, c.size, c.outline) then
+    text:SetFontObject("NumberFontNormal")
+  end
+  text:SetPoint("CENTER")
+  text:SetText(tostring(value))
+
+  local badge = { frame = slot, cue = key, plate = plate, text = text }
+
+  function badge:Show()
+    text:SetTextColor(tint[1], tint[2], tint[3])
+    text:SetAlpha(1)
+    slot:Show()
+  end
+
+  function badge:SetPoint(point, relativeTo, relativePoint, x, y)
+    slot:ClearAllPoints()
+    slot:SetPoint(point, relativeTo, relativePoint, x, y)
+  end
+
+  function badge:Hide() slot:Hide() end
 
   return badge
 end

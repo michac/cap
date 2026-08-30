@@ -222,9 +222,10 @@ local function relayout(plan)
   end
 end
 
---- Compose one icon: the art, the hatch, the scan edge, then a badge per cue — the same order
---- `Overlay` composes a CDM row in, bottom to top. `d.cues` arrives in shelf-RANK order, so its
---- index IS the badge's place in the flowing stack.
+--- Compose one icon: the art, the hatch, the scan edge, then the badge — the same order
+--- `Overlay` composes a CDM row in, bottom to top, and the same Z-STACK: the corner is one
+--- badge deep and `d.badges` says which one that is. A virtual row draws in cap's own panel
+--- rather than on a Cooldown Manager item, and it must not read differently for it.
 local function paint(icon, desc)
   local d = desc.draw or {}
   local texture = artOf(Panel.Face(desc.spellID))
@@ -236,12 +237,12 @@ local function paint(icon, desc)
   if icon.hatch then icon.hatch:SetShown(d.hatch == true) end
   if icon.skip then icon.skip:SetShown(d.skip == true) end
 
-  local wanted = {}
-  for i, key in ipairs(d.cues or {}) do wanted[key] = i - 1 end
+  local badges = d.badges or {}
   for key, badge in pairs(icon.badges) do
-    local at = wanted[key]
-    if at then
-      badge:SetPoint("TOPRIGHT", icon.frame, "TOPRIGHT", ns.Paint.StackOffset(icon.frame, at))
+    if badges[key] then
+      local cue = ns.Style.cues[key] or {}
+      ns.Paint.LevelAbove(badge.frame, icon.frame, ns.Paint.CueLevel(cue.polarity, cue.rank))
+      badge:SetPoint("TOPRIGHT", icon.frame, "TOPRIGHT", ns.Paint.StackOffset(icon.frame, 0))
       badge.frame:SetAlpha(1)
       badge:Show()
     else

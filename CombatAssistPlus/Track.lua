@@ -196,7 +196,12 @@ end
 -- ⚠ `capped` deliberately bypasses the charge ledger and is read live every tick. A napkin
 -- count cannot survive Immolation Aura's demon-form flip (the override id is not in the frozen
 -- spellIDs union, so a Consuming Fire cast would never debit) and `isActive` needs no ledger.
-local COPIED = { "proc", "identity", "capped", "affordable" }
+--
+-- ⚠ `baseoncd` IS COPIED AND MUST NEVER BE OBSERVED. `onCooldown` is folded into `self.ready`
+-- as `not onCooldown` (`Observe` above), and this is a fact about a DIFFERENT spell than the one
+-- the row is drawing — inverting it into `ready` would corrupt every readiness answer on the row
+-- for the whole time the transform is up, which is exactly when the row matters.
+local COPIED = { "proc", "identity", "capped", "affordable", "baseoncd" }
 Track.COPIED = COPIED
 
 function Instance:World(_, reads)

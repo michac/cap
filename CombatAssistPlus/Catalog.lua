@@ -22,6 +22,11 @@ local PREDICATES = {
   -- binds to a Cooldown Manager tracked-buff/bar row and the latch rides that row's alert edges.
   -- Unbound row (the player never enabled it) => no cid => UNKNOWN, never false. See Track.
   aura = { arity = 1, subject = true },
+  -- Is the subject's OWN cooldown running while its row is displaying a different spell? The
+  -- Cooldown Manager's dial resolves the display identity first, so a transformed row's swipe
+  -- belongs to the replacement and the base's cooldown is drawn nowhere. UNKNOWN whenever the
+  -- row is not transformed — the question only exists there. See Sense's `readBaseCooldown`.
+  baseoncd = { arity = 1, subject = true },
   aoe = { arity = 0 },
 }
 Catalog.PREDICATES = PREDICATES
@@ -35,6 +40,8 @@ local DISPLAYS = {
   ["sealed-proc-bar"] = true,
   ["sealed-power-percent"] = true,
   ["sealed-cooldown-range"] = true,
+  ["sealed-base-cooldown"] = true,
+  ["sealed-aura-remaining"] = true,
 }
 Catalog.DISPLAYS = DISPLAYS
 
@@ -45,8 +52,43 @@ Catalog.DISPLAYS = DISPLAYS
 local CORNER_DISPLAYS = {
   ["sealed-count-bands"] = true,
   ["sealed-pandemic"] = true,
+  ["sealed-base-cooldown"] = true,
 }
 Catalog.CORNER_DISPLAYS = CORNER_DISPLAYS
+
+-- The kinds that draw as a LIVE COOLDOWN DIAL (render-shelf.md V21) rather than as a cue sprite:
+-- a red radial on a real remaining time with a white countdown in it. Both resolve a cooldown and
+-- hand the client's own duration object to a StatusBar; they differ only in WHOSE cooldown, which
+-- is `Channel.lua`'s business and not this table's.
+--
+-- ⚠ A marker declaring one of these AND a `cue` draws that cue AS the dial, at the cue's own
+-- frame level, and `Overlay` does not show the sprite for it — `timer_CW_50` is a clock face
+-- frozen at 50 %, and drawing it over a clock that is telling the time is one statement made
+-- twice with only one of them true.
+local DIAL_DISPLAYS = {
+  ["sealed-base-cooldown"] = true,
+  ["sealed-cooldown-range"] = true,
+  -- ...and an AURA's remaining, which is the third supplier of the same picture. It differs from
+  -- the two above in resolving no cooldown at all: the slot filters to the aura, the client
+  -- drains the bar off that aura's own duration object, and cap holds neither. It is a CONTAINER,
+  -- so it is armed through `Channel.Arm` rather than as one of `Overlay`'s own dials — the only
+  -- thing this table decides for it is that it takes the cue's level and the sprite stays down.
+  ["sealed-aura-remaining"] = true,
+}
+Catalog.DIAL_DISPLAYS = DIAL_DISPLAYS
+
+-- What a marker's `badge` may be: a badge whose face is a NUMBER cap authored, drawn in place of
+-- the cue's sprite (render-shelf.md V22). One kind, one shape.
+--
+-- ⚠ THE NUMBER IS CAP'S OWN LITERAL AND ITS MARKER'S `when` IS WHAT MAKES IT TRUE. Everywhere
+-- else a count is the client's — a FontString in an AuraContainer slot cap never reads back —
+-- and this is legal only because a readable term has already fixed the value: `!aura(wild_imp)`
+-- means zero. A numeral whose marker does not establish it would be cap asserting a count it
+-- does not hold.
+local BADGES = {
+  numeral = true,
+}
+Catalog.BADGES = BADGES
 
 -- What ONE band of a `sealed-count-bands` display draws, as meaning rather than as pixels. The
 -- shelf (render-shelf.md V16/V17) owns the art each of these resolves to; a catalog picks from
@@ -282,6 +324,31 @@ function Catalog.Check(cat)
       if readable and (type(marker.when) ~= "table" or #marker.when == 0) then
         fail("shape", entry.id, "marker " .. tostring(marker.id) .. " has no readable condition")
       end
+      -- V22 · the numeral badge. Three checks, and the last two are the silent failures.
+      if marker.badge ~= nil then
+        local badge = marker.badge
+        if type(badge) ~= "table" or not BADGES[badge.kind] then
+          fail("badge", entry.id, "marker " .. tostring(marker.id) .. " names unsupported badge "
+            .. tostring(type(badge) == "table" and badge.kind or nil))
+        elseif type(badge.value) ~= "number" or badge.value < 0
+            or badge.value ~= math.floor(badge.value) then
+          fail("badge", entry.id, "marker " .. tostring(marker.id)
+            .. " needs a non-negative whole badge value")
+        end
+        -- The numeral stands in for a CUE's badge; one without a cue would build and never draw,
+        -- because `Overlay.paint` looks a numeral up by cue key off `d.badges`.
+        if marker.cue == nil then
+          fail("badge", entry.id, "marker " .. tostring(marker.id) .. " carries a badge with no cue")
+        end
+        -- ⚠ AND THIS IS THE ONE THAT FAILS SILENTLY WITHOUT IT. `Signal.markersOf` routes a
+        -- marker carrying a `display` to `verdict.gates` and it NEVER contributes a cue — so a
+        -- numeral declared on a display marker would pass every other gate, arm nothing, and be
+        -- invisible for the life of the session with nothing anywhere saying why.
+        if sealed then
+          fail("badge", entry.id, "marker " .. tostring(marker.id) .. " carries a badge AND a "
+            .. "display; a display marker contributes no cue, so the numeral would never draw")
+        end
+      end
       if sealed then
         local display = marker.display
         if type(display) ~= "table" or not DISPLAYS[display.kind] then
@@ -425,6 +492,30 @@ function Catalog.Check(cat)
           end
           if marker.cue == nil then
             fail("cue", entry.id, "marker " .. tostring(marker.id) .. " is a graded display with no cue")
+          end
+        elseif display.kind == "sealed-base-cooldown" then
+          -- V21. The subject names the row whose own cooldown this draws while the row is
+          -- wearing something else, so it must be declared — but the id the dial actually reads
+          -- is the BOUND ROW's `base`, not this declaration's `spell`: an entry covering both
+          -- halves of a choice node binds through `alt` and the declared id is then the wrong
+          -- half (`Channel.BaseCooldownPlan`). Nothing else to check: the display carries no
+          -- numbers of its own — the remaining time is the client's and cap never learns it.
+          if not abilities[display.ability] then
+            fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
+              .. tostring(display.ability))
+          end
+        elseif display.kind == "sealed-aura-remaining" then
+          -- V21's third supplier: an aura's remaining, in the badge's place. The subject must be
+          -- a declared ability, and the marker MUST declare a cue — the dial stands in for that
+          -- cue's badge, and one without a cue would be an ornament wearing the badge's corner.
+          -- No numbers of its own: the remaining is the client's and cap never learns it.
+          if not abilities[display.ability] then
+            fail("subject", entry.id, "marker " .. tostring(marker.id) .. " names undeclared ability "
+              .. tostring(display.ability))
+          end
+          if marker.cue == nil then
+            fail("cue", entry.id, "marker " .. tostring(marker.id)
+              .. " is a sealed-aura-remaining display with no cue; it stands in for a cue's badge")
           end
         elseif display.kind == "sealed-proc-bar" then
           -- V20: the proc's remaining lifetime as a bar above the charge bar. The subject must

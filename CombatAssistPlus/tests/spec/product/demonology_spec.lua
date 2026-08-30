@@ -90,6 +90,49 @@ describe("product characterization / Demonology", function()
       assert.same({}, blind.markers)
     end)
 
+  it("draws the zero it holds, rather than a clock it does not", function()
+    -- render-shelf.md V22. `!aura(wild_imp)` MEANS zero imps, so the numeral is a constant this
+    -- marker's own condition established — not a count cap read, which it could not: with no
+    -- aura the client shows no button and every sealed sink on the row is subjectless.
+    local m = marker("implosion_no_imps")
+    assert.equal("blocked", m.cue)
+    assert.equal("numeral", m.badge.kind)
+    assert.equal(0, m.badge.value)
+    assert.is_nil(m.display, "a display marker contributes no cue; the numeral would never draw")
+    -- ...and it still ELIMINATES, which is what the latch was for.
+    local out = ns.Signal.Evaluate(resolved,
+      H.world{ ready = H.map(true), aura = H.map(false) }).byEntry.implosion
+    assert.is_true(skips(out))
+  end)
+
+  it("draws the Infernal Bolt window on cue D WITHOUT giving up cue D's hatch", function()
+    -- The Grimoire row's shape: a readable marker carries the cue (and so the red skip hatch),
+    -- and a second marker beside it carries the display that becomes the badge. Folding the
+    -- display into the readable one would have traded the elimination for a picture — a marker
+    -- with a `display` lands in `verdict.gates` and contributes no cue at all.
+    local hold, window = marker("db_yields_to_infernal_bolt"), marker("db_yields_window")
+    assert.is_nil(hold.display)
+    assert.equal("blocked", hold.cue)
+    assert.equal("blocked", window.cue)
+    assert.equal("sealed-aura-remaining", window.display.kind)
+    assert.equal("art_mother_of_chaos", window.display.ability)
+    -- ⚠ THE WINDOW CARRIES CUE D's TERMS VERBATIM. The aura filter alone would paint the clock at
+    -- three or more shards, where the row is not held at all.
+    assert.same(hold.when, window.when)
+
+    local function db(shards, form)
+      return ns.Signal.Evaluate(resolved,
+        H.world{ ready = H.map(true), proc = H.map(true), resource = shards,
+                 identity = H.map("base", { shadow_bolt = form }) }).byEntry.demonbolt
+    end
+    -- Held: the cue is reported as a marker, and the display's gate is open.
+    assert.same({ "db_yields_to_infernal_bolt" }, db(2, "transformed").markers)
+    assert.is_true(db(2, "transformed").gates.db_yields_window)
+    -- Not held: the gate shuts, so the container is hidden and no clock is drawn on a free press.
+    assert.is_false(db(3, "transformed").gates.db_yields_window)
+    assert.is_false(db(2, "base").gates.db_yields_window)
+  end)
+
   it("reads ANOTHER row's identity to yield to an armed Infernal Bolt", function()
     local function db(shards, form)
       return ns.Signal.Evaluate(resolved,
@@ -213,6 +256,44 @@ describe("product characterization / Demonology", function()
       end
     end
   end)
+
+  it("draws the Grimoire's hold as the cooldown it is held on, not as a still clock", function()
+    -- render-shelf V21 / catalog.md's 2026-08-28 changelog. Cue K rules the row out on identity;
+    -- V21 says when it comes back — and since they are the same fact, they are one badge. The
+    -- `cue` on a display marker is what says WHICH badge the dial stands in for; it never becomes
+    -- a Lua cue of its own, because `Signal` routes a marker with a display to `gates`.
+    local base = marker("grimoire_base_cooldown")
+    assert.equal("sealed-base-cooldown", base.display.kind)
+    assert.equal("blocked", base.cue)
+    assert.is_true(ns.Catalog.DIAL_DISPLAYS[base.display.kind])
+    local out = ns.Signal.Evaluate(resolved,
+      H.world{ ready = H.map(true), baseoncd = H.map(true) }).byEntry.grimoire
+    assert.is_true(out.gates.grimoire_base_cooldown)
+    for _, id in ipairs(out.markers) do
+      assert.not_equal("grimoire_base_cooldown", id)
+    end
+  end)
+
+  it("keeps the Grimoire's two dials off each other, on the one readable term that separates them",
+    function()
+      -- This row is NEVER swiped — the button on it is the dispel, with its own 15 s — so nothing
+      -- but `!baseoncd` keeps the Tyrant band off a Grimoire that is itself on cooldown, and two
+      -- dials would then claim one badge. The exclusion is the whole reason the term is there.
+      local band = marker("grimoire_awaits_tyrant")
+      assert.equal("sealed-cooldown-range", band.display.kind)
+      assert.equal("summon_demonic_tyrant", band.display.ability)
+      assert.is_true(band.display.beyond < band.display.within)
+      local onCD = ns.Signal.Evaluate(resolved,
+        H.world{ ready = H.map(true), talent = H.map(true),
+                 baseoncd = H.map(true) }).byEntry.grimoire
+      assert.is_false(onCD.gates.grimoire_awaits_tyrant)
+      assert.is_true(onCD.gates.grimoire_base_cooldown)
+      local up = ns.Signal.Evaluate(resolved,
+        H.world{ ready = H.map(true), talent = H.map(true),
+                 baseoncd = H.map(false) }).byEntry.grimoire
+      assert.is_true(up.gates.grimoire_awaits_tyrant)
+      assert.is_false(up.gates.grimoire_base_cooldown)
+    end)
 
   it("binds on base spell ids only, leaving both transforms to the row union", function()
     for _, ability in ipairs(cat.abilities) do

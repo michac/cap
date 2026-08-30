@@ -24,12 +24,26 @@ describe("engine / style", function()
     assert.is_string(S.badges.plate.texture)
     assert.is_string(S.badges.halo_texture)
     assert.equal(3, #S.ready.rgb)
-    assert.is_number(S.ready.line_px)
     assert.is_number(S.ready.alpha)
+    -- ⚠ THE OUTLINE WIDTH LIVES IN ONE PLACE, and that is what makes "cap's ruled-out outline
+    -- exactly overlays the scan edge" true by construction rather than by two numbers agreeing.
+    -- It left `ready` on 2026-08-29 when both outlines became one nine-sliced sheet.
+    assert.is_nil(S.ready.line_px, "the outline width moved to ns.Style.outline")
+    assert.is_number(S.outline.line_px)
+    assert.is_number(S.outline.slice_px)
+    assert.is_true(S.outline.slice_px > S.outline.line_px,
+      "a nine-slice corner region must contain the whole corner")
+    assert.is_string(S.outline.texture)
+    assert.is_string(S.outline.texture_root)
     for key, cue in pairs(S.cues) do
       assert.is_number(cue.rank, key .. " has no rank")
-      assert.is_number(cue.duration_s, key .. " has no duration")
       assert.is_true(#cue.frames > 0, key .. " names no frames")
+      -- A ONE-FRAME cue is one picture, held: `Paint.Badge` builds no FlipBook for it, so there
+      -- is no duration to declare and declaring one is a number nothing reads. Only a flipbook
+      -- needs the pair.
+      if #cue.frames > 1 then
+        assert.is_number(cue.duration_s, key .. " animates but has no duration")
+      end
       if cue.glow then
         assert.is_number(cue.glow.hz)
         assert.is_number(cue.glow.alpha_min)
@@ -124,6 +138,9 @@ describe("engine / style", function()
                             "RingBand", "RingTexture", "Ring", "Flash", "Ghost", "Halo" }) do
       assert.is_nil(ns.Paint[gone], "Paint." .. gone .. " outlived the treatment that used it")
     end
+    -- ⚠ `ring` STAYS DEAD even though a sheet with the same shape came back on 2026-08-29. That
+    -- one is `ns.Style.outline`: a static nine-sliced outline, no frames and no snap. Reusing the
+    -- retired name would have silently defeated this guard, which is how it was caught.
     for _, gone in ipairs({ "ring", "motion", "arrival" }) do
       assert.is_nil(ns.Style[gone], "ns.Style." .. gone .. " outlived its last reader")
     end

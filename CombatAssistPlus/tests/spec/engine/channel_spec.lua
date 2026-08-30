@@ -9,8 +9,8 @@ local STYLE = {
   texture_root = "BADGES\\",
   hatch_root = "MEDIA\\",
   hatch = "stripes",
-  plate = "plate", plate_offset_px = { 20, -18 },
-  mark = "glyph", mark_offset_px = { 20, -18 },
+  plate = "plate",
+  mark = "glyph",
   rgb = { 1, 0.5, 0 },
   low_rgb = { 1, 0, 0 },
 }
