@@ -515,10 +515,17 @@ local function resizeAnchor(frame)
   local f = ensureAnchor()
   local w, h = gridSize()
   local scale = rowScale(frame)
-  local changed = f:GetWidth() ~= w or f:GetHeight() ~= h or f:GetScale() ~= scale
-  if not changed then return false end
+  local rescaled = f:GetScale() ~= scale
+  if not (rescaled or f:GetWidth() ~= w or f:GetHeight() ~= h) then return false end
   f:SetSize(w, h)
   f:SetScale(scale)
+  -- ⚠ A RESCALE MOVES THE PANEL UNLESS THE POSITION IS RE-APPLIED. The saved offset is stored
+  -- in UIParent units at scale 1.0 and written back DIVIDED by the panel's own scale
+  -- (`Place.Apply`), so the number already sitting in the panel's SetPoint was computed
+  -- against the OLD scale and means a different screen position under the new one. The armed
+  -- path re-applies a line later and hid this; the Edit Mode settings callback fires whether
+  -- or not cap is ordering, and there it would have jumped.
+  if rescaled and P.place then P.place:Apply() end
   return true
 end
 
