@@ -260,11 +260,10 @@ ns.Style = {
     tint = "shelf",
   },
   panel = {
-    _comment = "V12's virtual row: the geometry of cap's OWN icon strip, for presses the Cooldown Manager carries no frame for. It ships to Style.lua and Panel.lua draws from it — icon_px sizes each icon, gap_px separates them, and anchor/x/y place the strip against UIParent while grow says which way it fills. ⚠ `anchor` positions the WHOLE strip; the edge the icons hang off is derived from `grow`, so a centred anchor stays centred as the roster grows.",
+    _comment = "V12's virtual row: the geometry of cap's OWN icon strip, for presses the Cooldown Manager carries no frame for. It ships to Style.lua and Panel.lua draws from it — gap_px separates the icons and anchor/x/y place the strip against UIParent while grow says which way it fills. ⚠ THERE IS NO `icon_px` HERE ANY MORE, deliberately: the icon size is `row.icon_px`, the CDM row's. A virtual row takes part in the SAME left-to-right scan as the Cooldown Manager's rows, and a scan is a row of peers — one peer at a different size is a signal nothing in the cue vocabulary authorised. The two were authored separately and both read 50, so the mismatch was invisible until `row.icon_px` became the one knob a player turns; removed 2026-08-31 rather than kept in sync by hand. ⚠ `anchor` positions the WHOLE strip; the edge the icons hang off is derived from `grow`, so a centred anchor stays centred as the roster grows.",
     anchor = "BOTTOM",
     gap_px = 6,
     grow = "RIGHT",
-    icon_px = 50,
     x = 0,
     y = 190,
   },
@@ -305,12 +304,14 @@ ns.Style = {
     rows = 2,
   },
   surfaces = {
+    _comment_host_nominal_px = "THE CLIENT'S fallback icon size, in the HOST's own coordinate space — what a painter uses when a host is absent or its width reads secret. Deliberately NOT `icon_px` above, which is the PREVIEW's authoring nominal and is 56. Splitting them on 2026-08-31 closed a 12% oversize: Blizzard's item template is 50x50 (CooldownViewer.xml, CooldownViewerEssentialItemTemplate) and `GetWidth` on an item frame reads 50 at every scale, so a painter falling back to 56 sized every escape against a frame 6px wider than the one it was drawing on. That is not hypothetical — `Paint.lua`'s own note records it measured in flight: 'a 56px escape on a 42px icon is where the overhang came from'. It was defensible while Edit Mode owned the icon size and cap could only guess; cap owns it now (see `row.icon_px`) and knows the answer at login. ⚠ `/cap style`'s gallery still draws at `icon_px`: it is showing the shelf AS AUTHORED rather than decorating a real frame, which is the one place the preview's number is the right one in the client.",
     border_px = 1,
     count_tile = {
       font = "FRIZQT__.TTF",
       outline = "OUTLINE",
       size = 14,
     },
+    host_nominal_px = 50,
     icon_px = 56,
     proc_glow_alpha = 0.5,
     row_gap_px = 6,

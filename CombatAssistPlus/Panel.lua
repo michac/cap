@@ -111,13 +111,30 @@ local placedKey
 --- and every opened panel live; a surface at HIGH covers the talent window at every frame level,
 --- which `Overlay` learned the hard way. Nothing here anchors to a Cooldown Manager frame, so
 --- there is no item level to lift off — the strip sits where the shelf puts it.
+--- The virtual row's icon size, and it is the CDM ROW's — not a token of its own.
+---
+--- ⚠ WHY IT IS DERIVED. A virtual row takes part in the SAME left-to-right scan as the
+--- Cooldown Manager's rows (`render-shelf.md` V12), and a scan is a row of peers: one peer at a
+--- different size is a signal nothing in the cue vocabulary authorised. `panel.icon_px` used to
+--- be authored beside `row.icon_px` and the two happened to agree at 50, so the mismatch was
+--- invisible — until `row.icon_px` became the one knob a player turns, at which point Devourer's
+--- Consume would have been the only entry in its scan drawn at the old size. Decided 2026-08-31.
+local function panelIconPx()
+  local row = ns.Style and ns.Style.row
+  local px = type(row) == "table" and row.icon_px or nil
+  -- Same guard as `Anchor.rowScale`: a hand-edited token can be a string, and `plain` answers
+  -- secrecy rather than type. 50 is Blizzard's item template, the size a peer row draws at.
+  if type(px) ~= "number" or px <= 0 then px = 50 end
+  return px
+end
+
 local function container()
   if host then return host end
-  local p = ns.Style.panel
+  local p, iconPx = ns.Style.panel, panelIconPx()
   host = CreateFrame("Frame", nil, UIParent)
   host:SetFrameStrata("MEDIUM")
   host:SetPoint(p.anchor, UIParent, p.anchor, p.x, p.y)
-  host:SetSize(p.icon_px, p.icon_px)
+  host:SetSize(iconPx, iconPx)
   host:Hide()
   return host
 end
@@ -129,8 +146,8 @@ end
 --- point would grow the strip out of its own centre instead of filling it. A `grow` the shelf
 --- does not declare runs RIGHT rather than stacking every icon on one spot.
 local function slot(index)
-  local p = ns.Style.panel
-  local step = (p.icon_px + p.gap_px) * index
+  local p, iconPx = ns.Style.panel, panelIconPx()
+  local step = (iconPx + p.gap_px) * index
   local grow = p.grow
   if grow == "LEFT" then return "RIGHT", -step, 0 end
   if grow == "UP" then return "BOTTOM", 0, step end
@@ -142,9 +159,9 @@ end
 --- Built out of combat or not at all — every widget here is cap's own, so nothing is restricted,
 --- but the badge set is built once for the same reason `Overlay` builds it once.
 local function build()
-  local p = ns.Style.panel
+  local iconPx = panelIconPx()
   local f = CreateFrame("Frame", nil, container())
-  f:SetSize(p.icon_px, p.icon_px)
+  f:SetSize(iconPx, iconPx)
   f:Hide()
 
   -- ⚠ NO SetTexCoord. Cropping the baked ring off a spell icon is the convention on an action
@@ -195,12 +212,12 @@ local function relayout(plan)
   if key == placedKey then return end
   placedKey = key
 
-  local p = ns.Style.panel
+  local p, iconPx = ns.Style.panel, panelIconPx()
   local f = container()
   local n = #ids
-  local span = n > 0 and (n * p.icon_px + (n - 1) * p.gap_px) or p.icon_px
+  local span = n > 0 and (n * iconPx + (n - 1) * p.gap_px) or iconPx
   local vertical = p.grow == "UP" or p.grow == "DOWN"
-  f:SetSize(vertical and p.icon_px or span, vertical and span or p.icon_px)
+  f:SetSize(vertical and iconPx or span, vertical and span or iconPx)
 
   -- Every pooled icon goes down first: an id the new roster does not carry keeps its frame
   -- (frames cannot be destroyed) and would otherwise stay lit at its old place forever.

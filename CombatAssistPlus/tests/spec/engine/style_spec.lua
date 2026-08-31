@@ -63,9 +63,10 @@ describe("engine / style", function()
   end)
 
   it("derives badge geometry from the icon, and the stack steps clear of itself", function()
-    -- No host is the shelf's nominal: the same answer an unpinned frame and a secret width get.
+    -- No host is the HOST nominal: the same answer an unpinned frame and a secret width get.
+    -- Not the preview's `icon_px` — those split on 2026-08-31 and this is the client's side.
     local S, g = ns.Style, ns.Paint.Geometry()
-    assert.equal(S.badges.diameter_pct / 100 * S.surfaces.icon_px, g.diameter)
+    assert.equal(S.badges.diameter_pct / 100 * S.surfaces.host_nominal_px, g.diameter)
     assert.equal(g.diameter + S.badges.padding_px, g.step)
     assert.is_true(g.sprite < g.diameter)
     assert.is_true(g.plate > g.diameter)
@@ -85,8 +86,8 @@ describe("engine / style", function()
   -- the shelf's nominal, so on any other icon size the whole row drew the wrong size.
   it("scales every badge dimension with the icon rather than freezing at the nominal", function()
     local S = ns.Style
-    local nominal = ns.Paint.Ratios(S.surfaces.icon_px)
-    local double = ns.Paint.Ratios(S.surfaces.icon_px * 2)
+    local nominal = ns.Paint.Ratios(S.surfaces.host_nominal_px)
+    local double = ns.Paint.Ratios(S.surfaces.host_nominal_px * 2)
     assert.equal(nominal.diameter * 2, double.diameter)
     assert.equal(nominal.plate * 2, double.plate)
     assert.equal(nominal.sprite * 2, double.sprite)
@@ -95,16 +96,16 @@ describe("engine / style", function()
     assert.equal(nominal.overhang, double.overhang)
   end)
 
-  -- The three escape sizes were tokens frozen at a 56px icon. They are arithmetic now, and the
-  -- proof is that they still land on the numbers the tokens carried.
+  -- The three escape sizes were tokens frozen at a 56px icon. They are arithmetic now, so they
+  -- follow the width they are given rather than any authored constant.
   it("derives the band's escape sizes from the measured width", function()
     local S = ns.Style
-    local g = ns.Channel.CountGeometry(S.surfaces.icon_px)
-    assert.equal(S.surfaces.icon_px, g.hatch)
-    assert.equal(ns.Paint.Ratios(S.surfaces.icon_px).plate, g.plate)
-    assert.equal(ns.Paint.Ratios(S.surfaces.icon_px).sprite, g.mark)
+    local g = ns.Channel.CountGeometry(S.surfaces.host_nominal_px)
+    assert.equal(S.surfaces.host_nominal_px, g.hatch)
+    assert.equal(ns.Paint.Ratios(S.surfaces.host_nominal_px).plate, g.plate)
+    assert.equal(ns.Paint.Ratios(S.surfaces.host_nominal_px).sprite, g.mark)
 
-    local wide = ns.Channel.CountGeometry(S.surfaces.icon_px * 2)
+    local wide = ns.Channel.CountGeometry(S.surfaces.host_nominal_px * 2)
     assert.equal(g.hatch * 2, wide.hatch)
     assert.equal(g.plate * 2, wide.plate)
     assert.equal(g.mark * 2, wide.mark)
@@ -112,6 +113,33 @@ describe("engine / style", function()
     -- An unreadable width is the nominal, never nothing: an escape needs a literal.
     assert.same(g, ns.Channel.CountGeometry(nil))
     assert.same(g, ns.Channel.CountGeometry(0))
+  end)
+
+  -- ⚠ THE SPLIT ITSELF (2026-08-31). The client's fallback stands in for a REAL frame, and
+  -- Blizzard's item template is 50 wide in its own space at every icon-size setting. It used to
+  -- fall back to the PREVIEW's authoring nominal of 56 — 12% over — and `Paint.lua` records the
+  -- consequence measured in flight: "a 56px escape on a 42px icon is where the overhang came
+  -- from". If these two ever converge by accident, the degraded path silently regains that bug.
+  it("keeps the client's host nominal at the item template's size, apart from the preview's", function()
+    local S = ns.Style
+    assert.equal(50, S.surfaces.host_nominal_px)
+    assert.equal(56, S.surfaces.icon_px)
+    assert.are_not.equal(S.surfaces.icon_px, S.surfaces.host_nominal_px)
+    -- And it is the size the row's own cells are, which is what makes it the honest stand-in.
+    assert.equal(S.row.cell_px, S.surfaces.host_nominal_px)
+  end)
+
+  -- ⚠ ONE ICON-SIZE KNOB (2026-08-31). A virtual row (render-shelf.md V12 — cap's own icon for a
+  -- press the Cooldown Manager carries no frame for, e.g. Devourer's Consume) is a PEER in the
+  -- same left-to-right scan, so it draws at its peers' size. `panel.icon_px` was authored beside
+  -- `row.icon_px` and both read 50, so the mismatch was invisible until `row.icon_px` became the
+  -- knob a player turns. Re-adding it is how that mismatch would come back.
+  it("gives the virtual row no icon size of its own", function()
+    assert.is_nil(ns.Style.panel.icon_px)
+    assert.equal(50, ns.Style.row.icon_px)
+    -- The panel keeps its OWN layout opinions; only the size is the row's.
+    assert.is_not_nil(ns.Style.panel.gap_px)
+    assert.is_not_nil(ns.Style.panel.grow)
   end)
 
   it("overhangs less than the row gap, so a badge cannot land on the next icon", function()

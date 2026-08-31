@@ -109,7 +109,7 @@ end
 --- a frozen number is right at one icon size and wrong at every other. Falls back to the shelf's
 --- nominal, which is what `Paint.Extent` hands back for a width that reads secret.
 function Channel.CountGeometry(width)
-  local nominal = ((ns.Style or {}).surfaces or {}).icon_px
+  local nominal = ((ns.Style or {}).surfaces or {}).host_nominal_px
   local w = (type(width) == "number" and width > 0) and width or nominal
   if not (w and ns.Paint and ns.Paint.Ratios) then return nil end
   local r = ns.Paint.Ratios(w)
@@ -1193,8 +1193,10 @@ if ns.RegisterCommand then
         if row then
           local w = ns.Paint.Extent(row)
           local scale = row.GetEffectiveScale and row:GetEffectiveScale() or 1
-          ns.Emit(("row: local %.1f × effective scale %.3f = %.1f screen px  (shelf nominal %d)")
-            :format(w, scale, w * scale, ns.Style.surfaces.icon_px))
+          -- The nominal printed here is the CLIENT's fallback, not the preview's authoring
+          -- size — printing 56 beside a measured 50 read as a discrepancy that was not one.
+          ns.Emit(("row: local %.1f × effective scale %.3f = %.1f screen px  (host nominal %d)")
+            :format(w, scale, w * scale, ns.Style.surfaces.host_nominal_px))
           local g = Channel.CountGeometry(w)
           if g then
             ns.Emit(("escapes: hatch %.1f  plate %.1f  mark %.1f  (badge diameter %.1f = %d%% of "

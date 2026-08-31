@@ -119,11 +119,11 @@ end
 --- all, a host not yet pinned, and a width that reads secret. In every one of them the drawn
 --- width is not knowable, and the nominal is what the shelf was authored against.
 function Paint.Extent(host)
-  if host == nil then return ns.Style.surfaces.icon_px, ns.Style.surfaces.icon_px end
+  if host == nil then return ns.Style.surfaces.host_nominal_px, ns.Style.surfaces.host_nominal_px end
   local w, h = host:GetWidth(), host:GetHeight()
   if type(w) ~= "number" or type(h) ~= "number" or issecretvalue(w) or issecretvalue(h)
     or w <= 0 or h <= 0 then
-    return ns.Style.surfaces.icon_px, ns.Style.surfaces.icon_px
+    return ns.Style.surfaces.host_nominal_px, ns.Style.surfaces.host_nominal_px
   end
   return w, h
 end
@@ -152,13 +152,16 @@ end
 ---
 --- ⚠ PUBLIC as `Paint.Extent` since 2026-08-22, because the sealed band needs it too: an inline
 --- texture escape is sized in the string by a literal, so a band's hatch has to be told the
---- button's REAL width or it draws at the shelf's nominal 56 on whatever the player configured.
---- Measured in flight: a 56px escape on a 42px icon is where the overhang came from.
+--- button's REAL width or it draws at a nominal on whatever the player configured.
+--- Measured in flight: a 56px escape on a 42px icon is where the overhang came from — and the
+--- nominal it fell back to was the PREVIEW's 56. It is `surfaces.host_nominal_px` (50, the item
+--- template's own size) since 2026-08-31, so the degraded path is now the same size as the frame
+--- it stands in for rather than 12% over it.
 local function extent(host)
   local w, h = host:GetWidth(), host:GetHeight()
   if type(w) ~= "number" or type(h) ~= "number" or issecretvalue(w) or issecretvalue(h)
     or w <= 0 or h <= 0 then
-    return ns.Style.surfaces.icon_px, ns.Style.surfaces.icon_px
+    return ns.Style.surfaces.host_nominal_px, ns.Style.surfaces.host_nominal_px
   end
   return w, h
 end
@@ -885,7 +888,7 @@ end
 --- side of the button.
 function Paint.BandIsFullIcon(text, icon_px)
   if type(text) ~= "string" then return false end
-  local limit = (icon_px or ns.Style.surfaces.icon_px) * 0.75
+  local limit = (icon_px or ns.Style.surfaces.host_nominal_px) * 0.75
   for h in text:gmatch("|[AT]:?[^|:]+:(%d+):%d+") do
     if tonumber(h) >= limit then return true end
   end

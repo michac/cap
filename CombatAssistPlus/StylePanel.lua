@@ -23,6 +23,10 @@ local SAMPLE = {
 -- The pane being filled and its top-down cursor: a pane is built by pointing these at it.
 local container, y
 
+-- ⚠ The ONE client reader of the preview's authoring nominal, and deliberately so. Every
+-- painter uses `surfaces.host_nominal_px` (50) because it is standing in for a real frame; the
+-- gallery is not decorating anything, it is showing the shelf AS AUTHORED, so the number that
+-- belongs here is the one the shelf was drawn against. Not a site the 2026-08-31 split missed.
 local function icon()
   return ns.Style.surfaces.icon_px
 end
