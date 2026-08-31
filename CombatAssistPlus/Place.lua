@@ -31,37 +31,67 @@ local unlocked, ready = false, false
 -- The store
 -- ---------------------------------------------------------------------------
 
--- File scope runs before ADDON_LOADED, so the scratch carries the shape until ns.db exists —
--- Frame.lua's reason and Window.lua's. The root is resolved on every call: a subtable cached
--- while ns.db was nil is an orphan that never reaches SavedVariables.
+-- ⚠ PLACEMENT IS PER-CHARACTER, and that is not a preference. The row's position is SEEDED
+-- from where the Cooldown Manager drew on THIS character; an account-wide store would be
+-- seeded exactly once, by whichever character logged in first, and silently wrong on every
+-- other one — a player whose CDM sits elsewhere would find cap's row nowhere near it, with
+-- nothing on screen to say why. Opinions about the addon (`enabled`, `anchor`) stay in
+-- `ns.db`, where they belong: they are the same wherever you are logged in.
+--
+-- File scope runs before ADDON_LOADED, so the scratch carries the shape until `ns.cdb`
+-- exists — Frame.lua's reason and Window.lua's. The root is resolved on every call: a
+-- subtable cached while it was nil is an orphan that never reaches SavedVariables.
 local scratch = {}
 
--- The single-panel era wrote `db.frame`. Read once into the keyed store, or an upgrading
--- player's panel jumps back to the default the first time they log in. The old key is left
--- in place rather than deleted: it costs a few bytes, and a player who downgrades to the
--- previous build finds their panel where they left it instead of at the origin.
-local LEGACY = { frame = "frame" }
+--- Where a saved position CAME FROM. `"move"` is the player's own hand; `"seed"` is cap's
+--- one-time adoption of Blizzard's measured geometry. The difference is not cosmetic — it is
+--- what the migration below reads, since a seed taken on one character says nothing about
+--- another and a drag says everything.
+local BY_MOVE, BY_SEED = "move", "seed"
 
 local function all()
-  local root = ns.db or scratch
+  local root = ns.cdb or scratch
   local t = root.places
   if type(t) ~= "table" then
     t = {}
     root.places = t
   end
-  return t, root
+  return t
+end
+
+--- The account-wide place this key used to live in, if any. Two eras wrote one:
+--- `db.frame` (single-panel), then `db.places.<key>` (keyed, but still account-wide — the
+--- shape that made the seed wrong). Neither is deleted: they cost a few bytes, and a player
+--- who rolls back to an earlier build finds their panel where they left it.
+local function inherited(key)
+  local db = ns.db
+  if type(db) ~= "table" then return nil end
+  local keyed = db.places
+  if type(keyed) == "table" and type(keyed[key]) == "table" then return keyed[key] end
+  if key == "frame" and type(db.frame) == "table" then
+    -- The single-panel era had no `by` field, and everything in it was hand-placed: there
+    -- was no seeding before the row existed.
+    local old = db.frame
+    return { x = old.x, y = old.y, placed = old.placed, by = BY_MOVE }
+  end
+  return nil
 end
 
 --- The saved place for one key, created on first ask. `defaults` fills only absent fields,
 --- so a build that adds one does not clobber what the player set.
 function Place.Store(key, defaults)
-  local t, root = all()
+  local t = all()
   local s = t[key]
   if type(s) ~= "table" then
-    local legacy = LEGACY[key]
-    local old = legacy and root[legacy]
-    if type(old) == "table" then
-      s = { x = old.x, y = old.y, placed = old.placed }
+    local old = inherited(key)
+    if old then
+      -- ⚠ A SEED DOES NOT CROSS CHARACTERS. Position carries over so a player who placed
+      -- cap's panel keeps it everywhere; but if the only reason it sat there was a seed
+      -- taken from another character's Cooldown Manager, `placed` is dropped so THIS
+      -- character seeds from its own. That is the whole bug the split exists to close, and
+      -- it would come straight back if the migration copied the flag unconditionally.
+      local kept = old.by ~= BY_SEED and old.placed or false
+      s = { x = old.x, y = old.y, placed = kept, by = kept and old.by or nil }
     else
       s = {}
     end
@@ -119,14 +149,16 @@ function Handle:Apply()
   return true
 end
 
-function Handle:Save()
+--- `by` is how the position was arrived at — `Place` records it because the migration reads
+--- it, not for display. Defaults to the player's own hand, which is what a drag is.
+function Handle:Save(by)
   local x, y = self:Capture()
   if not x then
     ns.Emit(self.noun .. " position is unreadable — keeping the last saved place.")
     return false
   end
   local s = self:Store()
-  s.x, s.y, s.placed = x, y, true
+  s.x, s.y, s.placed, s.by = x, y, true, by or BY_MOVE
   return true
 end
 
@@ -135,12 +167,12 @@ end
 --- owns without appearing to jump on the login that changes it.
 function Handle:Seed()
   if self:Store().placed then return false end
-  return self:Save()
+  return self:Save(BY_SEED)
 end
 
 function Handle:Reset()
   local s = self:Store()
-  s.x, s.y, s.placed = self.defaultX, self.defaultY, false
+  s.x, s.y, s.placed, s.by = self.defaultX, self.defaultY, false, nil
   self:Apply()
   return s
 end

@@ -214,6 +214,14 @@ if CreateFrame and SlashCmdList then
     CombatAssistPlusDB = CombatAssistPlusDB or {}
     ns.db = CombatAssistPlusDB
     applyDefaults(CombatAssistPlusDB)
+    -- ⚠ TWO SAVED TABLES, split by what the thing IS. `ns.db` holds OPINIONS about the addon
+    -- — whether it is on, whether it orders — and those are the same wherever you are logged
+    -- in. `ns.cdb` holds PLACEMENT, which is about one character's screen: the row's position
+    -- is seeded from where THAT character's Cooldown Manager draws, so an account-wide one
+    -- would be seeded once, by whichever character happened to log in first, and then be
+    -- wrong everywhere else. `Place.lua` is the only reader.
+    CombatAssistPlusCharDB = CombatAssistPlusCharDB or {}
+    ns.cdb = CombatAssistPlusCharDB
     self:UnregisterEvent("ADDON_LOADED")
   end)
 end

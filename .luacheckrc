@@ -111,7 +111,8 @@ stds.wow = {
   globals = {
     "SLASH_COMBATASSISTPLUS1",
     "SlashCmdList",
-    "CombatAssistPlusDB",       -- SavedVariable
+    "CombatAssistPlusDB",       -- SavedVariable (account: the addon's opinions)
+    "CombatAssistPlusCharDB",   -- SavedVariablePerCharacter (placement, and only that)
     "SLASH_CAPANCHOR1",         -- probes/AnchorOrder.lua's own slash command
     "StaticPopupDialogs",       -- Anchor.lua registers the one-button stand-down notice
   },

@@ -180,7 +180,7 @@ local function stampMeta(snap, body)
   stream:Meta("verdict", token(snap.kind))
   stream:Meta("samples", samples)
   stream:Meta("last", body)
-  local f = ns.db and ns.Place.Store("frame")
+  local f = ns.cdb and ns.Place.Store("frame")
   stream:Meta("frame", type(f) == "table"
     and (num(f.x) .. "," .. num(f.y) .. "," .. tostring(f.placed == true)) or "?")
 end

@@ -1,6 +1,10 @@
--- Place.lua's store: the keyed saved position, and the one-time read of the single-panel
--- era's key. Drag, chrome and the frames themselves are client behaviour (house rule 6);
--- what is testable here is which table a position lands in and which one it came from.
+-- Place.lua's store: the keyed saved position, WHICH SAVED TABLE it lives in, and the
+-- one-time read of the two account-wide shapes that came before it. Drag, chrome and the
+-- frames themselves are client behaviour (house rule 6).
+--
+-- ⚠ The rule these mostly protect: placement is PER-CHARACTER (`ns.cdb`), and a SEEDED
+-- position does not carry its `placed` flag across characters. An account-wide seed is taken
+-- once, by whichever character logs in first, and is then silently wrong on every other one.
 local H = dofile("CombatAssistPlus/tests/mock_ns.lua")
 
 local function loadPlace()
@@ -21,7 +25,7 @@ describe("engine / place", function()
   local ns
   before_each(function()
     ns = loadPlace()
-    ns.db = {}
+    ns.db, ns.cdb = {}, {}
   end)
 
   it("creates a keyed table on first ask and fills only absent defaults", function()
@@ -29,7 +33,8 @@ describe("engine / place", function()
     assert.are.equal(1, s.x)
     assert.are.equal(2, s.y)
     assert.is_false(s.placed)
-    assert.are.equal(s, ns.db.places.row)
+    assert.are.equal(s, ns.cdb.places.row)
+    assert.is_nil(ns.db.places)
   end)
 
   it("never clobbers a saved value with a default", function()
@@ -69,10 +74,51 @@ describe("engine / place", function()
     assert.are.equal(7, ns.Place.Store("frame", { x = 0, y = 0 }).x)
   end)
 
-  it("keeps the shape before ns.db exists, so a load-time write is not orphaned", function()
-    ns.db = nil
+  it("keeps the shape before the saved table exists, so a load-time write is not orphaned", function()
+    ns.cdb = nil
     local s = ns.Place.Store("row", { x = 3, y = 4 })
     assert.are.equal(3, s.x)
     assert.are.equal(s, ns.Place.Store("row", { x = 3, y = 4 }))
+  end)
+
+  -- ⚠ THE BUG THE SPLIT EXISTS TO CLOSE. `placed` is what stops a re-seed, so an account-wide
+  -- seed taken by the first character to log in would leave every other character's row
+  -- sitting where THAT character's Cooldown Manager was. The position still carries over as a
+  -- starting point; only the flag is dropped, so this character measures its own.
+  it("does not carry a SEEDED position's placed flag to another character", function()
+    ns.db.places = { row = { x = 5, y = -300, placed = true, by = "seed" } }
+    local s = ns.Place.Store("row", { x = 0, y = -200 })
+    assert.are.equal(5, s.x)
+    assert.is_false(s.placed)
+    assert.is_nil(s.by)
+  end)
+
+  -- A drag is the player's opinion and it travels: they placed cap's panel once and want it
+  -- there on every character, which is the whole reason position carries at all.
+  it("does carry a MOVED position, flag and all", function()
+    ns.db.places = { frame = { x = 5, y = -300, placed = true, by = "move" } }
+    local s = ns.Place.Store("frame", { x = 0, y = 0 })
+    assert.are.equal(5, s.x)
+    assert.is_true(s.placed)
+  end)
+
+  -- The single-panel era had no `by` field and no seeding — the row did not exist yet — so
+  -- everything in it was hand-placed and must travel.
+  it("treats the pre-keyed db.frame as hand-placed", function()
+    ns.db.frame = { x = 9, y = -9, placed = true }
+    assert.is_true(ns.Place.Store("frame", { x = 0, y = 0 }).placed)
+  end)
+
+  -- Two characters, one account table: the second must not see the first's per-character work.
+  it("keeps two characters' positions apart", function()
+    ns.Place.Store("row", { x = 0, y = 0 }).x = 111
+    ns.cdb = {}
+    assert.are.equal(0, ns.Place.Store("row", { x = 0, y = 0 }).x)
+  end)
+
+  it("never writes placement into the account table", function()
+    ns.Place.Store("row", { x = 1, y = 2 })
+    ns.Place.Store("frame", { x = 1, y = 2 })
+    assert.is_nil(ns.db.places)
   end)
 end)

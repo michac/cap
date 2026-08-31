@@ -4,6 +4,7 @@
 ## Author: Michael Christiansen
 ## Version: 0.17.0
 ## SavedVariables: CombatAssistPlusDB
+## SavedVariablesPerCharacter: CombatAssistPlusCharDB
 ## IconTexture: Interface\ICONS\Ability_Warrior_BattleShout
 
 Core.lua
