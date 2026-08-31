@@ -31,6 +31,7 @@ Glow.lua
 Bars.lua
 Overlay.lua
 Panel.lua
+Riders.lua
 Anchor.lua
 Frame.lua
 Window.lua

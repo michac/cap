@@ -94,9 +94,16 @@ stds.wow = {
     -- declared here.
     "EventRegistry",
     -- Anchor.lua's contention dialog.  The generic-confirmation helpers take the whole
-    -- prompt as data, so no StaticPopupDialogs entry is registered under our own key.
-    -- Present in the 12.1 client source at Blizzard_StaticPopup/StaticPopup.lua:232, :236.
+    -- prompt as data; GENERIC_CONFIRMATION always draws two buttons, so the one-button
+    -- stand-down notice registers its own StaticPopupDialogs entry (declared under
+    -- `globals` below) and shows it with StaticPopup_Show.  Present in the 12.1 client
+    -- source at Blizzard_StaticPopup/StaticPopup.lua:232, :236 and
+    -- Blizzard_StaticPopup/SharedDialogDefs.lua:1.
     "StaticPopup_ShowCustomGenericConfirmation", "StaticPopup_IsCustomGenericConfirmationShown",
+    "StaticPopup_Show", "StaticPopup_Hide", "OKAY",
+    -- Anchor.lua's two-stage rider test.  `C_AddOns.IsAddOnLoaded` (declared above) is the
+    -- modern spelling; the bare global is the fallback the same call site keeps.
+    "IsAddOnLoaded",
   },
   -- The addon's true global writes.  Every module binds its namespace as a local
   -- (`local ADDON, ns = ...`), so there is no shared-namespace global to declare —
@@ -106,6 +113,7 @@ stds.wow = {
     "SlashCmdList",
     "CombatAssistPlusDB",       -- SavedVariable
     "SLASH_CAPANCHOR1",         -- probes/AnchorOrder.lua's own slash command
+    "StaticPopupDialogs",       -- Anchor.lua registers the one-button stand-down notice
   },
 }
 

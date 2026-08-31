@@ -39,8 +39,27 @@ local ASK_COOLDOWN = 60
 -- A destructive teardown re-pools every frame; the rebuild lets the viewer settle first.
 local REARM_DELAY = 0.3
 local ASK_KEY = "CAP_ANCHOR_CONTENTION"
+local RIDER_KEY = "CAP_ANCHOR_RIDER"
+-- Two addons that each force a frame back to their own anchor recurse without bound inside
+-- one SetPoint call. The positional test at arm time is the detector; this is the floor
+-- under it, for the rider that claims the row after cap has already armed.
+local REENTRY_LIMIT = 8
 
 local stream = ns.Capture.Open("anchor", { sessions = 8, cap = 2000, dedup = false })
+
+-- One button, because there is nothing for the player to decide here: cap has already
+-- stopped, and the only fix is a toggle on the addon list.
+if StaticPopupDialogs then
+  StaticPopupDialogs[RIDER_KEY] = {
+    text = "Combat Assist Plus\n\n%s",
+    button1 = OKAY or "Okay",
+    showAlert = 1,
+    hideOnEscape = 1,
+    whileDead = 1,
+    timeout = 0,
+    wide = 1,
+  }
+end
 
 -- ---------------------------------------------------------------------------
 -- Pure: the plan
@@ -209,6 +228,12 @@ local P = {
   askedAt = nil,
   asking = false,
   askPending = false,
+  -- The message cap is standing down with, or nil when it is not. Re-decided on every arm
+  -- attempt, so a rider the player disables stops holding cap off on the next event.
+  stoodDown = nil,
+  riderTold = false,
+  riderPending = nil,
+  riderGuard = false,
   staleLatched = false,
   generation = nil,
   dirty = false,
@@ -245,6 +270,62 @@ local function geometry(frame)
   local ok, left, top = pcall(function() return frame:GetLeft(), frame:GetTop() end)
   if not ok or not (plain(left) and plain(top)) then return nil end
   return left, top
+end
+
+-- ---------------------------------------------------------------------------
+-- Who is placing the row
+-- ---------------------------------------------------------------------------
+
+--- Which owner one anchor point names: cap's own frame, the viewer's subtree, or a
+--- stranger. A nil `relativeTo` resolves against the parent, which is how Blizzard's own
+--- layout writes most of them.
+local function owner(relativeTo, frame, v)
+  if relativeTo == nil then
+    local ok, parent = pcall(frame.GetParent, frame)
+    if not ok then return "other" end
+    relativeTo = parent
+  end
+  if P.anchor ~= nil and relativeTo == P.anchor then return "cap" end
+  local node, depth = relativeTo, 0
+  while node ~= nil and depth < 8 do
+    if node == v then return "viewer" end
+    -- One pcall for the index and the call together: a node with no GetParent and a node
+    -- that refuses the read are the same answer here, which is "stop walking".
+    local ok, parent = pcall(function() return node:GetParent() end)
+    if not ok then break end
+    node, depth = parent, depth + 1
+  end
+  return "other"
+end
+
+--- Owner tags for every point one item frame carries. A point cap cannot read is dropped
+--- rather than guessed at, because a guess here either nags a player with no rider or
+--- lets cap arm beside one.
+local function ownerTags(frame, v)
+  local tags = {}
+  local ok, n = pcall(frame.GetNumPoints, frame)
+  if not ok or not plain(n) or type(n) ~= "number" then return tags end
+  for i = 1, n do
+    local got, _, relativeTo = pcall(frame.GetPoint, frame, i)
+    if got then tags[#tags + 1] = owner(relativeTo, frame, v) end
+  end
+  return tags
+end
+
+local function addonLoaded()
+  return (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+end
+
+--- The stand-down message, or nil. Both stages have to agree: a known rider is loaded, AND
+--- an item frame is anchored to neither the viewer nor cap, which is the difference between
+--- a rider that is installed and a rider that is managing the row.
+local function riderMessage(rows)
+  local labels = ns.Riders.Loaded(addonLoaded())
+  if #labels == 0 then return nil end
+  local v = viewer()
+  local frames = {}
+  for _, row in ipairs(rows) do frames[#frames + 1] = ownerTags(row.frame, v) end
+  return ns.Riders.Message(labels, ns.Riders.Managing(frames))
 end
 
 -- ---------------------------------------------------------------------------
@@ -380,12 +461,15 @@ local function parkWant(left, top)
   return { x = PARK_X, y = PARK_Y, left = (left or 0) + PARK_X, top = (top or 0) + PARK_Y }
 end
 
+local reentry = 0
+local standDown
+
 --- Corrects a frame inside the call that moved it, so a foreign placement never draws.
 --- The discriminator is the anchor: everything cap writes is relative to its own frame,
 --- so a point relative to anything else — including a bare offset, which resolves against
 --- the parent — came from outside. This catches movers that expose no hook of their own.
 local function onFramePoint(frame, _, relativeTo)
-  if not P.armed or P.anchor == nil or relativeTo == P.anchor then return end
+  if not P.armed or P.riderGuard or P.anchor == nil or relativeTo == P.anchor then return end
   local want = P.wantOf[frame]
   if not want then return end
   -- ⚠ READ BEFORE THE CORRECTION, because the correction destroys the evidence. Blizzard's
@@ -406,7 +490,22 @@ local function onFramePoint(frame, _, relativeTo)
       f.at = now
     end
   end
+  -- ⚠ THE ONE PLACE CAP CAN CRASH THE CLIENT. Another rider's own SetPoint hook answers
+  -- this write with a write of its own, which lands back here: the depth counter is what
+  -- turns that mutual recursion into a stand-down. The teardown is deferred because this
+  -- runs inside somebody else's SetPoint.
+  if reentry >= REENTRY_LIMIT then
+    if not P.riderGuard then
+      P.riderGuard = true
+      C_Timer.After(0, function()
+        standDown(ns.Riders.Message(ns.Riders.Loaded(addonLoaded()), true))
+      end)
+    end
+    return
+  end
+  reentry = reentry + 1
   place(frame, want)
+  reentry = reentry - 1
   P.reasserts = P.reasserts + 1
   P.handledAt = now
 end
@@ -669,6 +768,7 @@ end
 --- coarse: `/cap anchor rows` is the detailed readout and this is not a second copy of it.
 function Anchor.Status()
   if not Anchor.Enabled() then return "off" end
+  if P.stoodDown then return "off — another addon is arranging the row" end
   if not P.armed then return "on, not applied" end
   local parkedNow = countParked()
   if parkedNow > 0 then
@@ -743,8 +843,48 @@ local function disarm()
   return orphans
 end
 
+-- ---------------------------------------------------------------------------
+-- Standing down beside another rider
+-- ---------------------------------------------------------------------------
+
+--- Said once a session, and deliberately not remembered across one: the nag is the point,
+--- and the fix is one toggle on the addon list. Held out of combat, as the contention
+--- question is.
+local function showRider(message)
+  if P.riderTold then return end
+  if InCombatLockdown() then P.riderPending = message; return end
+  P.riderTold, P.riderPending = true, nil
+  if StaticPopupDialogs and StaticPopupDialogs[RIDER_KEY] and StaticPopup_Show then
+    StaticPopup_Show(RIDER_KEY, message)
+  end
+end
+
+--- Gives every frame cap holds back and orders nothing until the rider is gone. `message`
+--- is what the player is told and also the flag `Anchor.Ordering` reads, so another addon's
+--- conflict check sees cap step aside rather than a setting it cannot inspect.
+function standDown(message)
+  -- Idempotent because every event retries the arm: without this the same finding would
+  -- write a capture mark and a chat line on each one.
+  if not message or P.stoodDown == message then return end
+  P.stoodDown = message
+  if P.armed then disarm() end
+  mark("# stood-down")
+  tell("rider", (message:gsub("%s+", " ")))
+  showRider(message)
+end
+
+--- Is cap going to order the row? Read by another addon's conflict table, which should not
+--- raise its own dialog about an addon that has already stepped aside.
+function Anchor.Ordering()
+  return Anchor.Enabled() and P.stoodDown == nil
+end
+_G._CAP_IsOrderingEnabled = Anchor.Ordering
+
 --- Returns ok, reason. `reason` is nil on success and on a silent retry-later.
 local function arm()
+  -- The backstop latches for the session: it fired inside somebody's SetPoint, and arming
+  -- again against the same frames is how that becomes a loop. /cap anchor retry releases it.
+  if P.riderGuard then return false, "rider" end
   local status, message = Anchor.Diagnose(Anchor.Census())
   if status ~= "ok" then
     tell(status, message)
@@ -758,6 +898,17 @@ local function arm()
       .. "impose — the row keeps Blizzard's.")
     return false, "no-catalog"
   end
+
+  -- ⚠ BEFORE `adopt`, which is what hooks each frame's SetPoint. A second such hook on a
+  -- frame another rider already holds recurses without bound, so the test has to precede
+  -- the first one. Re-decided every attempt, so a rider the player disables stops holding
+  -- cap off on the next event.
+  local rider = riderMessage(rows)
+  if rider then
+    standDown(rider)
+    return false, "rider"
+  end
+  P.stoodDown = nil
 
   adopt(rows, entries)
   P.armed = true
@@ -788,6 +939,11 @@ function rearm(why)
       .. "impose — the row keeps Blizzard's.")
     return false
   end
+  local rider = riderMessage(rows)
+  if rider then
+    standDown(rider)
+    return false
+  end
   adopt(rows, entries)
   P.dirty = false
   mark("# rearmed why=" .. why)
@@ -805,6 +961,7 @@ end
 --- Drops the strike run and rebuilds from scratch — the one recovery path.
 function Anchor.Retry()
   P.strikes, P.strikeAt, P.dirty, P.told = 0, nil, false, nil
+  P.riderGuard, P.stoodDown = false, nil
   if InCombatLockdown() then return false, "combat" end
   if P.armed then disarm() end
   return arm()
@@ -892,6 +1049,7 @@ events:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_REGEN_ENABLED" then
     P.combat = false
     if P.armed then mark("# combat end") end
+    if P.riderPending then showRider(P.riderPending) end
     if P.askPending then ask(); return end
   end
   if event == "PLAYER_ENTERING_WORLD" then
@@ -907,6 +1065,11 @@ end)
 
 local function statusLine()
   if not P.armed then
+    if P.stoodDown then
+      ns.Emit("ordering is standing down.")
+      ns.Emit("  " .. P.stoodDown:gsub("\n+", " "))
+      return
+    end
     ns.Emit("ordering is " .. (Anchor.Enabled() and "on but not applied" or "off") .. ".")
     local _, message = Anchor.Diagnose(Anchor.Census())
     if message then ns.Emit("  " .. message) end
