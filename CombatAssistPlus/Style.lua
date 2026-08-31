@@ -295,6 +295,14 @@ ns.Style = {
     blend = "BLEND",
     rgb = { 1.00, 0.86, 0.45 },
   },
+  row = {
+    _comment = "The CDM ROW PANEL's grid — the geometry of `CombatAssistPlusRow`, the named frame cap re-anchors the Essential viewer's own item frames onto. Distinct from `panel` above, which is cap's OWN icon strip: this one holds BLIZZARD's frames. cols × rows is a FIXED cell count, so the panel's rect is known at login and never waits for the Cooldown Manager to draw — which is what lets a mover address it. ⚠ EVERY NUMBER HERE IS IN THE PANEL'S OWN COORDINATE SPACE, not screen pixels: the panel is scaled to match the item frames, so the Edit Mode icon-size setting is carried by that SCALE and must NOT be multiplied in again here. cell_px is floored at 50 because that is the item template's own size (CooldownViewer.xml, CooldownViewerEssentialItemTemplate) and a smaller cell would overlap icons; gap_px defaults to Blizzard's own layout padding, iconPadding + GetAdditionalPaddingOffset() = 5 + (-4).",
+    cell_floor_px = 50,
+    cell_px = 50,
+    cols = 6,
+    gap_px = 1,
+    rows = 2,
+  },
   surfaces = {
     border_px = 1,
     count_tile = {

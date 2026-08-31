@@ -20,10 +20,16 @@ local TOLERANCE = 0.5
 -- A displacement this soon after one of our own hooks fired is Blizzard's layout engine;
 -- anything later had no observed cause and is reported as contention instead.
 local ATTRIBUTION_WINDOW = 1.0
-local DEFAULT_GAP = 4
--- A foreign placement read inside the call that made it is only the row's new home for as
--- long as the apply it provokes takes to run, which is one frame.
-local FOREIGN_WINDOW = 1.0
+-- The row panel's own name, because a mover can only address a frame that has one.
+local ROW_NAME = "CombatAssistPlusRow"
+-- Blizzard's item template is 50x50 (CooldownViewer.xml, CooldownViewerEssentialItemTemplate),
+-- so a cell narrower than this would overlap icons whatever the tokens say.
+local CELL_FLOOR = 50
+-- Where the panel sits before it has ever been placed. Nearly unreachable: the first apply
+-- SEEDS the saved position from wherever the Cooldown Manager drew the row, and `/cap move
+-- reset` clears the seed so the next apply takes it again. This is the fallback for a reset
+-- performed while the viewer has drawn nothing to measure.
+local ROW_DEFAULT_X, ROW_DEFAULT_Y = 0, -200
 -- Where a parked frame goes: far enough off the anchor that no UI scale brings it back, and
 -- expressed as an offset so it travels with the anchor instead of pinning to a screen corner.
 local PARK_X, PARK_Y = -10000, 10000
@@ -220,7 +226,6 @@ local P = {
   displaced = 0,
   contended = 0,
   reasserts = 0,
-  foreign = nil,
   handledAt = nil,
   staleSeen = 0,
   strikes = 0,
@@ -264,6 +269,55 @@ end
 
 local function viewer()
   return _G[VIEWER]
+end
+
+-- Defined with the apply machinery below; the row panel's drag callback reaches it from here.
+local schedule
+
+-- ---------------------------------------------------------------------------
+-- The grid
+--
+-- ⚠ EVERY NUMBER HERE IS IN THE PANEL'S OWN COORDINATE SPACE. The panel is scaled to match
+-- the item frames (see `rowScale`), so Edit Mode's icon-size setting arrives as that SCALE
+-- and must not be multiplied into these lengths as well — `GetWidth` on an item frame reads
+-- 50 whatever `SetScale` did to it. A cell of `50 x iconScale` would count it twice.
+--
+-- Fixed cell counts are the point: the panel's rect is known at login, so it never waits for
+-- the Cooldown Manager to draw before it can be dragged or anchored to.
+-- ---------------------------------------------------------------------------
+
+local function grid()
+  local t = ns.Style and ns.Style.row
+  if type(t) ~= "table" then return 6, 2, CELL_FLOOR, 1 end
+  local cell = math.max(t.cell_px or CELL_FLOOR, t.cell_floor_px or CELL_FLOOR)
+  return t.cols or 6, t.rows or 2, cell, t.gap_px or 1
+end
+
+local function gridSize()
+  local cols, rowCount, cell, gap = grid()
+  return cols * cell + (cols - 1) * gap, rowCount * cell + (rowCount - 1) * gap
+end
+
+-- Exported because they are the arithmetic and not the frame: the panel's rect is a claim
+-- about how many icons fit and how far apart they sit, and that claim is checkable without a
+-- client. Read them; do not re-derive a cell size anywhere else.
+Anchor.Grid = grid
+Anchor.GridSize = gridSize
+
+--- The scale the panel wears so that one unit in it is one unit on an item frame. Measured
+--- off a live frame when there is one; before that, Edit Mode's icon-size setting is the
+--- estimate, since the viewer itself is unscaled by default
+--- *[T1 src @12.1.0: Blizzard_EditMode/Shared/EditModeSystemTemplates.lua —
+--- EditModeCooldownViewerSystemMixin:UpdateSystemSettingIconSize]*.
+local function rowScale(frame)
+  if frame then
+    local mine, theirs = frame:GetEffectiveScale(), UIParent:GetEffectiveScale()
+    if plain(mine) and plain(theirs) and theirs ~= 0 then return mine / theirs end
+  end
+  local v = viewer()
+  local s = v and v.iconScale
+  if plain(s) and s > 0 then return s end
+  return 1
 end
 
 local function geometry(frame)
@@ -434,11 +488,38 @@ end
 -- Applying
 -- ---------------------------------------------------------------------------
 
+--- The row panel. Created once, eagerly: `/cap move` has to be able to offer it before the
+--- Cooldown Manager has drawn anything, and a mover can only register a frame that exists.
+--- ⚠ Its IDENTITY is the discriminator `owner()` uses to tell cap's own writes from a
+--- stranger's, so nothing here may replace the frame once anything is anchored to it.
 local function ensureAnchor()
   if P.anchor then return P.anchor end
-  P.anchor = CreateFrame("Frame", nil, UIParent)
-  P.anchor:SetSize(1, 1)
-  return P.anchor
+  local f = CreateFrame("Frame", ROW_NAME, UIParent)
+  f:SetSize(gridSize())
+  f:SetScale(rowScale(nil))
+  P.anchor = f
+  P.place = ns.Place.Register{
+    key = "row", frame = f, noun = "CDM row",
+    label = "cap row — drag to place",
+    x = ROW_DEFAULT_X, y = ROW_DEFAULT_Y,
+    -- A drag ends with the panel somewhere new; the frames it carries follow it live, but
+    -- the drift auditor's expectations are absolute coordinates and are now stale.
+    onPlaced = function() if P.armed then schedule("moved") end end,
+  }
+  return f
+end
+
+--- Re-sizes the panel from the tokens and the live icon scale. Cheap and idempotent, so it
+--- rides every apply and the Edit Mode settings callback rather than needing its own guard.
+local function resizeAnchor(frame)
+  local f = ensureAnchor()
+  local w, h = gridSize()
+  local scale = rowScale(frame)
+  local changed = f:GetWidth() ~= w or f:GetHeight() ~= h or f:GetScale() ~= scale
+  if not changed then return false end
+  f:SetSize(w, h)
+  f:SetScale(scale)
+  return true
 end
 
 -- Puts one frame where cap wants it — in the row, or off it. EVERY write cap makes to an item
@@ -472,24 +553,13 @@ local function onFramePoint(frame, _, relativeTo)
   if not P.armed or P.riderGuard or P.anchor == nil or relativeTo == P.anchor then return end
   local want = P.wantOf[frame]
   if not want then return end
-  -- ⚠ READ BEFORE THE CORRECTION, because the correction destroys the evidence. Blizzard's
-  -- Layout re-places every item frame relative to the viewer's item container
-  -- *[T1 src @12.1.0: Blizzard_SharedXML/LayoutFrame.lua — LayoutMixin:Layout, LayoutChildren]*,
-  -- and correcting inside that call means no later read can see where the row was being moved
-  -- to. Without this the row would hold its first origin forever and stop following the
-  -- Cooldown Manager's own placement.
+  -- ⚠ A FOREIGN ORIGIN USED TO BE READ HERE, before the correction destroyed the evidence,
+  -- so that Blizzard's Layout could move cap's whole row
+  -- *[T1 src @12.1.0: Blizzard_SharedXML/LayoutFrame.lua — LayoutMixin:Layout, LayoutChildren]*.
+  -- The row holds a saved position of its own now, so following somebody else's placement is
+  -- exactly what it must not do: the reading was deleted rather than kept and ignored, since a
+  -- live origin nothing consumes is an invitation to consume it.
   local now = GetTime()
-  local left, top = geometry(frame)
-  if left then
-    local f = P.foreign
-    if f == nil or (now - f.at) > FOREIGN_WINDOW then
-      P.foreign = { left = left, top = top, at = now }
-    else
-      if left < f.left then f.left = left end
-      if top > f.top then f.top = top end
-      f.at = now
-    end
-  end
   -- ⚠ THE ONE PLACE CAP CAN CRASH THE CLIENT. Another rider's own SetPoint hook answers
   -- this write with a write of its own, which lands back here: the depth counter is what
   -- turns that mutual recursion into a stand-down. The teardown is deferred because this
@@ -521,30 +591,27 @@ local function armFrame(frame)
   hooksecurefunc(frame, "SetPoint", onFramePoint)
 end
 
--- Read off the frames before any of them move, so the re-anchored row keeps the CDM's own
--- metrics: origin is the drawn row's top-left corner and the gap is its narrowest column
--- spacing. Scale is matched to the item frames so a SetPoint offset means the same distance
--- in both coordinate spaces.
-local function metrics(frames)
-  local w = frames[1]:GetWidth()
-  if not plain(w) then return nil end
-  local lefts, left, top = {}, nil, nil
+-- The drawn row's top-left corner, read off the frames before any of them move. This is the
+-- ONE thing still taken from Blizzard's geometry, and it is taken once: it seeds the panel's
+-- saved position so an upgrading player's row does not jump on the login that gives it one.
+-- ⚠ The COLUMN SPACING used to be derived here, as the narrowest observed gap with a
+-- fallback of 4. It is not derived any more, because the grid is cap's: the panel declares
+-- its own cell and gap (`tokens.row`), which is what lets its rect be known before the
+-- Cooldown Manager has drawn. For the record the fallback was also wrong — Blizzard's own
+-- layout padding is `iconPadding + GetAdditionalPaddingOffset()` = 5 + (-4) = 1
+-- *[T1 src @12.1.0: Blizzard_CooldownViewer/CooldownViewer.lua —
+-- CooldownViewerMixin:GetAdditionalPaddingOffset, and the childXPadding assignment]*.
+local function origin(frames)
+  local left, top = nil, nil
   for _, frame in ipairs(frames) do
     local l, t = geometry(frame)
     if l then
-      lefts[#lefts + 1] = l
       if left == nil or l < left then left = l end
       if top == nil or t > top then top = t end
     end
   end
   if left == nil then return nil end
-  table.sort(lefts)
-  local gap = DEFAULT_GAP
-  for i = 2, #lefts do
-    local delta = lefts[i] - lefts[i - 1] - w
-    if delta > 0 and delta < gap then gap = delta end
-  end
-  return w, gap, left, top
+  return left, top
 end
 
 local function apply(why)
@@ -553,26 +620,34 @@ local function apply(why)
   for _, t in ipairs(P.tracked) do frames[#frames + 1] = t.frame end
   if #frames == 0 then return false end
 
-  local w, gap, left, top = metrics(frames)
-  if not w then return false end
-
-  -- ⚠ WHOSE ORIGIN THIS IS, and the answer is not "whoever moved it last". A layout pass gets
-  -- to move the row: `why` names an event, and the position read inside it is where the
-  -- Cooldown Manager wants the row to sit. A DISPLACEMENT does not: adopting the origin there
-  -- would let a competitor drag the row by losing to cap repeatedly. Consumed either way, so a
-  -- reading never outlives the pass that took it.
-  local foreign = P.foreign
-  P.foreign = nil
-  if foreign and why ~= "displaced" and (GetTime() - foreign.at) <= FOREIGN_WINDOW then
-    left, top = foreign.left, foreign.top
-  end
-
-  local pitch = w + gap
   local anchor = ensureAnchor()
-  local mine, theirs = frames[1]:GetEffectiveScale(), UIParent:GetEffectiveScale()
-  if plain(mine) and plain(theirs) and theirs ~= 0 then anchor:SetScale(mine / theirs) end
-  anchor:ClearAllPoints()
-  anchor:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+  resizeAnchor(frames[1])
+
+  -- ⚠ WHOSE ORIGIN THIS IS. It used to be Blizzard's, re-measured on every pass, which is why
+  -- the row had no position of its own and nothing could be anchored to it. It is the
+  -- PLAYER'S now, held in `Place`, and Blizzard's geometry is consulted exactly once — to
+  -- seed that store the first time, so the login that hands the row a position of its own
+  -- does not appear to move it. A layout pass no longer relocates cap's row, and that is the
+  -- deliberate behaviour change: an Edit Mode move of the Cooldown Manager moves Blizzard's
+  -- row, and cap's row stays where the player put it (`/cap move reset` re-seeds).
+  if not P.place:Store().placed then
+    local left, top = origin(frames)
+    if not left then return false end
+    anchor:ClearAllPoints()
+    anchor:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+    P.place:Seed()
+  end
+  P.place:Apply()
+
+  -- The drift auditor compares absolute coordinates, so the row's expectations are derived
+  -- from where the panel actually landed rather than from what was asked for. A panel whose
+  -- rect will not answer is not a reason to place frames at a guessed origin: bail, and let
+  -- the next event try again.
+  local left, top = anchor:GetLeft(), anchor:GetTop()
+  if not (plain(left) and plain(top)) then return false end
+
+  local _, _, cell, gap = grid()
+  local pitch = cell + gap
 
   -- Stamped before the write, not after: `onFramePoint` fires synchronously inside the
   -- SetPoint below, and a stale expectation there would undo the move being made.
@@ -605,7 +680,7 @@ end
 
 -- One pass per burst: a spec swap raises several of these events back to back, and each
 -- one would otherwise re-measure a layout that is still in flight.
-local function schedule(why)
+function schedule(why)
   if not P.armed or P.pending then return end
   P.pending = true
   C_Timer.After(0, function()
@@ -730,6 +805,10 @@ local function installHooks()
   hooksecurefunc(v, "Layout", function() onStomp("Layout", false) end)
   if EventRegistry then
     EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", function()
+      -- ⚠ Unconditional, unlike the schedule below it: the icon-size setting changes the
+      -- panel's own size whether or not cap is ordering, and a mover that has registered our
+      -- geometry is entitled to a panel whose rect is honest at all times.
+      resizeAnchor(nil)
       if P.armed then schedule("settings") end
     end, Anchor)
   end
@@ -838,7 +917,6 @@ local function disarm()
   mark(("# restored n=%d orphans=%d"):format(#restoring, orphans))
   P.tracked, P.wantOf, P.planned, P.plan = {}, {}, {}, nil
   P.claimed, P.parked, P.parkPending = {}, {}, 0
-  P.foreign = nil
   P.strikes, P.strikeAt, P.dirty, P.generation = 0, nil, false, nil
   return orphans
 end
@@ -1062,6 +1140,12 @@ end)
 -- ---------------------------------------------------------------------------
 -- The command
 -- ---------------------------------------------------------------------------
+
+-- The panel exists from load, not from the first successful arm. `/cap move` must be able to
+-- offer it before the Cooldown Manager has drawn anything, a mover can only register a frame
+-- that already exists, and its size comes from the tokens rather than from a measurement — so
+-- there is nothing left to wait for.
+ensureAnchor()
 
 local function statusLine()
   if not P.armed then

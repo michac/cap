@@ -45,5 +45,7 @@ uv run python -m wowkb.addon release cap [--patch|--minor|--major]
 It checks Lua and tests, bumps the `.toc`, commits, pushes, creates a GitHub release and
 deploys that release. It refuses a dirty addon worktree.
 
-Releasing is ask-first. A push alone does not deploy anything. Read the live version with
+Releasing does **not** need asking (2026-08-31) — the standing authorization and the three
+gates that make it cheap live in the workspace's `projects/combat-assist/CLAUDE.md`
+§ Releasing. A push alone does not deploy anything. Read the live version with
 `wowkb.addon list`; never hardcode it here.

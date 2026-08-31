@@ -19,17 +19,21 @@ local function loadAnchor()
     RegisterCommand = function() end,
   }
   -- Core.lua FIRST: Anchor binds its fenced reads (`ns.num`, `ns.plain`, `ns.SpecAndHero`) as
-  -- file-locals at load, so they have to be on the namespace before the chunk runs.
+  -- file-locals at load, so they have to be on the namespace before the chunk runs. Place.lua
+  -- next, because Anchor builds its row panel at file scope and registers it as placeable —
+  -- eagerly and not on an event, so that `/cap move` can offer the panel before the Cooldown
+  -- Manager has drawn anything.
   H.load(ns, "Core.lua")
+  H.load(ns, "Place.lua")
   H.load(ns, "Anchor.lua")
 
   -- The module captured the stub as a file-local at load, so the pure functions keep
   -- working once the globals go back to being absent.
   _G.issecretvalue, _G.CreateFrame, _G.SlashCmdList = wasSecret, wasCreate, wasSlash
-  return ns.Anchor
+  return ns.Anchor, ns
 end
 
-local Anchor = loadAnchor()
+local Anchor, ANS = loadAnchor()
 
 local function rows(...)
   local out = {}
@@ -190,5 +194,72 @@ describe("Anchor.Diagnose", function()
 
   it("treats a missing census as an absent viewer rather than erroring", function()
     assert.equal("no-viewer", (Anchor.Diagnose(nil)))
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- The grid
+--
+-- The panel's rect is a claim about how many icons fit and how far apart they sit. It is
+-- FIXED — read from the tokens, never measured — which is the whole reason the row can be
+-- dragged and anchored to before the Cooldown Manager has drawn a single frame.
+-- ---------------------------------------------------------------------------
+
+describe("engine / anchor grid", function()
+  local was
+  before_each(function() was = ANS.Style end)
+  after_each(function() ANS.Style = was end)
+
+  it("reads the declared grid", function()
+    ANS.Style = { row = { cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    local cols, rows_, cell, gap = Anchor.Grid()
+    assert.are.equal(6, cols)
+    assert.are.equal(2, rows_)
+    assert.are.equal(50, cell)
+    assert.are.equal(1, gap)
+  end)
+
+  -- Six 50-wide cells with five 1-wide gaps between them, and two such rows.
+  it("sizes the panel as cells plus the gaps between them, never a trailing one", function()
+    ANS.Style = { row = { cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    local w, h = Anchor.GridSize()
+    assert.are.equal(6 * 50 + 5 * 1, w)
+    assert.are.equal(2 * 50 + 1 * 1, h)
+  end)
+
+  -- Blizzard's item template is 50x50, so a smaller cell would draw icons over each other.
+  -- The floor is a token-authoring guard, not a runtime one.
+  it("floors the cell at the item template's own size", function()
+    ANS.Style = { row = { cols = 2, rows = 1, cell_px = 20, cell_floor_px = 50, gap_px = 0 } }
+    local _, _, cell = Anchor.Grid()
+    assert.are.equal(50, cell)
+    assert.are.equal(100, (Anchor.GridSize()))
+  end)
+
+  it("takes a cell LARGER than the floor as authored", function()
+    ANS.Style = { row = { cols = 1, rows = 1, cell_px = 64, cell_floor_px = 50, gap_px = 0 } }
+    local _, _, cell = Anchor.Grid()
+    assert.are.equal(64, cell)
+  end)
+
+  -- ⚠ The icon-size setting is carried by the panel's SCALE, so it must not appear in these
+  -- lengths as well. A grid that changed with iconScale would count it twice, and the panel
+  -- would be the square of the setting away from the row it is supposed to hold.
+  it("does not vary with the viewer's icon scale", function()
+    ANS.Style = { row = { cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    local before = Anchor.GridSize()
+    _G.EssentialCooldownViewer = { iconScale = 1.5 }
+    local after = Anchor.GridSize()
+    _G.EssentialCooldownViewer = nil
+    assert.are.equal(before, after)
+  end)
+
+  it("falls back to a whole 6x2 grid when the tokens are missing", function()
+    ANS.Style = nil
+    local cols, rows_, cell, gap = Anchor.Grid()
+    assert.are.equal(6, cols)
+    assert.are.equal(2, rows_)
+    assert.are.equal(50, cell)
+    assert.are.equal(1, gap)
   end)
 end)
