@@ -649,9 +649,22 @@ function Sense.Health()
 end
 
 --- The signal verdicts a surface should draw, or nil when cap must draw nothing. The one
---- place the settle and the dark-for-the-fight rule are enforced, rather than re-derived
---- once per surface.
+--- place the settle, the dark-for-the-fight rule and the ordering rule are enforced, rather
+--- than re-derived once per surface.
 function Sense.Verdicts()
+  -- ⚠ THE LINE IN THE SAND, and it is a PRODUCT rule rather than a safety one (`spec.md`
+  -- §1): ordering and the augments are one product, not two features that can be run apart.
+  -- §3.1's whole reading — "scan left to right, press the first thing not ruled out" — is a
+  -- claim about POSITION, so an overlay drawn on a row cap did not order tells the player to
+  -- read left-to-right something whose left-to-right means nothing. cap cannot order while
+  -- the setting is off or while it has stood down beside another rider
+  -- (`Anchor.Ordering` reads both), so in either state it draws NOTHING AT ALL.
+  --
+  -- ⚠ It is enforced here rather than in each surface deliberately. There are two subscribers
+  -- today (`Overlay` and `Panel`) and a third would inherit the rule for free; starving them
+  -- of verdicts is also what makes them HIDE, because nil is already the "draw nothing" path
+  -- every one of them handles.
+  if not (ns.Anchor and ns.Anchor.Ordering and ns.Anchor.Ordering()) then return nil end
   if not (state.bound and state.settled and not state.dark) then return nil end
   return state.lastOut, state.bound
 end

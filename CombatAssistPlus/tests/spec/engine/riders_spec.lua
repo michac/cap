@@ -74,7 +74,13 @@ describe("Riders.Message", function()
     assert.truthy(text:find("Another addon is also arranging", 1, true))
   end)
 
-  it("tells the player the row's order is not cap's, which is the point of saying it", function()
-    assert.truthy(Riders.Message({ "ArcUI" }, true):find("should not be read as a priority", 1, true))
+  -- ⚠ This assertion used to require the OPPOSITE half of the sentence: that the row's order
+  -- is not cap's and "should not be read as a priority". That was cap admitting in words that
+  -- its own overlay had stopped meaning anything, and then drawing it regardless. Ordering and
+  -- the augments are one product (`spec.md` §1), so the message now says cap has gone dark.
+  it("tells the player cap is drawing nothing, not that its overlay has become unreliable", function()
+    local text = Riders.Message({ "ArcUI" }, true)
+    assert.truthy(text:find("drawing nothing", 1, true))
+    assert.is_nil(text:find("should not be read as a priority", 1, true))
   end)
 end)

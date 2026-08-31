@@ -64,7 +64,9 @@ function Riders.Message(labels, managing)
   local who, verb = Riders.Phrase(labels), (#labels == 1 and "is" or "are")
   if not who then who, verb = "Another addon", "is" end
   return who .. " " .. verb .. " also arranging the Cooldown Manager's icons. Two addons "
-    .. "cannot order the same icons, so cap's row ordering is off — the row's "
-    .. "left-to-right order is not cap's and should not be read as a priority.\n\n"
-    .. "Disable one of them and reload to get cap's order back."
+    .. "cannot order the same icons, so cap has stood down.\n\n"
+    .. "Combat Assist Plus is drawing nothing. Its whole reading is left-to-right, so an "
+    .. "overlay on a row it did not order would be pointing at the wrong icon — better "
+    .. "nothing than a scan that lies.\n\n"
+    .. "Disable one of them and reload to get cap back."
 end

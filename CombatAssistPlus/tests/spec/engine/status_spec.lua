@@ -27,8 +27,8 @@ describe("engine / status verdict", function()
     return h
   end
 
-  local function state(enabled, bind, health)
-    local s = verdict(enabled, bind, health)
+  local function state(enabled, bind, health, notOrdering)
+    local s = verdict(enabled, bind, health, notOrdering)
     return (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
   end
 
@@ -68,5 +68,36 @@ describe("engine / status verdict", function()
 
   it("reports a bound roster of zero rather than claiming to work", function()
     assert.equals("NOT DRAWING", state(true, ok(), healthy{ bound = 0 }))
+  end)
+
+  -- ⚠ THE LINE IN THE SAND (`spec.md` §1). Ordering and the augments are one product: the
+  -- scan is a claim about POSITION, so on a row cap did not order there is nothing true to
+  -- draw. These protect the PLACE of that term in the order — it sits directly under "off",
+  -- above every finer diagnosis, because while it holds none of them is worth reporting.
+  it("reports not ordering above every finer diagnosis", function()
+    assert.equals("DARK — NOT ORDERING",
+      state(true, ok(), healthy{ settled = false, dark = true }, "off"))
+  end)
+
+  it("still reports being switched off first, since that is the one the player did", function()
+    assert.equals("OFF", state(false, ok(), healthy(), "off"))
+  end)
+
+  it("names a rider stand-down as the same dark state", function()
+    assert.equals("DARK — NOT ORDERING", state(true, ok(), healthy(), "rider"))
+  end)
+
+  it("says nothing about ordering when cap is ordering", function()
+    assert.equals("WORKING", state(true, ok(), healthy(), nil))
+  end)
+
+  -- The two causes are not interchangeable to a player: one is a setting they can flip and
+  -- one is another addon they have to disable, so the ADVICE has to differ even though the
+  -- state does not.
+  it("gives a different reason for each cause", function()
+    local _, offWhy = verdict(true, ok(), healthy(), "off")
+    local _, riderWhy = verdict(true, ok(), healthy(), "rider")
+    assert.truthy(offWhy:find("/cap anchor on", 1, true))
+    assert.truthy(riderWhy:find("another addon", 1, true))
   end)
 end)

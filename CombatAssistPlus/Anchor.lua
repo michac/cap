@@ -958,6 +958,16 @@ function Anchor.Ordering()
 end
 _G._CAP_IsOrderingEnabled = Anchor.Ordering
 
+--- WHY cap is not ordering — `"off"` or `"rider"` — or nil when it is. Separate from
+--- `Ordering()` because the two readers want different things: a foreign conflict table wants
+--- the boolean, and `/cap status` has to name the cause, since "cap is drawing nothing" is
+--- only actionable with the reason beside it.
+function Anchor.NotOrdering()
+  if not Anchor.Enabled() then return "off" end
+  if P.stoodDown then return "rider" end
+  return nil
+end
+
 --- Returns ok, reason. `reason` is nil on success and on a silent retry-later.
 local function arm()
   -- The backstop latches for the session: it fired inside somebody's SetPoint, and arming

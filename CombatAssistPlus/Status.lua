@@ -22,8 +22,21 @@ end
 --- The first line, and the only one most readings need. Ordered by what a player would fix
 --- first, so the FIRST failing term is named and the rest are not — a list of six complaints
 --- when one of them is the cause is how a diagnosis becomes noise.
-local function verdict(enabled, bind, health)
+--- `notOrdering` is `Anchor.NotOrdering()`'s answer — "off", "rider", or nil — passed IN
+--- rather than read off the namespace, so this stays a pure classifier over its arguments.
+local function verdict(enabled, bind, health, notOrdering)
   if not enabled then return ERR .. "OFF" .. R, "you turned it off — /cap toggle" end
+  -- Second, and above everything below it: without the order there is nothing true to draw
+  -- (`spec.md` §1), so every finer diagnosis underneath is moot while this holds.
+  if notOrdering == "off" then
+    return ERR .. "DARK — NOT ORDERING" .. R,
+      "row ordering is off, and the scan is a claim about position — cap draws nothing "
+      .. "without it (/cap anchor on)"
+  elseif notOrdering then
+    return ERR .. "DARK — NOT ORDERING" .. R,
+      "another addon is arranging the Cooldown Manager's icons, so cap cannot order the row "
+      .. "and draws nothing (/cap anchor for the details)"
+  end
   if not health.catalog then
     return WARN .. "NO CATALOG" .. R, "this spec and hero pair has none, which is by design"
   end
@@ -50,7 +63,8 @@ local function cmdStatus()
   local bind = (ns.Bind and ns.Bind.Snapshot and ns.Bind.Snapshot()) or {}
   local health = (ns.Sense and ns.Sense.Health and ns.Sense.Health()) or {}
 
-  local state, why = verdict(enabled, bind, health)
+  local state, why = verdict(enabled, bind, health,
+    ns.Anchor and ns.Anchor.NotOrdering and ns.Anchor.NotOrdering())
   ns.Emit(("Combat Assist Plus %s — %s"):format(ns.version or "?", state))
   if why then ns.Emit("  " .. why) end
 
