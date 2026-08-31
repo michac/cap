@@ -585,6 +585,70 @@ function Catalog.Check(cat)
   if cat.bar ~= nil and (type(cat.bar) ~= "string" or not entries[cat.bar]) then
     fail("shape", tostring(cat.bar), "bar must name one enhanced entry")
   end
+
+  -- ⚠ THE ROW BREAK IS A CATALOG-LEVEL KEY, checked here rather than in the entry loop above,
+  -- because it names an entry instead of describing one. There is exactly one per catalog.
+  --
+  -- The panel is `cols x rows` cells and that count is authored in `render-tokens.json`, so it
+  -- is READ here and never written as a literal: making the row wider is meant to be a token
+  -- edit, and a hardcoded 12 would quietly turn it back into a code change. `Anchor.Grid` is
+  -- the arithmetic but cannot be called from here — `tests/check_catalog.lua` loads this file
+  -- without `Anchor.lua`, which builds a frame at file scope — so the two token values are read
+  -- directly and nothing else about the grid is re-derived.
+  local style = (ns.Style or {}).row or {}
+  local cols = type(style.cols) == "number" and style.cols or 6
+  local rowCount = type(style.rows) == "number" and style.rows or 2
+
+  -- Only the entries that get a Cooldown Manager row. A virtual entry is cap's own icon and
+  -- has no cell here by construction, so counting it would fail a catalog that fits.
+  local placed, at = {}, {}
+  for _, entry in ipairs(cat.entries or {}) do
+    if type(entry.id) == "string" and not entry.virtual then
+      placed[#placed + 1] = entry.id
+      at[entry.id] = #placed
+    end
+  end
+
+  local breakIndex
+  if cat.break_before ~= nil then
+    if type(cat.break_before) ~= "string" then
+      fail("shape", tostring(cat.break_before), "break_before must be an entry id")
+    elseif not entries[cat.break_before] then
+      fail("shape", cat.break_before, "break_before names an undeclared entry")
+    elseif not at[cat.break_before] then
+      -- A virtual entry never reaches `Resolve`'s `byEntry`, so a break on one would fall
+      -- through on every build and the key would do nothing, forever, with no error. A
+      -- permanent no-op is worse than a refusal.
+      fail("shape", cat.break_before, "break_before names a virtual entry, which has no row")
+    elseif at[cat.break_before] == 1 then
+      fail("shape", cat.break_before, "break_before names the first entry, so nothing precedes it")
+    else
+      breakIndex = at[cat.break_before]
+    end
+  end
+
+  -- ⚠ A TRIPWIRE FOR AUTHORING, NOT A SAFETY NET. `Anchor.Plan` appends every viewer row the
+  -- catalog does not name after the named ones, so a player enabling one extra ability in the
+  -- Essential viewer can overflow a catalog that passes here — from outside the catalog's
+  -- control and invisibly to anything static. The column clamp in `Anchor.Cells` is what
+  -- actually holds at runtime; this is what tells an author before they ship.
+  local n = #placed
+  if n > cols * rowCount then
+    fail("shape", nil, ("catalog places %d entries; the panel holds %d (%dx%d)")
+      :format(n, cols * rowCount, cols, rowCount))
+  elseif breakIndex then
+    -- The break decides the SPLIT, so a total that fits is not sufficient: a break authored
+    -- late runs the first row past the panel's edge even though the roster fits the panel.
+    if breakIndex - 1 > cols then
+      fail("shape", cat.break_before,
+        ("%d entries precede the break; a row holds %d"):format(breakIndex - 1, cols))
+    end
+    if n - breakIndex + 1 > cols then
+      fail("shape", cat.break_before,
+        ("%d entries follow the break; a row holds %d"):format(n - breakIndex + 1, cols))
+    end
+  end
+
   return found
 end
 

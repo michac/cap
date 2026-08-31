@@ -340,3 +340,247 @@ describe("engine / anchor grid", function()
     assert.are.equal(1, gap)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- The second row (Phase 2)
+-- ---------------------------------------------------------------------------
+
+describe("Anchor.Plan break", function()
+  local function e(...) return entries(...) end
+
+  it("is nil when the catalog authors no break, and the order is untouched", function()
+    local plan = Anchor.Plan(rows(10, 20, 30), e({ "a", 10 }, { "b", 20 }, { "c", 30 }))
+    assert.is_nil(plan.breakAt)
+    assert.same({ 10, 20, 30 }, ids(plan))
+  end)
+
+  it("points at the authored entry when every entry is present", function()
+    local plan = Anchor.Plan(rows(10, 20, 30, 40),
+      e({ "a", 10 }, { "b", 20 }, { "c", 30 }, { "d", 40 }), "c")
+    assert.are.equal(3, plan.breakAt)
+  end)
+
+  -- The nominal talent change: the break entry is not talented this build, so the row still
+  -- has to start somewhere and it starts at the next thing that is.
+  it("falls through to the next present entry when the break entry is absent", function()
+    local plan = Anchor.Plan(rows(10, 20, 40),
+      e({ "a", 10 }, { "b", 20 }, { "c", 99 }, { "d", 40 }), "c")
+    assert.same({ 10, 20, 40 }, ids(plan))
+    assert.are.equal(3, plan.breakAt)
+  end)
+
+  -- The break falls off the end. One row, not an empty second one, and above all not an error:
+  -- this is reachable by a talent change, which is exactly when nobody is looking.
+  it("runs past the end when every entry from the break onward is absent", function()
+    local plan = Anchor.Plan(rows(10, 20),
+      e({ "a", 10 }, { "b", 20 }, { "c", 98 }, { "d", 99 }), "c")
+    assert.are.equal(3, plan.breakAt)
+    assert.are.equal(2, #plan.order)
+    -- Past the end, so `Cells` puts everything on the first row.
+    local layout = Anchor.Cells(#plan.order, plan.breakAt, 6, 51)
+    assert.are.equal(0, layout[1].y)
+    assert.are.equal(0, layout[2].y)
+  end)
+
+  it("puts one icon on the second row when the break is the last entry", function()
+    local plan = Anchor.Plan(rows(10, 20, 30), e({ "a", 10 }, { "b", 20 }, { "c", 30 }), "c")
+    assert.are.equal(3, plan.breakAt)
+    local layout = Anchor.Cells(#plan.order, plan.breakAt, 6, 51)
+    assert.are.equal(0, layout[2].y)
+    assert.are.equal(-51, layout[3].y)
+  end)
+
+  -- The dedup case `Catalog.Resolve` cannot see: `byEntry` holds "b", but Plan dropped it
+  -- because "a" already took row 10. Resolving the break in plan space is what gets this right.
+  it("falls through when the break entry's row was already claimed by an earlier entry", function()
+    local plan = Anchor.Plan(rows(10, 30), e({ "a", 10 }, { "b", 10 }, { "c", 30 }), "b")
+    assert.same({ 10, 30 }, ids(plan))
+    assert.same({ "b" }, plan.missing)
+    assert.are.equal(2, plan.breakAt)
+  end)
+
+  it("sends rows the catalog does not name to the tail of the second row", function()
+    local plan = Anchor.Plan(rows(10, 20, 70, 80), e({ "a", 10 }, { "b", 20 }), "b")
+    assert.same({ 10, 20, 70, 80 }, ids(plan))
+    assert.are.equal(2, plan.breakAt)
+  end)
+
+  it("ignores a break naming an entry the catalog does not author", function()
+    local plan = Anchor.Plan(rows(10, 20), e({ "a", 10 }, { "b", 20 }), "nope")
+    assert.is_nil(plan.breakAt)
+  end)
+end)
+
+describe("Anchor.Cells", function()
+  -- ⚠ THE SIGN, ASSERTED AS A SIGN. A positive y draws the second row ABOVE the first and the
+  -- drift auditor reports zero drift either way, because `want.top` is wrong in the same
+  -- direction. Nothing else in the addon can catch this.
+  it("descends: the second row is NEGATIVE y, never positive", function()
+    local layout = Anchor.Cells(4, 3, 6, 51)
+    assert.are.equal(0, layout[1].y)
+    assert.are.equal(0, layout[2].y)
+    assert.is_true(layout[3].y < 0)
+    assert.are.equal(-51, layout[3].y)
+    assert.are.equal(-51, layout[4].y)
+  end)
+
+  it("left-aligns both rows, so x resets to 0 at the break", function()
+    local layout = Anchor.Cells(5, 3, 6, 51)
+    assert.same({ 0, 51, 0, 51, 102 },
+      { layout[1].x, layout[2].x, layout[3].x, layout[4].x, layout[5].x })
+  end)
+
+  -- The one-row case has to stay exactly what shipped, because every catalog but Havoc is it.
+  it("reproduces the old single-axis layout with no break and a roster that fits", function()
+    local layout = Anchor.Cells(6, nil, 6, 51)
+    for i = 1, 6 do
+      assert.are.equal((i - 1) * 51, layout[i].x)
+      assert.are.equal(0, layout[i].y)
+    end
+  end)
+
+  -- The clamp. Before this, a roster longer than the panel ran off its right edge in one line.
+  it("wraps at the column count even with no break authored", function()
+    local layout = Anchor.Cells(12, nil, 6, 51)
+    assert.are.equal(255, layout[6].x)
+    assert.are.equal(0, layout[6].y)
+    assert.are.equal(0, layout[7].x)
+    assert.are.equal(-51, layout[7].y)
+  end)
+
+  it("treats the break as a minimum wrap point, not the only one", function()
+    -- Break at 9 of 12: without the clamp the first row would run two cells past the edge.
+    local layout = Anchor.Cells(12, 9, 6, 51)
+    assert.is_true(layout[7].y < 0)
+    assert.are.equal(-51, layout[7].y)
+    -- And the authored break still forces its own wrap, onto a third row here.
+    assert.are.equal(0, layout[9].x)
+    assert.are.equal(-102, layout[9].y)
+  end)
+
+  it("does not skip a row when the break lands where a row already ended", function()
+    -- 6 columns and a break at 7: the column clamp has just wrapped, so the break must not
+    -- wrap again and leave an empty row behind it.
+    local layout = Anchor.Cells(8, 7, 6, 51)
+    assert.are.equal(0, layout[7].x)
+    assert.are.equal(-51, layout[7].y)
+  end)
+
+  it("returns an empty layout for an empty roster", function()
+    assert.same({}, Anchor.Cells(0, nil, 6, 51))
+  end)
+end)
+
+describe("Anchor.ReadOrder", function()
+  local function seen(...)
+    local out = {}
+    for _, t in ipairs({ ... }) do
+      out[#out + 1] = { cooldownID = t[1], left = t[2], top = t[3] }
+    end
+    return out
+  end
+
+  local function idsOf(list)
+    local out = {}
+    for i, e in ipairs(list) do out[i] = e.cooldownID end
+    return out
+  end
+
+  it("matches the old left-only result on a single row", function()
+    local ordered = Anchor.ReadOrder(seen({ 30, 102, 500 }, { 10, 0, 500 }, { 20, 51, 500 }))
+    assert.same({ 10, 20, 30 }, idsOf(ordered))
+  end)
+
+  -- ⚠ The sign test for the SORT. A higher top is higher on screen, so it reads FIRST. An
+  -- all-ascending comparator passes every same-row assertion and silently reverses the rows.
+  it("reads the higher row first, which is the LARGER top", function()
+    local ordered, first = Anchor.ReadOrder(seen(
+      { 40, 51, 449 }, { 10, 0, 500 }, { 30, 0, 449 }, { 20, 51, 500 }))
+    assert.same({ 10, 20, 30, 40 }, idsOf(ordered))
+    assert.are.equal(2, first)
+  end)
+
+  it("counts the whole roster as the first row when there is only one", function()
+    local _, first = Anchor.ReadOrder(seen({ 10, 0, 500 }, { 20, 51, 500 }))
+    assert.are.equal(2, first)
+  end)
+
+  it("has no first row for an empty input", function()
+    local ordered, first = Anchor.ReadOrder({})
+    assert.same({}, ordered)
+    assert.are.equal(0, first)
+  end)
+
+  it("breaks a tie on left, then on cooldownID", function()
+    local ordered = Anchor.ReadOrder(seen({ 30, 0, 500 }, { 10, 0, 500 }, { 20, 51, 500 }))
+    assert.same({ 10, 30, 20 }, idsOf(ordered))
+  end)
+
+  -- ⚠ THE TRANSITIVITY GUARD. A tolerance comparator (`abs(a.top - b.top) > TOL`) is not
+  -- transitive and Lua's table.sort raises `invalid order function for sorting` on a large
+  -- enough shuffled input — a hard error, in a capture path. Sub-unit jitter must sort, not
+  -- throw.
+  it("does not raise on sub-unit jitter in the measured tops", function()
+    local jittered, n = {}, 24
+    for i = 1, n do
+      local row = (i > n / 2) and 1 or 0
+      jittered[#jittered + 1] = {
+        cooldownID = i,
+        left = ((i - 1) % 12) * 51,
+        top = 500 - row * 51 + ((i % 5) - 2) * 0.2,
+      }
+    end
+    -- Shuffled deterministically, so a failure reproduces.
+    for i = #jittered, 2, -1 do
+      local j = (i * 7) % #jittered + 1
+      jittered[i], jittered[j] = jittered[j], jittered[i]
+    end
+    local ok, ordered, first = pcall(Anchor.ReadOrder, jittered)
+    assert.is_true(ok)
+    assert.are.equal(24, #ordered)
+    assert.are.equal(12, first)
+  end)
+end)
+
+describe("Anchor.Render row break", function()
+  local base = {
+    n = 4, named = 4, extra = 0, missing = 0,
+    planned = { 10, 20, 30, 40 }, drawn = { 10, 20, 30, 40 }, match = true, stale = 0,
+    stomps = 0, stompsCombat = 0, displaced = 0, contended = 0, reasserts = 0,
+    parks = 0, parkedNow = 0, staleSeen = 0, strikes = 0,
+  }
+
+  local function with(t)
+    local out = {}
+    for k, v in pairs(base) do out[k] = v end
+    for k, v in pairs(t) do out[k] = v end
+    return out
+  end
+
+  it("marks the split in both orders", function()
+    local body = Anchor.Render(with{ plannedRow0 = 2, drawnRow0 = 2 })
+    assert.is_truthy(body:find("P{10,20|30,40}", 1, true))
+    assert.is_truthy(body:find("D{10,20|30,40}", 1, true))
+  end)
+
+  it("omits the separator when everything is on one row", function()
+    local body = Anchor.Render(with{ plannedRow0 = 4, drawnRow0 = 4 })
+    assert.is_truthy(body:find("P{10,20,30,40}", 1, true))
+    assert.is_falsy(body:find("|", 1, true))
+  end)
+
+  -- ⚠ THE READING THAT MATTERS. Identical id sequences, different splits: the intended two
+  -- rows against a pass that collapsed them onto one. Nothing in `A{}` or the id order can
+  -- show this, which is why the separator is in the orders.
+  it("shows a collapsed second row as a difference between P and D", function()
+    local body = Anchor.Render(with{ plannedRow0 = 2, drawnRow0 = 4, match = false })
+    assert.is_truthy(body:find("P{10,20|30,40}", 1, true))
+    assert.is_truthy(body:find("D{10,20,30,40}", 1, true))
+    assert.is_truthy(body:find("X{MISMATCH}", 1, true))
+  end)
+
+  it("is still deterministic for a given snapshot", function()
+    local snap = with{ plannedRow0 = 2, drawnRow0 = 2 }
+    assert.are.equal(Anchor.Render(snap), Anchor.Render(snap))
+  end)
+end)

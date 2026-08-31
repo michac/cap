@@ -370,6 +370,107 @@ describe("engine / catalog", function()
     end).badge)
   end)
 
+  -- The authored row break. It is a catalog-level key naming an entry, so it is validated
+  -- beside `bar` rather than in the entry-shape loop.
+  describe("break_before", function()
+    it("accepts a catalog that authors none", function()
+      assert.is_nil(cat.break_before)
+      assert.same({}, ns.Catalog.Check(cat))
+    end)
+
+    it("accepts a break naming a later entry", function()
+      local ok = H.copy(cat)
+      ok.break_before = ok.entries[2].id
+      assert.same({}, ns.Catalog.Check(ok))
+    end)
+
+    it("refuses an entry the catalog does not declare", function()
+      local broken = H.copy(cat)
+      broken.break_before = "nosuchentry"
+      assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
+    end)
+
+    it("refuses the first entry, since nothing precedes it", function()
+      local broken = H.copy(cat)
+      broken.break_before = broken.entries[1].id
+      assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
+    end)
+
+    it("refuses a value that is not an entry id", function()
+      for _, bad in ipairs({ 2, true }) do
+        local broken = H.copy(cat)
+        broken.break_before = bad
+        assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape, tostring(bad))
+      end
+    end)
+
+    -- ⚠ A virtual entry has no CDM row by construction, so it never reaches `Resolve`'s
+    -- `byEntry` and a break on one would fall through on every build — a permanent no-op with
+    -- no error behind it, which is worse than a refusal.
+    it("refuses a virtual entry, which has no row to break before", function()
+      local broken = H.copy(cat)
+      broken.entries[2].virtual = true
+      broken.break_before = broken.entries[2].id
+      assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
+    end)
+  end)
+
+  -- ⚠ The panel is `cols x rows` cells and both are authored in `render-tokens.json`, so the
+  -- capacity is READ from the tokens. Widening the row is meant to stay a token edit.
+  --
+  -- Built from scratch rather than cloned from the fixture: the fixture's entries share one
+  -- ability, so cloning them and marking one virtual makes that ability virtual for all of
+  -- them, and the roster fails on the subject rule before capacity is ever reached.
+  describe("the panel's capacity", function()
+    local function synth(n)
+      local built = { spec = "TESTSPEC", name = "capacity fixture", abilities = {}, entries = {} }
+      for i = 1, n do
+        built.abilities[i] = { id = "a" .. i, spell = 90000 + i }
+        built.entries[i] = { id = "e" .. i, ability = "a" .. i }
+      end
+      return built
+    end
+
+    it("is a fixture the checker otherwise accepts", function()
+      assert.same({}, ns.Catalog.Check(synth(2)))
+    end)
+
+    it("accepts a roster that exactly fills the panel", function()
+      local cols, rowCount = ns.Style.row.cols, ns.Style.row.rows
+      assert.same({}, ns.Catalog.Check(synth(cols * rowCount)))
+    end)
+
+    it("refuses one entry more than the panel holds", function()
+      local cols, rowCount = ns.Style.row.cols, ns.Style.row.rows
+      assert.is_truthy(H.checks(ns.Catalog.Check(synth(cols * rowCount + 1))).shape)
+    end)
+
+    -- A total that fits is not sufficient: the break decides the SPLIT, and a break authored
+    -- late runs the first row past the panel's edge even though the roster fits the panel.
+    it("refuses a break that leaves one side wider than a row", function()
+      local cols = ns.Style.row.cols
+      local broken = synth(cols + 2)
+      broken.break_before = "e" .. (cols + 2)
+      assert.is_truthy(H.checks(ns.Catalog.Check(broken)).shape)
+    end)
+
+    it("accepts the same roster split evenly", function()
+      local cols = ns.Style.row.cols
+      local ok = synth(cols + 2)
+      ok.break_before = "e" .. (math.floor(cols / 2) + 1)
+      assert.same({}, ns.Catalog.Check(ok))
+    end)
+
+    -- A virtual entry is cap's own icon and takes no cell in the panel, so counting it would
+    -- fail a catalog that fits.
+    it("does not count a virtual entry against the panel", function()
+      local cols, rowCount = ns.Style.row.cols, ns.Style.row.rows
+      local ok = synth(cols * rowCount + 1)
+      ok.entries[#ok.entries].virtual = "standing"
+      assert.same({}, ns.Catalog.Check(ok))
+    end)
+  end)
+
   it("validates every catalog the addon actually registers", function()
     local all = ns.Catalog.All()
     assert.is_true(#all > 1, "the registry did not load")

@@ -81,7 +81,22 @@ end
 --- `{ id, cooldownID }`; a nil or unmatched cooldownID is skipped and reported rather
 --- than shifting the rest. Rows the catalog does not name keep their relative order and
 --- follow the named ones.
-function Anchor.Plan(rows, entries)
+---
+--- `breakBefore` is the catalog's authored row break — an entry id, or nil for none — and
+--- `plan.breakAt` is where it landed: the 1-based index in `order` of the first item that
+--- belongs to the second row.
+---
+--- ⚠ THE BREAK IS RESOLVED HERE AND NOT IN `Catalog.Resolve`, which is the only place that
+--- can get it right. Resolve knows `byEntry` — "this entry bound to a row" — but it does not
+--- know about the dedup below (two entries naming ONE row means the second is missing even
+--- though `byEntry` holds it) and it does not know about the unnamed rows appended after the
+--- named ones. Both change which item is first past the break.
+---
+--- A break entry that is not talented falls through to the next present entry in authored
+--- order, because the alternative is a hole in the row every time a talent moves. When every
+--- entry from the break onward is absent the break falls off the end (`#order + 1`) and the
+--- second row is simply empty — a talent change must not be able to raise an error here.
+function Anchor.Plan(rows, entries, breakBefore)
   local byID, seen = {}, {}
   for _, row in ipairs(rows or {}) do
     if row.cooldownID ~= nil and byID[row.cooldownID] == nil then byID[row.cooldownID] = row end
@@ -106,7 +121,31 @@ function Anchor.Plan(rows, entries)
     end
   end
 
-  return { order = order, named = named, extra = #order - named, missing = missing }
+  -- The authored position of every entry id, so "at or after the break" is answered against
+  -- the CATALOG's order rather than against the order that survived binding.
+  local breakAt
+  if type(breakBefore) == "string" then
+    local at
+    for i, entry in ipairs(entries or {}) do
+      if entry.id == breakBefore then at = i; break end
+    end
+    if at then
+      local authoredAt = {}
+      for i, entry in ipairs(entries or {}) do authoredAt[entry.id] = i end
+      for i, item in ipairs(order) do
+        local pos = item.entry and authoredAt[item.entry] or nil
+        if pos and pos >= at then breakAt = i; break end
+      end
+      -- Nothing at or after the break survived. The rows the catalog does not name join the
+      -- first row rather than being stranded alone on the second.
+      breakAt = breakAt or (#order + 1)
+    end
+  end
+
+  return {
+    order = order, named = named, extra = #order - named, missing = missing,
+    breakAt = breakAt,
+  }
 end
 
 -- ---------------------------------------------------------------------------
@@ -115,11 +154,21 @@ end
 
 local num = ns.num
 
-local function list(ids)
+--- An id order, with the row break marked by `|` where one applies.
+---
+--- ⚠ THE SEPARATOR IS THE INSTRUMENT, which is why it is in the orders rather than a count in
+--- `A{}`. A `brk:<n>` field there would restate the number the plan already chose and could
+--- never disagree with itself; `P{}` carries the intended split and `D{}` the measured one, so
+--- reading them beside each other is what shows a second row that did not happen.
+local function list(ids, row0)
   if not ids or #ids == 0 then return "-" end
-  local out = {}
-  for i = 1, #ids do out[i] = num(ids[i]) end
-  return table.concat(out, ",")
+  local head, tail = {}, {}
+  for i = 1, #ids do
+    local bucket = (row0 and i > row0) and tail or head
+    bucket[#bucket + 1] = num(ids[i])
+  end
+  if #tail == 0 then return table.concat(head, ",") end
+  return table.concat(head, ",") .. "|" .. table.concat(tail, ",")
 end
 
 --- No frames, no clock, no game reads: every field rides the snapshot the caller built.
@@ -142,8 +191,8 @@ function Anchor.Render(snap)
   if (snap.stale or 0) > 0 then verdict = "STALE:" .. num(snap.stale)
   elseif snap.match then verdict = "ok" end
   return "A{" .. table.concat(a, " ") .. "}"
-    .. " P{" .. list(snap.planned) .. "}"
-    .. " D{" .. list(snap.drawn) .. "}"
+    .. " P{" .. list(snap.planned, snap.plannedRow0) .. "}"
+    .. " D{" .. list(snap.drawn, snap.drawnRow0) .. "}"
     .. " X{" .. verdict .. "}"
     .. " S{" .. table.concat(s, " ") .. "}"
 end
@@ -311,6 +360,35 @@ end
 Anchor.Grid = grid
 Anchor.GridSize = gridSize
 
+--- Where each of `n` icons sits in the panel, as offsets from its TOPLEFT.
+---
+--- ⚠ THE Y SIGN IS THE THING TO GET RIGHT. `SetPoint("TOPLEFT", panel, "TOPLEFT", x, y)` on a
+--- y-up axis means descending a row is NEGATIVE. A positive y would draw the second row ABOVE
+--- the first and the drift auditor would report zero drift, because `want.top` would be wrong
+--- in exactly the same direction — so nothing already in the addon catches this and the sign
+--- is asserted by a test instead.
+---
+--- `breakAt` is a MINIMUM wrap point, not the only one: a row also ends when it runs out of
+--- columns. Without that clamp a break authored late (say entry 9 of 12) would run the first
+--- row past the panel's right edge with no diagnostic, and a catalog with no break at all
+--- would spill its whole roster off the panel in one line — which is what shipped before this
+--- and is exactly what `cols x rows` is supposed to mean.
+local function cells(n, breakAt, cols, pitch)
+  cols = (type(cols) == "number" and cols >= 1) and cols or 1
+  local out, row, col = {}, 0, 0
+  for i = 1, n or 0 do
+    -- Only when the current row has something in it: a break landing on a row that is already
+    -- empty must not skip a row and leave a blank one.
+    if breakAt and i == breakAt and col > 0 then row, col = row + 1, 0 end
+    out[i] = { x = col * pitch, y = -(row * pitch) }
+    col = col + 1
+    if col >= cols then row, col = row + 1, 0 end
+  end
+  return out
+end
+
+Anchor.Cells = cells
+
 --- The scale the panel wears, and the one cap asserts onto every frame it claims, so that one
 --- unit in the panel is one unit on an item frame.
 ---
@@ -430,8 +508,10 @@ local function countParked()
   return n
 end
 
-local function snapshot(drawn, match, stale)
+local function snapshot(drawn, match, stale, drawnRow0)
   return {
+    plannedRow0 = P.row0,
+    drawnRow0 = drawnRow0,
     n = P.plan and #P.plan.order or 0,
     named = P.plan and P.plan.named or 0,
     extra = P.plan and P.plan.extra or 0,
@@ -467,8 +547,8 @@ local function write(body, edge)
 end
 
 local function mark(edge)
-  local drawn, match, stale = Anchor.Drawn()
-  write(Anchor.Render(snapshot(drawn, match, stale)), edge)
+  local drawn, match, stale, drawnRow0 = Anchor.Drawn()
+  write(Anchor.Render(snapshot(drawn, match, stale, drawnRow0)), edge)
 end
 
 local function stampMeta()
@@ -476,7 +556,7 @@ local function stampMeta()
   stream:Meta("viewer", VIEWER)
   stream:Meta("catalog", (ns.Sense and ns.Sense.CatalogName()) or "-")
   stream:Meta("rows", P.plan and #P.plan.order or 0)
-  stream:Meta("intended", list(P.planned))
+  stream:Meta("intended", list(P.planned, P.row0))
   stream:Meta("contended", P.contended)
 end
 
@@ -500,26 +580,69 @@ local function liveID(frame)
   return id
 end
 
---- Tracked cooldownIDs by drawn left edge, whether that agrees with the plan, and how
---- many tracked frames now serve a different row.
+--- Reading order for frames drawn on more than one row: top row first, then left to right.
+---
+--- ⚠ TOP DESCENDS AND LEFT ASCENDS. A higher `GetTop()` is higher on the screen, so the first
+--- row to read is the one with the LARGER top. Sorting both ascending silently reverses the
+--- rows and every capture would then certify the wrong order as the right one.
+---
+--- ⚠ THE BUCKET IS NOT A TOLERANCE, DELIBERATELY. A comparator of the form
+--- `math.abs(a.top - b.top) > TOL` is not transitive, and Lua's `table.sort` raises
+--- `invalid order function for sorting` on a large enough shuffled input — a hard error, in a
+--- capture path, on a frame count nobody tested at. Rounding to a whole unit first is
+--- transitive by construction. Row pitch is at least 51 panel units at any icon size cap will
+--- draw, so a one-unit bucket can never merge two rows.
+function Anchor.ReadOrder(seen)
+  local out = {}
+  for i, e in ipairs(seen or {}) do out[i] = e end
+  table.sort(out, function(a, b)
+    local ta, tb = math.floor(a.top + 0.5), math.floor(b.top + 0.5)
+    if ta ~= tb then return ta > tb end
+    if a.left ~= b.left then return a.left < b.left end
+    return a.cooldownID < b.cooldownID
+  end)
+  -- How many landed on the first row. This is the measurement, and it is the only thing that
+  -- can tell a correct two-row draw from every icon collapsed onto one.
+  local first = 0
+  if out[1] then
+    local top = math.floor(out[1].top + 0.5)
+    for _, e in ipairs(out) do
+      if math.floor(e.top + 0.5) ~= top then break end
+      first = first + 1
+    end
+  end
+  return out, first
+end
+
+--- Tracked cooldownIDs in reading order, whether that agrees with the plan, how many tracked
+--- frames now serve a different row, and how many landed on the first row.
+---
+--- ⚠ THE ROW SPLIT IS PART OF THE VERDICT, and it has to be. The id sequence alone cannot see
+--- it: a pass that collapsed all twelve icons onto one row produces exactly the same sequence
+--- as the correct two-row draw, so `match` on ids alone would read `ok` forever and the phase
+--- that added the second row would ship with no instrument for the only thing it added.
+---
+--- ⚠ Parked frames are absent from `P.tracked` and must stay that way. They sit at the park
+--- offset, far above the panel, so they would sort ahead of the first row and take the split
+--- with them. Walking `P.claimed` here instead would corrupt every capture.
 function Anchor.Drawn()
   local seen, stale = {}, 0
   for _, t in ipairs(P.tracked) do
     local live = liveID(t.frame)
     if live ~= nil and live ~= t.cooldownID then stale = stale + 1 end
-    local left = geometry(t.frame)
-    if left then seen[#seen + 1] = { cooldownID = t.cooldownID, left = left } end
+    local left, top = geometry(t.frame)
+    if left then seen[#seen + 1] = { cooldownID = t.cooldownID, left = left, top = top } end
   end
-  table.sort(seen, function(a, b)
-    if a.left ~= b.left then return a.left < b.left end
-    return a.cooldownID < b.cooldownID
-  end)
-  local drawn, match = {}, #seen == #P.planned
-  for i = 1, #seen do
-    drawn[i] = seen[i].cooldownID
+  local ordered, firstRow = Anchor.ReadOrder(seen)
+  local drawn, match = {}, #ordered == #P.planned
+  for i = 1, #ordered do
+    drawn[i] = ordered[i].cooldownID
     if drawn[i] ~= P.planned[i] then match = false end
   end
-  return drawn, match, stale
+  -- Only once a pass has actually placed frames: before that `P.row0` is nil and there is no
+  -- claim to disagree with.
+  if P.row0 and firstRow ~= P.row0 then match = false end
+  return drawn, match, stale, firstRow
 end
 
 -- ---------------------------------------------------------------------------
@@ -703,8 +826,16 @@ local function apply(why)
   local left, top = anchor:GetLeft(), anchor:GetTop()
   if not (plain(left) and plain(top)) then return false end
 
-  local _, _, cell, gap = grid()
+  local cols, _, cell, gap = grid()
   local pitch = cell + gap
+  local layout = cells(#P.tracked, P.plan and P.plan.breakAt or nil, cols, pitch)
+  -- The claim the drift auditor and the capture are judged against: how many icons this pass
+  -- put on the first row. Recorded from the geometry actually used, not from `breakAt`, so
+  -- the column clamp is included in what gets checked.
+  P.row0 = 0
+  for _, c in ipairs(layout) do
+    if c.y == 0 then P.row0 = P.row0 + 1 end
+  end
 
   -- Stamped before the write, not after: `onFramePoint` fires synchronously inside the
   -- SetPoint below, and a stale expectation there would undo the move being made.
@@ -712,8 +843,11 @@ local function apply(why)
   -- Per pass, because the question is "did THIS re-assert land", not "has one ever failed".
   P.scaleFails = 0
   for i, t in ipairs(P.tracked) do
-    local x = (i - 1) * pitch
-    local want = { x = x, y = 0, left = left + x, top = top }
+    local c = layout[i]
+    -- `want.top` is `top + y` with y NEGATIVE below the first row, because it is an absolute
+    -- coordinate the auditor compares against `frame:GetTop()` and the frame's own top is
+    -- `top + y` by construction of the SetPoint. Not `top - y`, and not `top`.
+    local want = { x = c.x, y = c.y, left = left + c.x, top = top + c.y }
     P.wantOf[t.frame] = want
     place(t.frame, want)
   end
@@ -937,9 +1071,12 @@ end
 --- cap's coordinates, inside a row that reads as a priority scan, in nobody's order. The
 --- commonest way in is a live `GetCooldownID()` that stopped matching, which takes the row out
 --- of `Bind`'s list without taking the icon off the screen.
-local function adopt(rows, entries)
-  P.plan = Anchor.Plan(rows, entries)
+local function adopt(rows, entries, breakBefore)
+  P.plan = Anchor.Plan(rows, entries, breakBefore)
   P.tracked, P.planned = {}, {}
+  -- Cleared, not carried: the previous pass's row split is a claim about frames this one is
+  -- about to replace, and `apply` sets it again from the geometry it uses.
+  P.row0 = nil
   local inPlan = {}
   for i, item in ipairs(P.plan.order) do
     P.tracked[i] = { cooldownID = item.cooldownID, frame = item.row.frame }
@@ -992,6 +1129,7 @@ local function disarm()
   end
   mark(("# restored n=%d orphans=%d"):format(#restoring, orphans))
   P.tracked, P.wantOf, P.planned, P.plan = {}, {}, {}, nil
+  P.row0 = nil
   P.claimed, P.parked, P.parkPending = {}, {}, 0
   P.strikes, P.strikeAt, P.dirty, P.generation = 0, nil, false, nil
   return orphans
@@ -1074,7 +1212,7 @@ local function arm()
   end
   P.stoodDown = nil
 
-  adopt(rows, entries)
+  adopt(rows, entries, cat.break_before)
   P.armed = true
   installHooks()
   mark("# armed")
@@ -1108,7 +1246,7 @@ function rearm(why)
     standDown(rider)
     return false
   end
-  adopt(rows, entries)
+  adopt(rows, entries, cat.break_before)
   P.dirty = false
   mark("# rearmed why=" .. why)
   stampMeta()
