@@ -25,6 +25,12 @@ local ROW_NAME = "CombatAssistPlusRow"
 -- Blizzard's item template is 50x50 (CooldownViewer.xml, CooldownViewerEssentialItemTemplate),
 -- so a cell narrower than this would overlap icons whatever the tokens say.
 local CELL_FLOOR = 50
+-- The item template's own size, and the divisor that turns cap's authored `icon_px` into the
+-- scale the panel and the claimed frames both wear. Same number as CELL_FLOOR and deliberately
+-- NOT the same constant: one is a floor on a token, this is a fact about Blizzard's frame
+-- *[T1 src @12.1.0: Blizzard_CooldownViewer/CooldownViewer.xml —
+-- CooldownViewerEssentialItemTemplate]*.
+local ITEM_TEMPLATE_PX = 50
 -- Where the panel sits before it has ever been placed. Nearly unreachable: the first apply
 -- SEEDS the saved position from wherever the Cooldown Manager drew the row, and `/cap move
 -- reset` clears the seed so the next apply takes it again. This is the fallback for a reset
@@ -277,10 +283,11 @@ local schedule
 -- ---------------------------------------------------------------------------
 -- The grid
 --
--- ⚠ EVERY NUMBER HERE IS IN THE PANEL'S OWN COORDINATE SPACE. The panel is scaled to match
--- the item frames (see `rowScale`), so Edit Mode's icon-size setting arrives as that SCALE
--- and must not be multiplied into these lengths as well — `GetWidth` on an item frame reads
--- 50 whatever `SetScale` did to it. A cell of `50 x iconScale` would count it twice.
+-- ⚠ EVERY NUMBER HERE IS IN THE PANEL'S OWN COORDINATE SPACE. The panel and the frames it
+-- holds wear ONE shared effective scale, cap's own (see `rowScale`), so these lengths are in
+-- template units and the authored `icon_px` must not be multiplied into them as well —
+-- `GetWidth` on an item frame reads 50 whatever `SetScale` did to it, so a cell of
+-- `50 x icon_px` would count the size twice.
 --
 -- Fixed cell counts are the point: the panel's rect is known at login, so it never waits for
 -- the Cooldown Manager to draw before it can be dragged or anchored to.
@@ -304,21 +311,52 @@ end
 Anchor.Grid = grid
 Anchor.GridSize = gridSize
 
---- The scale the panel wears so that one unit in it is one unit on an item frame. Measured
---- off a live frame when there is one; before that, Edit Mode's icon-size setting is the
---- estimate, since the viewer itself is unscaled by default
---- *[T1 src @12.1.0: Blizzard_EditMode/Shared/EditModeSystemTemplates.lua —
---- EditModeCooldownViewerSystemMixin:UpdateSystemSettingIconSize]*.
-local function rowScale(frame)
-  if frame then
-    local mine, theirs = frame:GetEffectiveScale(), UIParent:GetEffectiveScale()
-    if plain(mine) and plain(theirs) and theirs ~= 0 then return mine / theirs end
-  end
-  local v = viewer()
-  local s = v and v.iconScale
-  if plain(s) and s > 0 then return s end
-  return 1
+--- The scale the panel wears, and the one cap asserts onto every frame it claims, so that one
+--- unit in the panel is one unit on an item frame.
+---
+--- ⚠ IT IS CAP'S NUMBER, NOT BLIZZARD'S, and that is the whole point. This used to MEASURE a
+--- live item frame and fall back to the viewer's `iconScale`, which made Edit Mode's icon-size
+--- setting an input cap had to chase: the panel's rect moved under a setting nobody had
+--- decided cap should follow, it cost the v0.18.1 rescale re-apply, and it is why a count band
+--- sized once at arm time goes stale (`specs/backlog.md`). Authority was inverted on
+--- 2026-08-31 — cap declares the icon size, the Cooldown Manager's frames are scaled to fit it.
+--- `icon_px` defaults to the template's own 50, so the default draws pixel-identically to
+--- Blizzard's and only an edit to `render-tokens.json` resizes the row.
+local function rowScale()
+  local t = ns.Style and ns.Style.row
+  local px = type(t) == "table" and t.icon_px or nil
+  -- ⚠ `plain` answers "present and readable", NOT "is a number" — a hand-edited token can be a
+  -- string, and `px > 0` on one is a hard error rather than a fallback. Type first.
+  if type(px) ~= "number" or not (plain(px) and px > 0) then px = ITEM_TEMPLATE_PX end
+  return px / ITEM_TEMPLATE_PX
 end
+
+--- The scale to put ON an item frame so its EFFECTIVE scale equals the panel's.
+---
+--- ⚠ Anchoring is not parenting: a claimed frame stays a child of the viewer
+--- (`knowledge/addon-dev/cooldown-manager.md` — re-anchoring an item frame does not break its
+--- parent chain), so its effective scale is its own times the VIEWER's, while the panel's is
+--- its own times UIParent's. Dividing by the parent's ratio is what keeps the two spaces equal
+--- when those differ; when they do not, this is just `rowScale()`. Getting it wrong would
+--- reintroduce the v0.18.1 bug one level down — placement offsets are written raw precisely
+--- because the two frames share a scale.
+local function itemScale(frame)
+  local want = rowScale()
+  local parent = frame and frame.GetParent and frame:GetParent()
+  local theirs = parent and parent.GetEffectiveScale and parent:GetEffectiveScale()
+  local ours = UIParent and UIParent:GetEffectiveScale()
+  if type(theirs) == "number" and type(ours) == "number"
+    and plain(theirs) and plain(ours) and theirs ~= 0 then
+    return want * ours / theirs
+  end
+  return want
+end
+
+-- Exported for the same reason `Grid`/`GridSize` are: this is the arithmetic, not the frame.
+-- That cap's size is its own and Blizzard's setting cannot reach it is a claim worth checking
+-- without a client.
+Anchor.Scale = rowScale
+Anchor.ItemScale = itemScale
 
 local function geometry(frame)
   local ok, left, top = pcall(function() return frame:GetLeft(), frame:GetTop() end)
@@ -496,7 +534,7 @@ local function ensureAnchor()
   if P.anchor then return P.anchor end
   local f = CreateFrame("Frame", ROW_NAME, UIParent)
   f:SetSize(gridSize())
-  f:SetScale(rowScale(nil))
+  f:SetScale(rowScale())
   P.anchor = f
   P.place = ns.Place.Register{
     key = "row", frame = f, noun = "CDM row",
@@ -511,10 +549,10 @@ end
 
 --- Re-sizes the panel from the tokens and the live icon scale. Cheap and idempotent, so it
 --- rides every apply and the Edit Mode settings callback rather than needing its own guard.
-local function resizeAnchor(frame)
+local function resizeAnchor()
   local f = ensureAnchor()
   local w, h = gridSize()
-  local scale = rowScale(frame)
+  local scale = rowScale()
   local rescaled = f:GetScale() ~= scale
   if not (rescaled or f:GetWidth() ~= w or f:GetHeight() ~= h) then return false end
   f:SetSize(w, h)
@@ -537,6 +575,18 @@ end
 -- accumulate a second, conflicting anchor, so a parked frame would be pulled between the two
 -- rather than leaving the row.
 local function place(frame, want)
+  -- ⚠ THE SCALE IS RE-ASSERTED HERE, ON EVERY PASS, AND THAT IS THE ONLY DEFENCE. Blizzard
+  -- applies `iconScale` at POOL ACQUIRE (CooldownViewer.lua, CooldownViewerMixin:
+  -- OnAcquireItemFrame), so a re-pool silently reverts cap's size — and re-pools happen on
+  -- talent changes and roster churn, not just at login. A one-shot SetScale would hold until
+  -- the first spec swap and then quietly stop. Because this is the single door every write
+  -- goes through, riding it costs nothing and cannot be forgotten on a new path.
+  --
+  -- It also has to precede the SetPoint conceptually: `want.x`/`want.y` are in the PANEL's
+  -- units and are written raw, which is only valid while the two frames share an effective
+  -- scale. `itemScale` is what makes that true.
+  local ok = pcall(frame.SetScale, frame, itemScale(frame))
+  if not ok then P.scaleFails = (P.scaleFails or 0) + 1 end
   frame:ClearAllPoints()
   frame:SetPoint("TOPLEFT", P.anchor, "TOPLEFT", want.x, want.y)
   P.claimed[frame] = true
@@ -628,7 +678,7 @@ local function apply(why)
   if #frames == 0 then return false end
 
   local anchor = ensureAnchor()
-  resizeAnchor(frames[1])
+  resizeAnchor()
 
   -- ⚠ WHOSE ORIGIN THIS IS. It used to be Blizzard's, re-measured on every pass, which is why
   -- the row had no position of its own and nothing could be anchored to it. It is the
@@ -659,6 +709,8 @@ local function apply(why)
   -- Stamped before the write, not after: `onFramePoint` fires synchronously inside the
   -- SetPoint below, and a stale expectation there would undo the move being made.
   P.wantOf = {}
+  -- Per pass, because the question is "did THIS re-assert land", not "has one ever failed".
+  P.scaleFails = 0
   for i, t in ipairs(P.tracked) do
     local x = (i - 1) * pitch
     local want = { x = x, y = 0, left = left + x, top = top }
@@ -680,7 +732,12 @@ local function apply(why)
     mark(("# parked n=%d combat=%s"):format(P.parkPending, bit(P.combat)))
     P.parkPending = 0
   end
-  mark("# reapply why=" .. why)
+  -- ⚠ Reported only when non-zero, and it should always be zero: item frames are measured
+  -- unprotected in and out of combat (`knowledge/addon-dev/cooldown-manager.md`), so a refused
+  -- SetScale means an assumption this rider is built on has changed. A silent counter would
+  -- have let that pass unnoticed, which is the whole reason it reaches the capture.
+  local fails = (P.scaleFails or 0) > 0 and (" scalefail=" .. P.scaleFails) or ""
+  mark("# reapply why=" .. why .. fails)
   stampMeta()
   return true
 end
@@ -812,10 +869,13 @@ local function installHooks()
   hooksecurefunc(v, "Layout", function() onStomp("Layout", false) end)
   if EventRegistry then
     EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", function()
-      -- ⚠ Unconditional, unlike the schedule below it: the icon-size setting changes the
-      -- panel's own size whether or not cap is ordering, and a mover that has registered our
-      -- geometry is entitled to a panel whose rect is honest at all times.
-      resizeAnchor(nil)
+      -- ⚠ WHY THIS STILL MATTERS NOW THAT CAP OWNS THE SIZE. The setting no longer moves or
+      -- resizes cap's panel — `rowScale` reads a token, so this callback cannot change either.
+      -- What it DOES do is re-apply Blizzard's `iconScale` to the item frames, stomping the
+      -- scale cap asserted, so an armed cap has to re-assert. `schedule` is what does that,
+      -- via `place`. The resize is kept because it is idempotent and cheap, and because it is
+      -- the one call that would notice a `render-tokens.json` edit landing under a live panel.
+      resizeAnchor()
       if P.armed then schedule("settings") end
     end, Anchor)
   end
@@ -914,8 +974,17 @@ local function disarm()
   if P.ticker then P.ticker:Cancel(); P.ticker = nil end
   local restoring, orphans = {}, 0
   for frame in pairs(P.claimed) do restoring[#restoring + 1] = frame end
-  for _, frame in ipairs(restoring) do frame:ClearAllPoints() end
+  -- ⚠ THE SIZE IS PART OF WHAT DISARM OWES BACK. cap overwrote the `iconScale` Blizzard put on
+  -- these frames, and Blizzard only re-applies it at pool acquire — so handing back position
+  -- alone would leave the player's Cooldown Manager wearing cap's icon size until something
+  -- happened to re-pool, with cap gone and nothing left to blame. Read from the viewer rather
+  -- than remembered per frame: it IS the setting, and a frame cap claimed after a settings
+  -- change never wore the old value anyway.
   local v = viewer()
+  local restore = v and v.iconScale
+  if type(restore) ~= "number" or not (plain(restore) and restore > 0) then restore = 1 end
+  for _, frame in ipairs(restoring) do pcall(frame.SetScale, frame, restore) end
+  for _, frame in ipairs(restoring) do frame:ClearAllPoints() end
   if v and type(v.Layout) == "function" then pcall(v.Layout, v) end
   for _, frame in ipairs(restoring) do
     local ok, points = pcall(frame.GetNumPoints, frame)

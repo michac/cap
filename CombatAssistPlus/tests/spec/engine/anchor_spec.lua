@@ -254,6 +254,83 @@ describe("engine / anchor grid", function()
     assert.are.equal(before, after)
   end)
 
+  -- -------------------------------------------------------------------------
+  -- Who owns the icon size. Inverted 2026-08-31: cap declares it, Blizzard's Edit Mode
+  -- setting does not reach it. These are the tests that would have caught the old premise.
+  -- -------------------------------------------------------------------------
+
+  it("takes the panel's scale from cap's own token", function()
+    ANS.Style = { row = { icon_px = 75, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    assert.are.equal(1.5, Anchor.Scale())
+  end)
+
+  -- The default is the template's own size, so landing this inversion changed nothing on
+  -- screen for anyone who had not authored a size.
+  it("draws at Blizzard's own size when nothing is authored", function()
+    ANS.Style = { row = { cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    assert.are.equal(1, Anchor.Scale())
+    ANS.Style = nil
+    assert.are.equal(1, Anchor.Scale())
+  end)
+
+  -- ⚠ THE POINT OF THE WHOLE INVERSION. Blizzard's setting is an input cap no longer chases:
+  -- it cost the v0.18.1 rescale jump and it is why a band sized at arm time goes stale.
+  it("ignores the viewer's icon scale entirely", function()
+    ANS.Style = { row = { icon_px = 50, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    _G.EssentialCooldownViewer = { iconScale = 2.5 }
+    local scale, size = Anchor.Scale(), Anchor.GridSize()
+    _G.EssentialCooldownViewer = nil
+    assert.are.equal(1, scale)
+    assert.are.equal(Anchor.GridSize(), size)
+  end)
+
+  it("refuses a token that is absent, zero, negative or not a number", function()
+    for _, bad in ipairs({ 0, -10, "50", false }) do
+      ANS.Style = { row = { icon_px = bad, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+      assert.are.equal(1, Anchor.Scale())
+    end
+  end)
+
+  -- ⚠ Anchoring is not parenting: a claimed frame stays a child of the VIEWER, so the scale
+  -- put on it has to be divided by its parent's ratio for its effective scale to equal the
+  -- panel's. Placement offsets are written raw and are only valid while those two are equal.
+  it("scales a claimed frame to the panel's space, not its own parent's", function()
+    ANS.Style = { row = { icon_px = 60, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    _G.UIParent = { GetEffectiveScale = function() return 1 end }
+    -- The panel wants 1.2. The frame reaches it through a viewer that is already doubling
+    -- everything under it, so it needs 0.6 — NOT 1.2, which is the bug this test exists for.
+    local frame = { GetParent = function() return { GetEffectiveScale = function() return 2 end } end }
+    local got = Anchor.ItemScale(frame)
+    _G.UIParent = nil
+    assert.are.equal(0.6, got)
+  end)
+
+  -- A viewer at the same scale as UIParent is the ordinary case, and there the correction is
+  -- the identity — which is why getting it wrong stays invisible until someone scales the UI.
+  it("is the panel's own scale when the viewer sits at UIParent's scale", function()
+    ANS.Style = { row = { icon_px = 60, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    _G.UIParent = { GetEffectiveScale = function() return 0.64 end }
+    local frame = { GetParent = function() return { GetEffectiveScale = function() return 0.64 end } end }
+    local got = Anchor.ItemScale(frame)
+    _G.UIParent = nil
+    assert.are.equal(1.2, got)
+  end)
+
+  it("falls back to the panel's own scale when the parent cannot be measured", function()
+    ANS.Style = { row = { icon_px = 60, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+    _G.UIParent = { GetEffectiveScale = function() return 1 end }
+    assert.are.equal(1.2, Anchor.ItemScale(nil))
+    assert.are.equal(1.2, Anchor.ItemScale({ GetParent = function() return nil end }))
+    assert.are.equal(1.2, Anchor.ItemScale({
+      GetParent = function() return { GetEffectiveScale = function() return 0 end } end,
+    }))
+    _G.UIParent = nil
+    -- And with no UIParent at all, which is the harness's own state.
+    assert.are.equal(1.2, Anchor.ItemScale({
+      GetParent = function() return { GetEffectiveScale = function() return 2 end } end,
+    }))
+  end)
+
   it("falls back to a whole 6x2 grid when the tokens are missing", function()
     ANS.Style = nil
     local cols, rows_, cell, gap = Anchor.Grid()
