@@ -54,6 +54,15 @@ function Channel.SecondsFormatter()
   pcall(f.SetCanRoundUpLastUnit, f, true)
   pcall(f.SetConvertToLower, f, true)
 
+  -- The configuration is the only thing standing between this and a sentence, and every setter
+  -- above is `pcall`ed, so it is read back once and reported.
+  local okAbbrev, got = pcall(f.GetDefaultAbbreviation, f)
+  if not okAbbrev then
+    ns.Log.Mark("SecondsFormatter: GetDefaultAbbreviation refused — " .. tostring(got))
+  elseif got ~= abbrev then
+    ns.Log.Mark("SecondsFormatter: abbreviation is " .. tostring(got) .. ", wanted " .. tostring(abbrev))
+  end
+
   secondsFmt = f
   return secondsFmt
 end
@@ -876,14 +885,21 @@ function Channel.ArmCooldownDial(host, level)
     -- There is exactly one such call on this bar and it is that one.
     bar = buildDial(region, style.dial, "baseCooldownSink")
 
-    text = region:CreateFontString(nil, "OVERLAY")
+    -- ⚠ ITS OWN FRAME, ABOVE THE BAR. A FontString on `region` is one of the region's LAYERS,
+    -- and `bar` is a child FRAME — so the fill draws over the numeral and hides it until the
+    -- arc has drained past it.
+    local numerals = CreateFrame("Frame", nil, region)
+    numerals:SetAllPoints(region)
+    numerals:SetFrameLevel(bar:GetFrameLevel() + 1)
+    text = numerals:CreateFontString(nil, "OVERLAY")
     if not text:SetFont("Fonts\\" .. style.font, style.size, style.outline) then
       text:SetFontObject("NumberFontNormal")
     end
     text:SetTextColor(style.rgb[1], style.rgb[2], style.rgb[3])
-    text:SetPoint("CENTER", region, "CENTER", 0, 0)
-    -- Bounded to the badge; an unbounded centred string grows off the icon both ways.
-    text:SetSize(d, style.size + 2)
+    text:SetPoint("CENTER", numerals, "CENTER", 0, 0)
+    -- Bounded so it cannot grow off the icon, but wider than the plate: at this size `57s`
+    -- already overruns the badge's own diameter and comes back with an ellipsis.
+    text:SetSize(d * 1.8, style.size + 2)
     text:SetWordWrap(false)
     text:SetJustifyH("CENTER")
     built = true

@@ -104,7 +104,11 @@ ns.Catalog.Register{
       markers = {
         { id = "dt_awaits_wrath",
           cue = "blocked",
-          when = { { "ready", "divine_toll" }, { "talent", "righteous_protector", negate = true } },
+          when = {
+            { "ready", "divine_toll" },
+            { "talent", "righteous_protector", negate = true },
+            { "talent", "sentinel", negate = true },
+          },
           display = {
             ability = "avenging_wrath",
             kind = "sealed-cooldown-range",
@@ -133,7 +137,11 @@ ns.Catalog.Register{
       markers = {
         { id = "ha_banks_bulwark",
           cue = "blocked",
-          when = { { "identity", "holy_armaments", "base" }, { "ready", "holy_armaments" } },
+          when = {
+            { "identity", "holy_armaments", "base" },
+            { "ready", "holy_armaments" },
+            { "talent", "sentinel", negate = true },
+          },
           display = {
             ability = "avenging_wrath",
             beyond = 5,

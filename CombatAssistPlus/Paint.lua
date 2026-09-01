@@ -844,14 +844,27 @@ end
 --- failure here is a bar that drains INVISIBLY — the sibling of §4.8.1 finding 3. Two of the
 --- four callers checked it and two did not; the shared version checks, so `who` is a required
 --- caller name rather than a nicety.
+--- ⚠ A `texture` makes the bar's SHAPE. `StatusBarRenderMode.Radial` drives a texture's radial
+--- progress percent and does not change its outline, so a flat colour fill sweeps as a square.
 function Paint.BarFill(bar, o, who)
+  local art = o.texture and ((o.texture_root or "") .. o.texture .. ".tga")
   local track = bar:CreateTexture(nil, "BACKGROUND")
   track:SetAllPoints(bar)
   local tr = o.track_rgb or { 0, 0, 0 }
-  track:SetColorTexture(tr[1], tr[2], tr[3], o.track_alpha or 0.55)
+  if art then
+    track:SetTexture(art, nil, nil, "TRILINEAR")
+    track:SetVertexColor(tr[1], tr[2], tr[3], o.track_alpha or 0.55)
+  else
+    track:SetColorTexture(tr[1], tr[2], tr[3], o.track_alpha or 0.55)
+  end
 
   local fill = bar:CreateTexture(nil, "ARTWORK")
-  fill:SetColorTexture(o.rgb[1], o.rgb[2], o.rgb[3], o.alpha or 1)
+  if art then
+    fill:SetTexture(art, nil, nil, "TRILINEAR")
+    fill:SetVertexColor(o.rgb[1], o.rgb[2], o.rgb[3], o.alpha or 1)
+  else
+    fill:SetColorTexture(o.rgb[1], o.rgb[2], o.rgb[3], o.alpha or 1)
+  end
   if not bar:SetStatusBarTexture(fill) then
     if ns.Log and ns.Log.Mark then
       ns.Log.Mark(who .. ": SetStatusBarTexture refused the fill")
