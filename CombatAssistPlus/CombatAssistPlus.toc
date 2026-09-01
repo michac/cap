@@ -2,7 +2,7 @@
 ## Title: Combat Assist Plus
 ## Notes: Combat assistance overlay for Blizzard's Cooldown Manager.
 ## Author: Michael Christiansen
-## Version: 0.23.3
+## Version: 0.23.4
 ## SavedVariables: CombatAssistPlusDB
 ## SavedVariablesPerCharacter: CombatAssistPlusCharDB
 ## OptionalDeps: EllesmereUI
