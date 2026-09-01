@@ -10,6 +10,9 @@ ns.Overlay = ns.Overlay or {}
 local Overlay = ns.Overlay
 local stream = ns.Capture.Open("draw", { sessions = 8, cap = 2000, dedup = false })
 local pool = {}
+-- Chrome-only frames for viewer rows the catalog does not claim: a keybind hint and
+-- nothing else. Kept apart from `pool` so nothing here can ever reach the verdict loop.
+local chromePool = {}
 local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false }
 
 --- One pooled frame per row, carrying every primitive the shelf declares — a badge per cue
@@ -535,8 +538,39 @@ end
 
 --- Cap has stopped drawing — unsettled, dark, or catalog-less. Every row goes quiet; the scan
 --- edge is a still treatment, so resuming needs no first-draw special case.
+--- The keybind hint on a row cap has no opinion about. V15 is CHROME (`spec.md` §3.8): it names
+--- the row and asserts nothing about the press, so it is the one mark that may sit on an
+--- unclaimed row without cap having authored anything for it.
+local function chrome(cid, primary)
+  local f = chromePool[cid]
+  if not f then
+    f = CreateFrame("Frame", nil, UIParent)
+    f:Hide()
+    chromePool[cid] = f
+    anchor(f, cid)
+    f.hotkey = ns.Paint.Hotkey(f)
+  end
+  anchor(f, cid)
+  if not f.anchoredTo then return f:Hide() end
+  ns.Paint.Label(f.hotkey, ns.Binds and ns.Binds.For(primary))
+  f:Show()
+end
+
+--- Every viewer row the catalog did not claim, given the ones it did.
+local function chromeSweep(claimed)
+  local live = {}
+  for _, row in ipairs(ns.Bind.RowDigest()) do
+    if row.cooldownID ~= nil and not claimed[row.cooldownID] then
+      live[row.cooldownID] = true
+      chrome(row.cooldownID, row.primary)
+    end
+  end
+  for cid, f in pairs(chromePool) do if not live[cid] then f:Hide() end end
+end
+
 local function hideAll(edge)
   for _, f in pairs(pool) do quiet(f); f:Hide() end
+  for _, f in pairs(chromePool) do f:Hide() end
   local bars, bar = barReport()
   write(Overlay.Render{ entries = 0, rows = 0, anchored = 0, confirmed = 0,
     hidden = 0, noframe = 0, bars = bars, bar = bar }, edge)
@@ -563,6 +597,7 @@ local function rebuild(bound)
     anchor(f, cid)
     configure(f, item, bound.declared)
   end
+  chromeSweep(live)
 end
 
 local function draw(out, bound, edge)
