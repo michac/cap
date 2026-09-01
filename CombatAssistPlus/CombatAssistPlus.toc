@@ -5,6 +5,7 @@
 ## Version: 0.22.1
 ## SavedVariables: CombatAssistPlusDB
 ## SavedVariablesPerCharacter: CombatAssistPlusCharDB
+## OptionalDeps: EllesmereUI
 ## IconTexture: Interface\ICONS\Ability_Warrior_BattleShout
 
 Core.lua
@@ -35,6 +36,7 @@ Overlay.lua
 Panel.lua
 Riders.lua
 Anchor.lua
+Ellesmere.lua
 Frame.lua
 Window.lua
 StylePanel.lua

@@ -104,6 +104,10 @@ stds.wow = {
     -- Anchor.lua's two-stage rider test.  `C_AddOns.IsAddOnLoaded` (declared above) is the
     -- modern spelling; the bare global is the fallback the same call site keeps.
     "IsAddOnLoaded",
+    -- Ellesmere.lua's host.  NOT a WoW API: it is a third-party addon's global, declared
+    -- here for the same reason the Blizzard names are — so a typo in it still warns.  Every
+    -- read of it is guarded on presence, because it is absent on most installs.
+    "EllesmereUI",
   },
   -- The addon's true global writes.  Every module binds its namespace as a local
   -- (`local ADDON, ns = ...`), so there is no shared-namespace global to declare —

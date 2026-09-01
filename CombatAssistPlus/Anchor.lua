@@ -804,6 +804,21 @@ local function ensureAnchor()
   return f
 end
 
+--- The row panel and the handle that places it, for `Ellesmere.lua`. ⚠ Exported, not re-derived:
+--- `ROW_NAME` and the `Place` key are written only here, and a second speller of either would
+--- fail by finding nothing rather than by failing to load.
+function Anchor.Row()
+  local f = ensureAnchor()
+  return f, P.place
+end
+
+--- The panel's footprint changed. Resolved per call: `Ellesmere.lua` loads after this file.
+--- Why a scale change needs saying and a resize does not: cdm-rider-patterns.md §4.8.
+local function resized()
+  local bridge = ns.Ellesmere
+  if bridge and bridge.Resized then bridge.Resized() end
+end
+
 --- Re-sizes the panel from the tokens and the live icon scale. Cheap and idempotent, so it
 --- rides every apply and the Edit Mode settings callback rather than needing its own guard.
 local function resizeAnchor()
@@ -821,6 +836,7 @@ local function resizeAnchor()
   -- path re-applies a line later and hid this; the Edit Mode settings callback fires whether
   -- or not cap is ordering, and there it would have jumped.
   if rescaled and P.place then P.place:Apply() end
+  resized()
   return true
 end
 
@@ -1600,10 +1616,10 @@ local actions = {
 --- through, so a grid change is one more apply and never a second placement path. Nothing to do
 --- when cap is not armed: the next arm reads the new numbers anyway.
 ---
---- @pending Phase 3 — this is the case `EllesmereUI.NotifyElementResized` exists for: the panel
---- changes size without a `SetSize` any mover installed a hook on.
+--- ⚠ IT NOTIFIES EVEN WITH NOTHING TO RE-DRAW: `resizeAnchor` only fires while armed, `/cap
+--- grid` is legal unarmed, and a mover on an unarmed panel is on a rect that just moved.
 local function regrid(why)
-  if not P.armed then return end
+  if not P.armed then resized(); return end
   apply(why)
 end
 

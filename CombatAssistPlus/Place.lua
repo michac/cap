@@ -170,6 +170,18 @@ function Handle:Seed()
   return self:Save(BY_SEED)
 end
 
+--- Records a position handed in from OUTSIDE, in the shape `Capture` returns; a foreign drop is
+--- the player's own hand, so it is a move and not a seed. ⚠ IT DOES NOT RE-CAPTURE — the frame
+--- may not have moved yet, and reading it would store the OLD place and undo the drag.
+function Handle:Place(x, y)
+  if not readable(x, y) then return false end
+  local s = self:Store()
+  s.x, s.y, s.placed, s.by = x, y, true, BY_MOVE
+  self:Apply()
+  if self.onPlaced then self.onPlaced(self) end
+  return true
+end
+
 function Handle:Reset()
   local s = self:Store()
   s.x, s.y, s.placed, s.by = self.defaultX, self.defaultY, false, nil
