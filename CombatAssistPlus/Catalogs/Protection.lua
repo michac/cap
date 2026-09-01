@@ -22,6 +22,7 @@ local ADDON, ns = ...
 ns.Catalog.Register{
   spec = 66,
   name = "Protection / Lightsmith",
+  break_before = "avengers_shield",
 
   abilities = {
     { id = "avenging_wrath", spell = 31884 },

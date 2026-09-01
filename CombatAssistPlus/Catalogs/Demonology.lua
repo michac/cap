@@ -12,6 +12,7 @@ ns.Catalog.Register{
   hero = 59,
   name = "Demonology / Diabolist",
   power = "SoulShards",
+  break_before = "implosion",
 
   abilities = {
     { id = "power_siphon", spell = 264130 },

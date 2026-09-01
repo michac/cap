@@ -19,6 +19,7 @@ ns.Catalog.Register{
   spec = 70,
   name = "Retribution / Templar",
   power = "HolyPower",
+  break_before = "templars_verdict",
 
   abilities = {
     { id = "execution_sentence", spell = 343527 },

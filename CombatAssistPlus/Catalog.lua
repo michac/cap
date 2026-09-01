@@ -661,14 +661,21 @@ function Catalog.Check(cat)
   -- Only the entries that get a Cooldown Manager row. A virtual entry is cap's own icon and
   -- has no cell here by construction, so counting it would fail a catalog that fits.
   --
-  -- ⚠ IT STILL OVER-COUNTS BY ONE PER UTILITY-VIEWER ENTRY, and that is a known limit rather
-  -- than an oversight. `Anchor.lua` re-anchors the ESSENTIAL viewer only, so an entry whose
-  -- ability binds to a Utility row is skinned and hatched but never placed — Devourer's
-  -- `vengeful_retreat` is the shipped example, making that catalog 6 counted against 5 actually
-  -- placed. Which viewer an entry lands in is a COMMENT in the catalog today, not a field, so
-  -- nothing here can read it. The error is in the safe direction (stricter than reality, never
-  -- looser) and no catalog is near capacity because of it, but a `viewer` field would make the
-  -- count exact — see `specs/backlog.md`.
+  -- ⚠ COUNTING EVERY DECLARED NON-VIRTUAL ENTRY IS CORRECT, AND A `viewer` FIELD MUST NOT BE
+  -- ADDED TO MAKE IT "EXACT". Essential versus Utility is the PLAYER'S LAYOUT, not a property
+  -- of the spell: within one family the two categories are interchangeable by drag, the two
+  -- viewer mixins are the same code twice, and the two item templates differ in four cosmetic
+  -- values only. A `viewer` field would encode a user setting as authored data, and would be
+  -- wrong the moment the player dragged the row. See `knowledge/addon-dev/cooldown-manager.md`
+  -- §1.1 — classify on family, never on category.
+  --
+  -- So what this number is, is an AUTHORING-TIME UPPER BOUND against the panel the catalog
+  -- ships: does this roster fit the grid this catalog proposes, if every entry it declares
+  -- gets a cell. That is the authoring question and the right one to answer here. What holds
+  -- for a real player is `Anchor.Cells`' capacity clamp and the `over:<n>` readout — an entry
+  -- the player has dragged into the Utility viewer is skinned and hatched but never placed,
+  -- because `Anchor.lua` re-anchors the ESSENTIAL viewer only. Devourer's `vengeful_retreat`
+  -- is the shipped example, and the fix for it is a line in the setup docs, not a field here.
   local placed, at = {}, {}
   for _, entry in ipairs(cat.entries or {}) do
     if type(entry.id) == "string" and not entry.virtual then

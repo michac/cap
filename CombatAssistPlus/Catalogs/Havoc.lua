@@ -14,6 +14,7 @@ ns.Catalog.Register{
   spec = 577,
   hero = 34,
   name = "Havoc / Fel-Scarred",
+  break_before = "immolation_aura",
 
   abilities = {
     { id = "vengeful_retreat", spell = 198793 },
