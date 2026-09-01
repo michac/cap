@@ -28,6 +28,8 @@ local secondsFmt
 
 --- Built once and kept. `false` records that the route is unavailable, so a caller can say so
 --- rather than re-asking on every pass.
+---
+--- ⚠ A fresh formatter is UNABBREVIATED (`security-taint-and-restricted-data.md` §4.8.1 finding 2), so it is configured here.
 function Channel.SecondsFormatter()
   if secondsFmt ~= nil then return secondsFmt or nil end
   if not (C_StringUtil and C_StringUtil.CreateSecondsFormatter) then
@@ -35,8 +37,25 @@ function Channel.SecondsFormatter()
     return nil
   end
   local ok, f = pcall(C_StringUtil.CreateSecondsFormatter)
-  secondsFmt = (ok and f ~= nil) and f or false
-  return secondsFmt or nil
+  if not (ok and f ~= nil) then
+    secondsFmt = false
+    return nil
+  end
+
+  local E = Enum or {}
+  local abbrev = E.SecondsFormatterAbbreviation and E.SecondsFormatterAbbreviation.OneLetter
+  local minutes = E.SecondsFormatterInterval and E.SecondsFormatterInterval.Minutes
+  local strip = E.SecondsFormatterIntervalWhitespace
+    and E.SecondsFormatterIntervalWhitespace.StripIgnoreLocale
+  if abbrev then pcall(f.SetDefaultAbbreviation, f, abbrev) end
+  if minutes then pcall(f.SetMaxInterval, f, minutes) end
+  if strip then pcall(f.SetStripIntervalWhitespace, f, strip) end
+  pcall(f.SetDesiredUnitCount, f, 1)
+  pcall(f.SetCanRoundUpLastUnit, f, true)
+  pcall(f.SetConvertToLower, f, true)
+
+  secondsFmt = f
+  return secondsFmt
 end
 
 --- A spell's duration object, or nil plus the reason. Nil with NO reason is a spell with
@@ -773,11 +792,31 @@ local function buildDial(parent, dial, who)
   bar:SetPoint("CENTER")
   bar:SetMinMaxValues(0, 1)
   ns.Paint.BarFill(bar, dial, who)
-  -- Radial is measured on a SetTimerDuration-driven bar [client 2026-08-21]; a client that
-  -- refuses it here gets a linear drain rather than no dial.
-  pcall(bar.SetRenderMode, bar,
-    Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial or 1)
+  -- A refused render mode degrades to a linear bar — a rectangle where the arc belongs.
+  local radial = Enum and Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial
+  if radial == nil then
+    ns.Log.Mark(who .. ": StatusBarRenderMode.Radial absent — dial stays linear")
+  else
+    local ok, err = pcall(bar.SetRenderMode, bar, radial)
+    if not ok then
+      ns.Log.Mark(who .. ": SetRenderMode refused — " .. tostring(err))
+    end
+  end
   return bar
+end
+
+--- Read the render mode back after `SetTimerDuration`; the arc is only measured on a bar the
+--- BUTTON claimed (`security-taint-and-restricted-data.md` §4.8.1), never on a self-driven one.
+local function markRenderMode(bar, who)
+  local radial = Enum and Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial
+  if radial == nil or not bar.GetRenderMode then return end
+  local ok, mode = pcall(bar.GetRenderMode, bar)
+  if not ok then
+    return ns.Log.Mark(who .. ": GetRenderMode refused — " .. tostring(mode))
+  end
+  if mode ~= radial then
+    ns.Log.Mark(who .. ": render mode is " .. tostring(mode) .. " after SetTimerDuration, not radial")
+  end
 end
 
 --- The badge plate every corner display sits on: one pre-tinted disc, contrast rather than
@@ -843,6 +882,10 @@ function Channel.ArmCooldownDial(host, level)
     end
     text:SetTextColor(style.rgb[1], style.rgb[2], style.rgb[3])
     text:SetPoint("CENTER", region, "CENTER", 0, 0)
+    -- Bounded to the badge; an unbounded centred string grows off the icon both ways.
+    text:SetSize(d, style.size + 2)
+    text:SetWordWrap(false)
+    text:SetJustifyH("CENTER")
     built = true
   end)
   if not (ok and built) then
@@ -884,6 +927,7 @@ function Channel.ArmCooldownDial(host, level)
     end
     if not self.snapped then
       pcall(bar.SetToTargetValue, bar)
+      markRenderMode(bar, "baseCooldownSink")
       self.snapped = true
     end
     text:SetText(Channel.RemainingText(d) or NO_NUMBER)

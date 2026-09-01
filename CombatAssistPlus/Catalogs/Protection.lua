@@ -68,10 +68,12 @@ ns.Catalog.Register{
   -- key `divine_guidance` appears in BOTH families and that is legal — `Catalog.Check` keys
   -- `abilities` and `talents` in separate tables and the `talent` predicate resolves only the
   -- second. The aura is the stacking buff; the talent is whether the buff can exist at all.
+  -- `sentinel` is declared only to be negated (catalog.md → cue A).
   talents = {
     { id = "righteous_protector", node = 81477, entry = 102440, spell = 204074 },
     { id = "divine_guidance", node = 95235, entry = 117884, spell = 433106 },
     { id = "blessed_assurance", node = 95235, entry = 117883, spell = 433015 },
+    { id = "sentinel", node = 81497, entry = 102466, spell = 389539 },
   },
 
   -- Entry order IS the authored priority, and it is the flattened `actions.default` — one list,
@@ -84,7 +86,7 @@ ns.Catalog.Register{
       markers = {
         { id = "aw_awaits_toll",
           cue = "blocked",
-          when = { { "ready", "avenging_wrath" } },
+          when = { { "ready", "avenging_wrath" }, { "talent", "sentinel", negate = true } },
           display = {
             ability = "divine_toll",
             beyond = 10,
