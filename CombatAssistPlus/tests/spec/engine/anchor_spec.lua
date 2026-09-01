@@ -385,6 +385,27 @@ describe("Anchor.Plan break", function()
     assert.are.equal(0, layout[2].y)
   end)
 
+  -- ⚠ THE FOLD SURVIVES A TALENT CHANGE, IT DOES NOT FALL BACK TO THE COLUMN CLAMP. The two
+  -- cases above prove the fallthrough on short rosters; this is the one that matters in play —
+  -- a roster long enough for the clamp to be a plausible outcome, where guessing wrong means
+  -- predicting the wrong row for every icon after the break. Demonology's shape: nine entries
+  -- folding before the sixth, with the sixth untalented.
+  it("keeps the fold at the next surviving entry, not at the column clamp", function()
+    -- Nine authored entries; every row but `f`'s, which is what an untalented break entry
+    -- looks like to the plan.
+    local plan = Anchor.Plan(
+      rows(10, 20, 30, 40, 50, 70, 80, 90),
+      e({ "a", 10 }, { "b", 20 }, { "c", 30 }, { "d", 40 }, { "e", 50 },
+        { "f", 60 }, { "g", 70 }, { "h", 80 }, { "i", 90 }), "f")
+    assert.same({ 10, 20, 30, 40, 50, 70, 80, 90 }, ids(plan))
+    -- `g` was authored 7th and is now 6th, so it inherits the break.
+    assert.are.equal(6, plan.breakAt)
+    local layout = Anchor.Cells(#plan.order, plan.breakAt, 6, 51)
+    -- Five above the fold and three below it — NOT the 6 + 2 a column clamp would give.
+    for i = 1, 5 do assert.are.equal(0, layout[i].y) end
+    for i = 6, 8 do assert.are.equal(-51, layout[i].y) end
+  end)
+
   it("puts one icon on the second row when the break is the last entry", function()
     local plan = Anchor.Plan(rows(10, 20, 30), e({ "a", 10 }, { "b", 20 }, { "c", 30 }), "c")
     assert.are.equal(3, plan.breakAt)
