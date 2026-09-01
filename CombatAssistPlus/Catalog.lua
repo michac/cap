@@ -607,6 +607,15 @@ function Catalog.Check(cat)
 
   -- Only the entries that get a Cooldown Manager row. A virtual entry is cap's own icon and
   -- has no cell here by construction, so counting it would fail a catalog that fits.
+  --
+  -- ⚠ IT STILL OVER-COUNTS BY ONE PER UTILITY-VIEWER ENTRY, and that is a known limit rather
+  -- than an oversight. `Anchor.lua` re-anchors the ESSENTIAL viewer only, so an entry whose
+  -- ability binds to a Utility row is skinned and hatched but never placed — Devourer's
+  -- `vengeful_retreat` is the shipped example, making that catalog 6 counted against 5 actually
+  -- placed. Which viewer an entry lands in is a COMMENT in the catalog today, not a field, so
+  -- nothing here can read it. The error is in the safe direction (stricter than reality, never
+  -- looser) and no catalog is near capacity because of it, but a `viewer` field would make the
+  -- count exact — see `specs/backlog.md`.
   local placed, at = {}, {}
   for _, entry in ipairs(cat.entries or {}) do
     if type(entry.id) == "string" and not entry.virtual then
