@@ -108,6 +108,25 @@ local COUNT_DRAWS = {
 }
 Catalog.COUNT_DRAWS = COUNT_DRAWS
 
+-- The bounds every panel dimension is held to, and THE ONLY COPY OF THEM — `Anchor.Limits`
+-- aliases this table, so the author's numbers and the player's are judged by one list. It lives
+-- here because `tests/check_catalog.lua` loads this file WITHOUT `Anchor.lua`, which builds a
+-- frame at file scope. The floor is 1 because a one-cell row is a legitimate thing to want; the
+-- ceilings only stop a typo building a panel larger than the screen.
+-- ⚠ `icon_px` is here because the PLAYER may set it. `Catalog.Check` rejects it by name.
+local GRID_LIMITS = {
+  cols = { min = 1, max = 16 },
+  rows = { min = 1, max = 8 },
+  icon_px = { min = 16, max = 256 },
+}
+Catalog.GridLimits = GRID_LIMITS
+
+-- The grid fields an AUTHOR may declare. `cols` and `rows` fit the ROSTER — twelve entries need
+-- twelve cells, which is the author's business. Icon size is taste, and taste is the player's:
+-- a catalog shipping 40px icons imposes a preference rather than fitting anything.
+local GRID_AUTHORABLE = { cols = true, rows = true }
+Catalog.GridAuthorable = GRID_AUTHORABLE
+
 -- The cue vocabulary is the GENERATED shelf's, read at call time rather than copied here:
 -- a second list would let the addon invent a fifth cue that renders nowhere.
 local function cues()
@@ -586,24 +605,58 @@ function Catalog.Check(cat)
     fail("shape", tostring(cat.bar), "bar must name one enhanced entry")
   end
 
+  -- ⚠ THE GRID IS THE CATALOG'S PROPOSAL, checked here rather than in the entry loop because it
+  -- describes the panel and not an entry. `cols` and `rows` only; `icon_px` is refused by name
+  -- so the message can say where taste is set instead of reading as a typo.
+  if cat.grid ~= nil then
+    if type(cat.grid) ~= "table" then
+      fail("shape", tostring(cat.grid), "grid must be a table of cols and rows")
+    else
+      for field, v in pairs(cat.grid) do
+        local lim = GRID_LIMITS[field]
+        if not GRID_AUTHORABLE[field] then
+          if field == "icon_px" then
+            fail("shape", "icon_px",
+              "icon size is the player's, not the catalog's — it is set with /cap grid")
+          else
+            fail("shape", tostring(field), "grid takes only cols and rows")
+          end
+        elseif type(v) ~= "number" or v ~= math.floor(v) then
+          fail("shape", field, ("grid %s must be a whole number"):format(field))
+        elseif v < lim.min or v > lim.max then
+          fail("shape", field, ("grid %s must be between %d and %d"):format(field, lim.min, lim.max))
+        end
+      end
+    end
+  end
+
   -- ⚠ THE ROW BREAK IS A CATALOG-LEVEL KEY, checked here rather than in the entry loop above,
   -- because it names an entry instead of describing one. There is exactly one per catalog.
   --
-  -- The panel is `cols x rows` cells and that count is authored in `render-tokens.json`, so it
-  -- is READ here and never written as a literal: making the row wider is meant to be a token
-  -- edit, and a hardcoded 12 would quietly turn it back into a code change. `Anchor.Grid` is
-  -- the arithmetic but cannot be called from here — `tests/check_catalog.lua` loads this file
-  -- without `Anchor.lua`, which builds a frame at file scope — so the two token values are read
-  -- directly and nothing else about the grid is re-derived.
+  -- The panel is `cols x rows` cells: the catalog's own grid where it declares one, else the
+  -- token in `render-tokens.json`, which is the same order `Anchor.Grid` resolves in minus the
+  -- player tier a static check cannot see. Nothing is written as a literal here — a hardcoded
+  -- 12 would turn widening the row back into a code change. `Anchor.Grid` is the arithmetic but
+  -- cannot be called from here: `tests/check_catalog.lua` loads this file without `Anchor.lua`.
   --
-  -- ⚠ THIS IS THE DEFAULT PANEL, NOT NECESSARILY THE PLAYER'S. The grid is settable per spec
-  -- and hero tree (`/cap grid`), and a static check cannot know what any given player set — so
-  -- what it answers is "does this catalog fit a DEFAULT panel", which is an authoring question
-  -- and the right one to ask at author time. The messages say so rather than implying a
-  -- guarantee. `Anchor.Cells`' capacity clamp is what holds for a real player.
+  -- ⚠ THIS IS THE AUTHORED PANEL, NOT NECESSARILY THE PLAYER'S. The grid is settable per spec
+  -- and hero tree (`/cap grid`) and a static check cannot know what any given player set, so
+  -- what it answers is "does this catalog fit the panel it ships with" — the authoring question,
+  -- and the right one at author time. The messages say so rather than implying a guarantee.
+  -- `Anchor.Cells`' capacity clamp is what holds for a real player.
   local style = (ns.Style or {}).row or {}
-  local cols = type(style.cols) == "number" and style.cols or 6
-  local rowCount = type(style.rows) == "number" and style.rows or 2
+  local authored = type(cat.grid) == "table" and cat.grid or {}
+  local function dimension(field, fallback)
+    for _, v in ipairs({ authored[field], style[field] }) do
+      if type(v) == "number" and v == math.floor(v) then
+        local lim = GRID_LIMITS[field]
+        if v >= lim.min and v <= lim.max then return v end
+      end
+    end
+    return fallback
+  end
+  local cols = dimension("cols", 6)
+  local rowCount = dimension("rows", 2)
 
   -- Only the entries that get a Cooldown Manager row. A virtual entry is cap's own icon and
   -- has no cell here by construction, so counting it would fail a catalog that fits.
@@ -649,19 +702,19 @@ function Catalog.Check(cat)
   -- actually holds at runtime; this is what tells an author before they ship.
   local n = #placed
   if n > cols * rowCount then
-    fail("shape", nil, ("catalog places %d entries; the DEFAULT panel holds %d (%dx%d) — a "
-      .. "player can size their own with /cap grid, but do not author against that")
+    fail("shape", nil, ("catalog places %d entries; its authored panel holds %d (%dx%d) — "
+      .. "declare a `grid` if the roster needs more cells")
       :format(n, cols * rowCount, cols, rowCount))
   elseif breakIndex then
     -- The break decides the SPLIT, so a total that fits is not sufficient: a break authored
     -- late runs the first row past the panel's edge even though the roster fits the panel.
     if breakIndex - 1 > cols then
       fail("shape", cat.break_before,
-        ("%d entries precede the break; a default row holds %d"):format(breakIndex - 1, cols))
+        ("%d entries precede the break; this catalog's row holds %d"):format(breakIndex - 1, cols))
     end
     if n - breakIndex + 1 > cols then
       fail("shape", cat.break_before,
-        ("%d entries follow the break; a default row holds %d"):format(n - breakIndex + 1, cols))
+        ("%d entries follow the break; this catalog's row holds %d"):format(n - breakIndex + 1, cols))
     end
   end
 

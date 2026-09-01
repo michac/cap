@@ -359,14 +359,11 @@ local schedule
 -- that never reaches SavedVariables. Both are Place.lua's reasons and the same trap.
 local gridScratch = {}
 
--- Sane rather than tasteful. The floor is 1 because a one-cell row is a legitimate thing to
--- want (Destruction authors a single entry); the ceilings only exist so a typo cannot build a
--- panel larger than the screen and lose the player their row behind it.
-local LIMITS = {
-  cols = { min = 1, max = 16 },
-  rows = { min = 1, max = 8 },
-  icon_px = { min = 16, max = 256 },
-}
+-- ⚠ ALIASED, NOT COPIED. `Catalog.GridLimits` is the one list, because `Catalog.Check` judges
+-- the author's numbers and this file judges the player's, and two lists that agreed today would
+-- drift the first time a ceiling moved. It lives there because `tests/check_catalog.lua` loads
+-- `Catalog.lua` without this file, which builds a frame at file scope.
+local LIMITS = ns.Catalog.GridLimits
 
 Anchor.Limits = LIMITS
 
@@ -416,21 +413,47 @@ end
 
 Anchor.GridOverride = override
 
---- The player's grid, or the authored one. `Style.row` is the DEFAULT now rather than the
---- value: `cols`, `rows` and `icon_px` are three fields of one setting the player owns per
---- spec, and the token is what they fall back to.
+--- What this build's catalog PROPOSES for one grid field, or nil where it proposes nothing.
 ---
---- ⚠ `cell_px` and `gap_px` are NOT settable and that is deliberate. `cell_px` is floored at
---- the item template's own 50 and a narrower cell would overlap its neighbour in panel units —
---- making the icons smaller is `icon_px`'s job, and exposing both would give the player two
---- knobs for one outcome, one of which silently draws icons on top of each other.
+--- ⚠ Validated here as well as in `Catalog.Check`, because a catalog reaches the client through
+--- `Catalog.Register`, which asserts only the spec id. A shape the validator would have refused
+--- must fall back to the token rather than propagate into the geometry.
+local function proposed(field)
+  if not ns.Catalog.GridAuthorable[field] then return nil end
+  local cat = ns.Catalog.ForBuild(ns.SpecAndHero())
+  local g = cat and cat.grid
+  local v = type(g) == "table" and g[field] or nil
+  local lim = LIMITS[field]
+  if type(v) ~= "number" or not plain(v) then return nil end
+  v = math.floor(v)
+  if lim and (v < lim.min or v > lim.max) then return nil end
+  return v
+end
+
+Anchor.GridProposed = proposed
+
+--- The grid this build draws at, resolved in three tiers: the PLAYER's `/cap grid`, then the
+--- CATALOG's own proposal, then the token in `Style.row`.
+---
+--- The player wins because they set it deliberately and per spec, so a catalog update must not
+--- silently move a row they placed. The catalog is above the token because `cols` and `rows` fit
+--- a roster, and only the catalog knows how long its roster is.
+---
+--- ⚠ `icon_px` HAS NO CATALOG TIER — see `rowScale`. It is taste, not fit.
+---
+--- ⚠ `cell_px` and `gap_px` are NOT settable at all. `cell_px` is floored at the item template's
+--- own 50 and a narrower cell would overlap its neighbour in panel units — making the icons
+--- smaller is `icon_px`'s job, and exposing both would give the player two knobs for one
+--- outcome, one of which silently draws icons on top of each other.
 local function grid()
+  local cols = override("cols") or proposed("cols")
+  local rowCount = override("rows") or proposed("rows")
   local t = ns.Style and ns.Style.row
   if type(t) ~= "table" then
-    return override("cols") or 6, override("rows") or 2, CELL_FLOOR, 1
+    return cols or 6, rowCount or 2, CELL_FLOOR, 1
   end
   local cell = math.max(t.cell_px or CELL_FLOOR, t.cell_floor_px or CELL_FLOOR)
-  return override("cols") or t.cols or 6, override("rows") or t.rows or 2, cell, t.gap_px or 1
+  return cols or t.cols or 6, rowCount or t.rows or 2, cell, t.gap_px or 1
 end
 
 local function gridSize()
@@ -500,6 +523,8 @@ Anchor.Cells = cells
 --- 2026-08-31 — cap declares the icon size, the Cooldown Manager's frames are scaled to fit it.
 --- `icon_px` defaults to the template's own 50, so the default draws pixel-identically to
 --- Blizzard's and only an edit to `render-tokens.json` resizes the row.
+--- ⚠ TWO TIERS, NOT THREE. A catalog may propose `cols` and `rows` because those fit its roster;
+--- it may not propose an icon size, which is taste and is the player's alone.
 local function rowScale()
   local t = ns.Style and ns.Style.row
   local px = override("icon_px") or (type(t) == "table" and t.icon_px or nil)
@@ -1582,13 +1607,15 @@ local function regrid(why)
   apply(why)
 end
 
---- Reads back the grid this build is drawing at, and where each number came from.
+--- Reads back the grid this build is drawing at, and which of the three tiers each number came
+--- from — so a spec that SHIPS a wide row reads differently from one the player widened.
 local function gridLine()
   local cols, rowCount = grid()
   local px = math.floor(rowScale() * ITEM_TEMPLATE_PX + 0.5)
   local t = (ns.Style or {}).row or {}
   local function src(field, value, default)
     if override(field) then return ("%s (yours)"):format(value) end
+    if proposed(field) then return ("%s (catalog)"):format(value) end
     return ("%s (default%s)"):format(value, default and "" or ", no token")
   end
   ns.Emit(("grid: %s x %s cells, icons %s"):format(
@@ -1612,7 +1639,7 @@ local function setGrid(rest)
     local saved = gridStore(true)
     if not saved then ns.Emit("the client will not say what spec this is, so there is nothing to reset."); return end
     saved.cols, saved.rows, saved.icon_px = nil, nil, nil
-    ns.Emit("grid reset to the authored default for this spec.")
+    ns.Emit("grid reset — this spec now draws at whatever its catalog proposes, else the token.")
     regrid("grid")
     gridLine()
     return

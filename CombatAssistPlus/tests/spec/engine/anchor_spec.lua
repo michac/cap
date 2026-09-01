@@ -25,6 +25,9 @@ local function loadAnchor()
   -- Manager has drawn anything.
   H.load(ns, "Core.lua")
   H.load(ns, "Place.lua")
+  -- Catalog.lua before Anchor.lua, in the `.toc`'s own order: Anchor aliases
+  -- `Catalog.GridLimits` at file scope, so the one list of bounds is on the namespace first.
+  H.load(ns, "Catalog.lua")
   H.load(ns, "Anchor.lua")
 
   -- The module captured the stub as a file-local at load, so the pure functions keep
@@ -681,5 +684,79 @@ describe("Anchor grid override", function()
     ANS.SpecAndHero = function() return nil, nil end
     store{ cols = 7 }
     assert.are.equal(6, Anchor.Grid())
+  end)
+end)
+
+-- The catalog tier, which sits between the two above: the catalog PROPOSES a shape that fits its
+-- roster, the player DISPOSES, and the token is the floor.
+describe("Anchor grid tiers", function()
+  local savedSpec, savedCdb
+
+  local function register(grid)
+    local cat = { spec = 577, hero = 2456, entries = {} }
+    if grid then cat.grid = grid end
+    ANS.Catalog.Register(cat)
+    return cat
+  end
+
+  before_each(function()
+    savedSpec, savedCdb = ANS.SpecAndHero, ANS.cdb
+    ANS.SpecAndHero = function() return 577, 2456 end
+    ANS.cdb = {}
+    ANS.Style = { row = { icon_px = 50, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+  end)
+
+  after_each(function()
+    ANS.SpecAndHero, ANS.cdb = savedSpec, savedCdb
+    -- The registry is one module-level table, so a catalog left in it is the next suite's
+    -- catalog too. Emptied in place because `Catalog.All` hands back the table itself.
+    local reg = ANS.Catalog.All()
+    for i = #reg, 1, -1 do reg[i] = nil end
+  end)
+
+  it("uses the catalog's grid over the token", function()
+    register{ cols = 7, rows = 3 }
+    local cols, rows_ = Anchor.Grid()
+    assert.are.equal(7, cols)
+    assert.are.equal(3, rows_)
+  end)
+
+  it("takes the token for a dimension the catalog does not propose", function()
+    register{ cols = 7 }
+    local cols, rows_ = Anchor.Grid()
+    assert.are.equal(7, cols)
+    assert.are.equal(2, rows_)
+  end)
+
+  it("lets the player override the catalog", function()
+    register{ cols = 7, rows = 3 }
+    ANS.cdb.grid = { ["577:2456"] = { cols = 4 } }
+    local cols, rows_ = Anchor.Grid()
+    assert.are.equal(4, cols)
+    assert.are.equal(3, rows_)
+  end)
+
+  -- ⚠ Icon size has NO catalog tier: it is taste, and taste is the player's. A catalog that
+  -- declares one anyway is refused by `Catalog.Check`, and ignored here even if it loads.
+  it("ignores an icon size the catalog declares", function()
+    register{ cols = 7, icon_px = 75 }
+    assert.are.equal(1, Anchor.Scale())
+    assert.is_nil(Anchor.GridProposed("icon_px"))
+  end)
+
+  -- Same rule the player's store follows: `Catalog.Register` asserts only the spec id, so a
+  -- shape the validator would have refused must fall back rather than reach the geometry.
+  it("ignores a catalog dimension that is not a usable number", function()
+    for _, bad in ipairs({ "seven", true, 0, -1, 999 }) do
+      register{ cols = bad }
+      assert.are.equal(6, Anchor.Grid(), "cols accepted " .. tostring(bad))
+      local reg = ANS.Catalog.All()
+      for i = #reg, 1, -1 do reg[i] = nil end
+    end
+  end)
+
+  it("takes the token when this build has no catalog at all", function()
+    assert.are.equal(6, Anchor.Grid())
+    assert.is_nil(Anchor.GridProposed("cols"))
   end)
 end)

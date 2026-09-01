@@ -469,6 +469,82 @@ describe("engine / catalog", function()
       ok.entries[#ok.entries].virtual = "standing"
       assert.same({}, ns.Catalog.Check(ok))
     end)
+
+    -- The catalog PROPOSES the shape, so the capacity a static check measures against is the
+    -- catalog's own grid where it declares one. Without this a catalog shipping `cols = 7` is
+    -- still refused a 7-wide row and the declaration does nothing.
+    it("measures capacity against the catalog's own grid, not the token", function()
+      local cols, rowCount = ns.Style.row.cols, ns.Style.row.rows
+      local over = synth(cols * rowCount + 2)
+      assert.is_truthy(H.checks(ns.Catalog.Check(over)).shape)
+      over.grid = { cols = cols + 1, rows = rowCount }
+      assert.same({}, ns.Catalog.Check(over))
+    end)
+
+    it("measures the break's split against the catalog's own grid", function()
+      local cols = ns.Style.row.cols
+      local wide = synth(cols + 2)
+      wide.break_before = "e" .. (cols + 2)
+      assert.is_truthy(H.checks(ns.Catalog.Check(wide)).shape)
+      wide.grid = { cols = cols + 1 }
+      assert.same({}, ns.Catalog.Check(wide))
+    end)
+  end)
+
+  -- The catalog's own panel proposal. `cols` and `rows` fit a roster and are the author's;
+  -- `icon_px` is taste and is the player's, so it is refused by name rather than as a typo.
+  describe("grid", function()
+    local function withGrid(grid)
+      local c = H.copy(cat)
+      c.grid = grid
+      return c
+    end
+
+    it("accepts a catalog that declares none", function()
+      assert.is_nil(cat.grid)
+      assert.same({}, ns.Catalog.Check(cat))
+    end)
+
+    it("accepts cols and rows, together or alone", function()
+      assert.same({}, ns.Catalog.Check(withGrid{ cols = 7, rows = 3 }))
+      assert.same({}, ns.Catalog.Check(withGrid{ cols = 7 }))
+      assert.same({}, ns.Catalog.Check(withGrid{ rows = 3 }))
+      assert.same({}, ns.Catalog.Check(withGrid{}))
+    end)
+
+    it("refuses a grid that is not a table", function()
+      for _, bad in ipairs({ 7, "7x2", true }) do
+        assert.is_truthy(H.checks(ns.Catalog.Check(withGrid(bad))).shape, tostring(bad))
+      end
+    end)
+
+    it("refuses a dimension that is not a whole number", function()
+      for _, bad in ipairs({ "seven", true, 6.5 }) do
+        assert.is_truthy(H.checks(ns.Catalog.Check(withGrid{ cols = bad })).shape, tostring(bad))
+      end
+    end)
+
+    it("refuses a dimension outside the shared limits", function()
+      local lim = ns.Catalog.GridLimits
+      assert.is_truthy(H.checks(ns.Catalog.Check(withGrid{ cols = lim.cols.min - 1 })).shape)
+      assert.is_truthy(H.checks(ns.Catalog.Check(withGrid{ cols = lim.cols.max + 1 })).shape)
+      assert.is_truthy(H.checks(ns.Catalog.Check(withGrid{ rows = lim.rows.max + 1 })).shape)
+    end)
+
+    -- ⚠ BY NAME, so the message can say where icon size IS set rather than reading as a typo.
+    it("refuses icon_px and says which knob to use instead", function()
+      local found = ns.Catalog.Check(withGrid{ icon_px = 40 })
+      assert.is_truthy(H.checks(found).shape)
+      local said
+      for _, f in ipairs(found) do
+        if tostring(f.detail or ""):find("/cap grid", 1, true) then said = true end
+      end
+      assert.is_true(said, "the refusal does not name /cap grid")
+    end)
+
+    it("refuses a key that is neither cols nor rows", function()
+      assert.is_truthy(H.checks(ns.Catalog.Check(withGrid{ gap_px = 4 })).shape)
+    end)
   end)
 
   it("validates every catalog the addon actually registers", function()
