@@ -797,9 +797,8 @@ local function ensureAnchor()
     key = "row", frame = f, noun = "CDM row",
     label = "cap row — drag to place",
     x = ROW_DEFAULT_X, y = ROW_DEFAULT_Y,
-    -- A drag ends with the panel somewhere new; the frames it carries follow it live, but
-    -- the drift auditor's expectations are absolute coordinates and are now stale.
-    onPlaced = function() if P.armed then schedule("moved") end end,
+    -- No `onPlaced`: the icons are anchored to this frame and the auditor measures them
+    -- against it, so a drag moves the whole row and invalidates nothing.
   }
   return f
 end
@@ -866,10 +865,8 @@ local function place(frame, want)
 end
 
 --- Where a frame goes when cap has claimed it but the plan no longer says where it belongs.
---- `left`/`top` follow the offsets so a later drift read describes the parked position rather
---- than reporting the park itself as a displacement.
-local function parkWant(left, top)
-  return { x = PARK_X, y = PARK_Y, left = (left or 0) + PARK_X, top = (top or 0) + PARK_Y }
+local function parkWant()
+  return { x = PARK_X, y = PARK_Y }
 end
 
 local reentry = 0
@@ -969,13 +966,11 @@ local function apply(why)
   end
   P.place:Apply()
 
-  -- The drift auditor compares absolute coordinates, so the row's expectations are derived
-  -- from where the panel actually landed rather than from what was asked for. A panel whose
-  -- rect will not answer is not a reason to place frames at a guessed origin: bail, and let
-  -- the next event try again.
-  local left, top = anchor:GetLeft(), anchor:GetTop()
-  if not (plain(left) and plain(top)) then return false end
-
+  -- ⚠ THE PANEL'S OWN SCREEN POSITION IS DELIBERATELY NOT READ HERE. `SetPoint` does not
+  -- update the rect, so `GetLeft()` on the line after `Place:Apply()` can still answer with
+  -- where the panel WAS — and an expectation built on that is wrong by the size of the move,
+  -- on every frame, until something moves the panel back. The auditor measures each icon
+  -- against the panel instead, at the moment it looks.
   local cols, rowCount, cell, gap = grid()
   local pitch = cell + gap
   local layout, overflowFrom =
@@ -1003,15 +998,10 @@ local function apply(why)
     -- in nobody's order. It is also what keeps the panel's rect honest for anything anchored
     -- to it. The cause is DIFFERENT from a parked frame's — this one is still in the plan, it
     -- just has nowhere to go — so it is counted separately and never enters `P.parked`.
-    local want
-    if c then
-      -- `want.top` is `top + y` with y NEGATIVE below the first row, because it is an absolute
-      -- coordinate the auditor compares against `frame:GetTop()` and the frame's own top is
-      -- `top + y` by construction of the SetPoint. Not `top - y`, and not `top`.
-      want = { x = c.x, y = c.y, left = left + c.x, top = top + c.y }
-    else
-      want = parkWant(left, top)
-    end
+    -- Panel-relative and nothing else: this is what `place` writes as a `SetPoint` offset and
+    -- what the auditor compares an icon's measured offset against, so the two cannot disagree
+    -- about a frame of reference.
+    local want = c and { x = c.x, y = c.y } or parkWant()
     P.wantOf[t.frame] = want
     place(t.frame, want)
   end
@@ -1019,7 +1009,7 @@ local function apply(why)
   -- placed ones, so an omission here would not leave them parked — it would hand them back to
   -- Blizzard's next layout pass, which is the state parking exists to prevent.
   for frame in pairs(P.parked) do
-    local want = parkWant(left, top)
+    local want = parkWant()
     P.wantOf[frame] = want
     place(frame, want)
   end
@@ -1102,12 +1092,21 @@ local function sample()
   end
   P.staleLatched = false
 
+  -- ⚠ DISPLACEMENT IS MEASURED AGAINST THE PANEL, NOT THE SCREEN. Every icon is anchored to
+  -- the panel and is SUPPOSED to travel with it, so a panel that moves — a drag, a foreign
+  -- mover, a rescale — must not read as eleven displaced icons. Read the origin here rather
+  -- than carrying one from `apply`: that is the only version of this that cannot go stale.
+  -- An origin that will not answer is not evidence of anything, so the tick is skipped.
+  local ox, oy = geometry(P.anchor)
+  if not ox then return end
+
   local moved = 0
   for _, t in ipairs(P.tracked) do
     local want = P.wantOf[t.frame]
     local left, top = geometry(t.frame)
     if want and left then
-      if math.abs(left - want.left) > TOLERANCE or math.abs(top - want.top) > TOLERANCE then
+      if math.abs((left - ox) - want.x) > TOLERANCE
+        or math.abs((top - oy) - want.y) > TOLERANCE then
         moved = moved + 1
       end
     end
@@ -1636,8 +1635,20 @@ local function gridLine()
   end
   ns.Emit(("grid: %s x %s cells, icons %s"):format(
     src("cols", cols, t.cols), src("rows", rowCount, t.rows), src("icon_px", px, t.icon_px)))
+  -- ⚠ CELLS ARE NOT CAPACITY WHEN A FOLD IS AUTHORED. A break before entry 5 on a six-wide
+  -- panel ends the first row at four, and the two cells past it can never be reached — so
+  -- `cols * rows` would tell a player the row holds twelve while cap holds one icon off it for
+  -- want of a cell. Asked of the same function that lays the row out, so it cannot disagree.
+  local breakAt = P.plan and P.plan.breakAt
+  local total = cols * rowCount
+  local _, firstOver = cells(total + 1, breakAt, cols, 1, rowCount)
+  local reach = (firstOver or (total + 1)) - 1
+  if reach < total then
+    ns.Emit(("  the catalog folds after %d, so %d of the %d cells sit past the fold and cannot "
+      .. "be reached"):format(breakAt - 1, total - reach, total))
+  end
   ns.Emit(("  holds %d icons; this build is drawing %d%s"):format(
-    cols * rowCount, P.placed or #P.tracked,
+    reach, P.placed or #P.tracked,
     (P.overflowed or 0) > 0 and (", %d held off the row for want of a cell"):format(P.overflowed) or ""))
 end
 

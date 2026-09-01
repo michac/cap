@@ -23,6 +23,7 @@ ns.Catalog.Register{
   spec = 66,
   name = "Protection / Lightsmith",
   break_before = "avengers_shield",
+  grid = { cols = 7, rows = 2 },
 
   abilities = {
     { id = "avenging_wrath", spell = 31884 },

@@ -286,6 +286,17 @@ describe("product characterization / Protection", function()
     assert.same({}, light.word_of_glory.markers)
   end)
 
+  -- ⚠ THE GRID AND THE FOLD ARE ONE DECISION. Folding before the fifth entry ends the first
+  -- row there, so the cells past it cannot be reached and the panel's WIDTH is what decides
+  -- whether the roster still fits. At six columns this catalog reached ten icons and a real
+  -- roster of eleven — nine authored plus two the player enabled — dropped one off the row.
+  -- `anchor_spec`'s reachable-capacity group owns the arithmetic; this owns the declaration.
+  it("ships the seven-wide panel its fold needs", function()
+    assert.are.equal(7, cat.grid.cols)
+    assert.are.equal(2, cat.grid.rows)
+    assert.are.equal("avengers_shield", cat.break_before)
+  end)
+
   it("reaches both hammers through `alt`, because the choice node is not a transform", function()
     local cs = ability("crusader_strike")
     assert.equal(35395, cs.spell)

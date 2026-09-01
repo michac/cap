@@ -759,4 +759,44 @@ describe("Anchor grid tiers", function()
     assert.are.equal(6, Anchor.Grid())
     assert.is_nil(Anchor.GridProposed("cols"))
   end)
+
+  -- ⚠ A FOLD COSTS CELLS, and `/cap grid` reports what it says here. `cols * rows` is the
+  -- panel's cell count and NOT its capacity: a break before entry 5 ends the first row at four
+  -- and strands the two cells past it, so a player is told the row holds twelve while cap holds
+  -- an icon off it for want of one. Protection on a six-wide panel is the measured case.
+  describe("reachable capacity under a fold", function()
+    -- Asking for one more than the panel could ever hold makes `overflowFrom` the first index
+    -- with nowhere to go, so capacity is the index before it — the same arithmetic the row is
+    -- laid out with, rather than a second one that could drift from it.
+    local function reach(breakAt, cols, rowCount)
+      local _, firstOver = Anchor.Cells(cols * rowCount + 1, breakAt, cols, 1, rowCount)
+      return (firstOver or (cols * rowCount + 1)) - 1
+    end
+
+    it("is the full cell count when nothing folds", function()
+      assert.are.equal(12, reach(nil, 6, 2))
+    end)
+
+    it("loses the cells past the fold", function()
+      -- Protection: folds before entry 5, so the first row ends at four and 6x2 holds ten.
+      assert.are.equal(10, reach(5, 6, 2))
+    end)
+
+    it("costs nothing when the fold lands where the row would wrap anyway", function()
+      assert.are.equal(12, reach(7, 6, 2))
+    end)
+
+    it("is what Protection's wider panel buys", function()
+      -- Folds before entry 5 at seven columns: 4 + 7 = 11, which is nine authored entries plus
+      -- the two a measured player had enabled. At six it reached ten and dropped one.
+      assert.are.equal(10, reach(5, 6, 2))
+      assert.are.equal(11, reach(5, 7, 2))
+    end)
+
+    it("is what Havoc's wider panel buys", function()
+      -- Folds before entry 6 at seven columns: 5 + 7 = 12, the roster exactly.
+      assert.are.equal(12, reach(6, 7, 2))
+    end)
+  end)
+
 end)
