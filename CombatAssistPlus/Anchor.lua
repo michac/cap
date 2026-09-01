@@ -177,7 +177,7 @@ function Anchor.Render(snap)
   local a = {
     "n:" .. num(snap.n), "named:" .. num(snap.named),
     "extra:" .. num(snap.extra), "miss:" .. num(snap.missing),
-    "parked:" .. num(snap.parkedNow),
+    "parked:" .. num(snap.parkedNow), "over:" .. num(snap.overflowed),
   }
   local s = {
     "stomp:" .. num(snap.stomps), "icombat:" .. num(snap.stompsCombat),
@@ -342,11 +342,95 @@ local schedule
 -- the Cooldown Manager to draw before it can be dragged or anchored to.
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- The player's own grid
+-- ---------------------------------------------------------------------------
+
+-- ⚠ KEYED ON SPEC AND HERO TREE, not on the character. What the grid has to fit is a ROSTER,
+-- and a roster is a property of the catalog — which is chosen by spec AND hero tree, so
+-- Fel-Scarred and Aldrachi Reaver are two different lengths on one character. Keying on the
+-- character alone would size every spec for the longest one and leave the others holding empty
+-- cells; keying per account would do the same across the whole roster of characters. It sits
+-- in `ns.cdb` beside placement for the same reason placement is there: it is about this
+-- character's screen, not an opinion about the addon.
+--
+-- File scope runs before ADDON_LOADED, so a scratch carries the shape until `ns.cdb` exists,
+-- and the root is resolved on every call — a subtable cached while it was nil is an orphan
+-- that never reaches SavedVariables. Both are Place.lua's reasons and the same trap.
+local gridScratch = {}
+
+-- Sane rather than tasteful. The floor is 1 because a one-cell row is a legitimate thing to
+-- want (Destruction authors a single entry); the ceilings only exist so a typo cannot build a
+-- panel larger than the screen and lose the player their row behind it.
+local LIMITS = {
+  cols = { min = 1, max = 16 },
+  rows = { min = 1, max = 8 },
+  icon_px = { min = 16, max = 256 },
+}
+
+Anchor.Limits = LIMITS
+
+--- The key this character's current build stores its grid under, or nil when the client will
+--- not say what spec it is — in which case there is no override and the tokens stand.
+local function gridKey()
+  local spec, hero = ns.SpecAndHero()
+  if not plain(spec) then return nil end
+  return tostring(spec) .. ":" .. (plain(hero) and tostring(hero) or "-")
+end
+
+--- The saved grid for this build. Created on first WRITE, never on a read: an empty table per
+--- spec the player has merely logged into is noise in the saved variables.
+local function gridStore(create)
+  local key = gridKey()
+  if not key then return nil end
+  local root = ns.cdb or gridScratch
+  local t = root.grid
+  if type(t) ~= "table" then
+    if not create then return nil end
+    t = {}
+    root.grid = t
+  end
+  local s = t[key]
+  if type(s) ~= "table" then
+    if not create then return nil end
+    s = {}
+    t[key] = s
+  end
+  return s
+end
+
+--- One override field, or nil where the player has set none or set nonsense.
+---
+--- ⚠ Validated on READ and not only on write, because SavedVariables are a file a player can
+--- edit and a build can roll back. A stored string or an out-of-range number falls back to the
+--- token rather than propagating into the geometry.
+local function override(field)
+  local s = gridStore(false)
+  local v = s and s[field] or nil
+  local lim = LIMITS[field]
+  if type(v) ~= "number" or not plain(v) then return nil end
+  v = math.floor(v)
+  if lim and (v < lim.min or v > lim.max) then return nil end
+  return v
+end
+
+Anchor.GridOverride = override
+
+--- The player's grid, or the authored one. `Style.row` is the DEFAULT now rather than the
+--- value: `cols`, `rows` and `icon_px` are three fields of one setting the player owns per
+--- spec, and the token is what they fall back to.
+---
+--- ⚠ `cell_px` and `gap_px` are NOT settable and that is deliberate. `cell_px` is floored at
+--- the item template's own 50 and a narrower cell would overlap its neighbour in panel units —
+--- making the icons smaller is `icon_px`'s job, and exposing both would give the player two
+--- knobs for one outcome, one of which silently draws icons on top of each other.
 local function grid()
   local t = ns.Style and ns.Style.row
-  if type(t) ~= "table" then return 6, 2, CELL_FLOOR, 1 end
+  if type(t) ~= "table" then
+    return override("cols") or 6, override("rows") or 2, CELL_FLOOR, 1
+  end
   local cell = math.max(t.cell_px or CELL_FLOOR, t.cell_floor_px or CELL_FLOOR)
-  return t.cols or 6, t.rows or 2, cell, t.gap_px or 1
+  return override("cols") or t.cols or 6, override("rows") or t.rows or 2, cell, t.gap_px or 1
 end
 
 local function gridSize()
@@ -371,20 +455,36 @@ Anchor.GridSize = gridSize
 --- `breakAt` is a MINIMUM wrap point, not the only one: a row also ends when it runs out of
 --- columns. Without that clamp a break authored late (say entry 9 of 12) would run the first
 --- row past the panel's right edge with no diagnostic, and a catalog with no break at all
---- would spill its whole roster off the panel in one line — which is what shipped before this
---- and is exactly what `cols x rows` is supposed to mean.
-local function cells(n, breakAt, cols, pitch)
+--- would spill its whole roster off the panel in one line.
+---
+--- ⚠ `rows` IS THE OTHER HALF OF THAT CLAMP AND IT IS NOT OPTIONAL IN PRACTICE. Wrapping at
+--- `cols` alone just rotates the overflow: instead of running off the right-hand edge the row
+--- runs off the BOTTOM, onto a third row of a two-row panel, still outside the rect and still
+--- with no diagnostic. That matters more than it sounds, because the panel's rect is the thing
+--- other UI anchors to — icons drawn below it make that rect a lie. An icon with no cell gets
+--- NO ENTRY in the returned array, and the caller parks it.
+---
+--- Passing `rows` as nil means "arithmetic only, no capacity" and is for tests that are
+--- checking placement rather than policy. `apply` always passes it.
+---
+--- Returns the cells, and the 1-based index of the first icon that had nowhere to go.
+local function cells(n, breakAt, cols, pitch, rows)
   cols = (type(cols) == "number" and cols >= 1) and cols or 1
-  local out, row, col = {}, 0, 0
+  local cap = (type(rows) == "number" and rows >= 1) and rows or nil
+  local out, row, col, overflowFrom = {}, 0, 0, nil
   for i = 1, n or 0 do
     -- Only when the current row has something in it: a break landing on a row that is already
     -- empty must not skip a row and leave a blank one.
     if breakAt and i == breakAt and col > 0 then row, col = row + 1, 0 end
-    out[i] = { x = col * pitch, y = -(row * pitch) }
-    col = col + 1
-    if col >= cols then row, col = row + 1, 0 end
+    if cap and row >= cap then
+      overflowFrom = overflowFrom or i
+    else
+      out[i] = { x = col * pitch, y = -(row * pitch) }
+      col = col + 1
+      if col >= cols then row, col = row + 1, 0 end
+    end
   end
-  return out
+  return out, overflowFrom
 end
 
 Anchor.Cells = cells
@@ -402,7 +502,7 @@ Anchor.Cells = cells
 --- Blizzard's and only an edit to `render-tokens.json` resizes the row.
 local function rowScale()
   local t = ns.Style and ns.Style.row
-  local px = type(t) == "table" and t.icon_px or nil
+  local px = override("icon_px") or (type(t) == "table" and t.icon_px or nil)
   -- ⚠ `plain` answers "present and readable", NOT "is a number" — a hand-edited token can be a
   -- string, and `px > 0` on one is a hard error rather than a fallback. Type first.
   if type(px) ~= "number" or not (plain(px) and px > 0) then px = ITEM_TEMPLATE_PX end
@@ -512,6 +612,7 @@ local function snapshot(drawn, match, stale, drawnRow0)
   return {
     plannedRow0 = P.row0,
     drawnRow0 = drawnRow0,
+    overflowed = P.overflowed,
     n = P.plan and #P.plan.order or 0,
     named = P.plan and P.plan.named or 0,
     extra = P.plan and P.plan.extra or 0,
@@ -626,15 +727,23 @@ end
 --- offset, far above the panel, so they would sort ahead of the first row and take the split
 --- with them. Walking `P.claimed` here instead would corrupt every capture.
 function Anchor.Drawn()
+  -- ⚠ ONLY THE FRAMES THAT GOT A CELL. An overflowed frame is still in `P.tracked` — unlike a
+  -- parked one, it is still in the plan — but it sits at the park offset, ten thousand units
+  -- ABOVE the panel. `ReadOrder` sorts on top descending, so a single overflowed frame would
+  -- sort ahead of everything and be read as the whole first row, turning every capture into
+  -- nonsense. Position is judged over what was placed; identity below is judged over all of it.
+  local limit = P.placed or #P.tracked
   local seen, stale = {}, 0
-  for _, t in ipairs(P.tracked) do
+  for i, t in ipairs(P.tracked) do
     local live = liveID(t.frame)
     if live ~= nil and live ~= t.cooldownID then stale = stale + 1 end
-    local left, top = geometry(t.frame)
-    if left then seen[#seen + 1] = { cooldownID = t.cooldownID, left = left, top = top } end
+    if i <= limit then
+      local left, top = geometry(t.frame)
+      if left then seen[#seen + 1] = { cooldownID = t.cooldownID, left = left, top = top } end
+    end
   end
   local ordered, firstRow = Anchor.ReadOrder(seen)
-  local drawn, match = {}, #ordered == #P.planned
+  local drawn, match = {}, #ordered == limit
   for i = 1, #ordered do
     drawn[i] = ordered[i].cooldownID
     if drawn[i] ~= P.planned[i] then match = false end
@@ -826,9 +935,12 @@ local function apply(why)
   local left, top = anchor:GetLeft(), anchor:GetTop()
   if not (plain(left) and plain(top)) then return false end
 
-  local cols, _, cell, gap = grid()
+  local cols, rowCount, cell, gap = grid()
   local pitch = cell + gap
-  local layout = cells(#P.tracked, P.plan and P.plan.breakAt or nil, cols, pitch)
+  local layout, overflowFrom =
+    cells(#P.tracked, P.plan and P.plan.breakAt or nil, cols, pitch, rowCount)
+  P.overflowed = overflowFrom and (#P.tracked - overflowFrom + 1) or 0
+  P.placed = overflowFrom and (overflowFrom - 1) or #P.tracked
   -- The claim the drift auditor and the capture are judged against: how many icons this pass
   -- put on the first row. Recorded from the geometry actually used, not from `breakAt`, so
   -- the column clamp is included in what gets checked.
@@ -844,10 +956,21 @@ local function apply(why)
   P.scaleFails = 0
   for i, t in ipairs(P.tracked) do
     local c = layout[i]
-    -- `want.top` is `top + y` with y NEGATIVE below the first row, because it is an absolute
-    -- coordinate the auditor compares against `frame:GetTop()` and the frame's own top is
-    -- `top + y` by construction of the SetPoint. Not `top - y`, and not `top`.
-    local want = { x = c.x, y = c.y, left = left + c.x, top = top + c.y }
+    -- ⚠ NO CELL MEANS OFF THE ROW, NOT BELOW IT. An icon cap cannot fit is held at the park
+    -- offset rather than drawn under the panel, for the reason §3.9 gives for parking at all:
+    -- the row reads as a priority scan, and an icon outside the rect that scan is drawn in is
+    -- in nobody's order. It is also what keeps the panel's rect honest for anything anchored
+    -- to it. The cause is DIFFERENT from a parked frame's — this one is still in the plan, it
+    -- just has nowhere to go — so it is counted separately and never enters `P.parked`.
+    local want
+    if c then
+      -- `want.top` is `top + y` with y NEGATIVE below the first row, because it is an absolute
+      -- coordinate the auditor compares against `frame:GetTop()` and the frame's own top is
+      -- `top + y` by construction of the SetPoint. Not `top - y`, and not `top`.
+      want = { x = c.x, y = c.y, left = left + c.x, top = top + c.y }
+    else
+      want = parkWant(left, top)
+    end
     P.wantOf[t.frame] = want
     place(t.frame, want)
   end
@@ -1074,9 +1197,9 @@ end
 local function adopt(rows, entries, breakBefore)
   P.plan = Anchor.Plan(rows, entries, breakBefore)
   P.tracked, P.planned = {}, {}
-  -- Cleared, not carried: the previous pass's row split is a claim about frames this one is
-  -- about to replace, and `apply` sets it again from the geometry it uses.
-  P.row0 = nil
+  -- Cleared, not carried: the previous pass's row split and overflow are claims about frames
+  -- this one is about to replace, and `apply` sets them again from the geometry it uses.
+  P.row0, P.placed, P.overflowed = nil, nil, 0
   local inPlan = {}
   for i, item in ipairs(P.plan.order) do
     P.tracked[i] = { cooldownID = item.cooldownID, frame = item.row.frame }
@@ -1129,7 +1252,7 @@ local function disarm()
   end
   mark(("# restored n=%d orphans=%d"):format(#restoring, orphans))
   P.tracked, P.wantOf, P.planned, P.plan = {}, {}, {}, nil
-  P.row0 = nil
+  P.row0, P.placed, P.overflowed = nil, nil, 0
   P.claimed, P.parked, P.parkPending = {}, {}, 0
   P.strikes, P.strikeAt, P.dirty, P.generation = 0, nil, false, nil
   return orphans
@@ -1446,6 +1569,94 @@ local actions = {
   retry = retryLine,
   on = enable,
   off = Anchor.Disable,
+}
+
+--- Re-draws at the new geometry. `apply` re-reads `grid()` and re-sizes the panel on its way
+--- through, so a grid change is one more apply and never a second placement path. Nothing to do
+--- when cap is not armed: the next arm reads the new numbers anyway.
+---
+--- @pending Phase 3 — this is the case `EllesmereUI.NotifyElementResized` exists for: the panel
+--- changes size without a `SetSize` any mover installed a hook on.
+local function regrid(why)
+  if not P.armed then return end
+  apply(why)
+end
+
+--- Reads back the grid this build is drawing at, and where each number came from.
+local function gridLine()
+  local cols, rowCount = grid()
+  local px = math.floor(rowScale() * ITEM_TEMPLATE_PX + 0.5)
+  local t = (ns.Style or {}).row or {}
+  local function src(field, value, default)
+    if override(field) then return ("%s (yours)"):format(value) end
+    return ("%s (default%s)"):format(value, default and "" or ", no token")
+  end
+  ns.Emit(("grid: %s x %s cells, icons %s"):format(
+    src("cols", cols, t.cols), src("rows", rowCount, t.rows), src("icon_px", px, t.icon_px)))
+  ns.Emit(("  holds %d icons; this build is drawing %d%s"):format(
+    cols * rowCount, P.placed or #P.tracked,
+    (P.overflowed or 0) > 0 and (", %d held off the row for want of a cell"):format(P.overflowed) or ""))
+end
+
+--- `/cap grid` — the player's own panel geometry, per spec and hero tree.
+---
+--- ⚠ IT WRITES NUMBERS, NOT A LAYOUT. Everything downstream re-reads `grid()` on the next
+--- apply, so a change is a re-apply and never a second placement path.
+local function setGrid(rest)
+  local words = {}
+  for w in (rest or ""):gmatch("%S+") do words[#words + 1] = w end
+
+  if #words == 0 then gridLine(); return end
+
+  if words[1]:lower() == "reset" then
+    local saved = gridStore(true)
+    if not saved then ns.Emit("the client will not say what spec this is, so there is nothing to reset."); return end
+    saved.cols, saved.rows, saved.icon_px = nil, nil, nil
+    ns.Emit("grid reset to the authored default for this spec.")
+    regrid("grid")
+    gridLine()
+    return
+  end
+
+  -- `cols rows [icon_px]`, positionally, because that is how a grid is said out loud.
+  local want = {}
+  local fields = { "cols", "rows", "icon_px" }
+  for i, word in ipairs(words) do
+    local field = fields[i]
+    if not field then
+      ns.Emit("usage: /cap grid  or  /cap grid <cols> <rows> [icon size]  or  /cap grid reset")
+      return
+    end
+    local v = tonumber(word)
+    local lim = LIMITS[field]
+    if not v or v ~= math.floor(v) then
+      ns.Emit(("%s must be a whole number, not '%s'."):format(field, word)); return
+    end
+    if v < lim.min or v > lim.max then
+      ns.Emit(("%s must be between %d and %d."):format(field, lim.min, lim.max)); return
+    end
+    want[field] = v
+  end
+
+  local saved = gridStore(true)
+  if not saved then
+    ns.Emit("the client will not say what spec this is, so cap has nowhere to store a grid.")
+    return
+  end
+  for _, field in ipairs(fields) do
+    if want[field] then saved[field] = want[field] end
+  end
+  regrid("grid")
+  gridLine()
+end
+
+ns.RegisterCommand{
+  name = "grid", order = 36, args = "[<cols> <rows> [icon size]|reset]",
+  desc = "Size the row panel for this spec — how many cells, and how big",
+  handler = function(rest)
+    if InCombatLockdown() then ns.Emit("out of combat only."); return end
+    setGrid(rest)
+  end,
 }
 
 ns.RegisterCommand{

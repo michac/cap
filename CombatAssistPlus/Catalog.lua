@@ -595,6 +595,12 @@ function Catalog.Check(cat)
   -- the arithmetic but cannot be called from here — `tests/check_catalog.lua` loads this file
   -- without `Anchor.lua`, which builds a frame at file scope — so the two token values are read
   -- directly and nothing else about the grid is re-derived.
+  --
+  -- ⚠ THIS IS THE DEFAULT PANEL, NOT NECESSARILY THE PLAYER'S. The grid is settable per spec
+  -- and hero tree (`/cap grid`), and a static check cannot know what any given player set — so
+  -- what it answers is "does this catalog fit a DEFAULT panel", which is an authoring question
+  -- and the right one to ask at author time. The messages say so rather than implying a
+  -- guarantee. `Anchor.Cells`' capacity clamp is what holds for a real player.
   local style = (ns.Style or {}).row or {}
   local cols = type(style.cols) == "number" and style.cols or 6
   local rowCount = type(style.rows) == "number" and style.rows or 2
@@ -634,18 +640,19 @@ function Catalog.Check(cat)
   -- actually holds at runtime; this is what tells an author before they ship.
   local n = #placed
   if n > cols * rowCount then
-    fail("shape", nil, ("catalog places %d entries; the panel holds %d (%dx%d)")
+    fail("shape", nil, ("catalog places %d entries; the DEFAULT panel holds %d (%dx%d) — a "
+      .. "player can size their own with /cap grid, but do not author against that")
       :format(n, cols * rowCount, cols, rowCount))
   elseif breakIndex then
     -- The break decides the SPLIT, so a total that fits is not sufficient: a break authored
     -- late runs the first row past the panel's edge even though the roster fits the panel.
     if breakIndex - 1 > cols then
       fail("shape", cat.break_before,
-        ("%d entries precede the break; a row holds %d"):format(breakIndex - 1, cols))
+        ("%d entries precede the break; a default row holds %d"):format(breakIndex - 1, cols))
     end
     if n - breakIndex + 1 > cols then
       fail("shape", cat.break_before,
-        ("%d entries follow the break; a row holds %d"):format(n - breakIndex + 1, cols))
+        ("%d entries follow the break; a default row holds %d"):format(n - breakIndex + 1, cols))
     end
   end
 

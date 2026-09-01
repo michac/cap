@@ -86,19 +86,19 @@ describe("Anchor.Render", function()
     n = 3, named = 2, extra = 1, missing = 1,
     planned = { 30, 10, 20 }, drawn = { 30, 10, 20 }, match = true, stale = 0,
     stomps = 4, stompsCombat = 1, displaced = 2, contended = 0, reasserts = 7,
-    parks = 0, parkedNow = 0, staleSeen = 0, strikes = 0,
+    parks = 0, parkedNow = 0, staleSeen = 0, strikes = 0, overflowed = 0,
   }
 
   it("is deterministic for a given snapshot", function()
     assert.equal(Anchor.Render(snap), Anchor.Render(snap))
-    assert.equal("A{n:3 named:2 extra:1 miss:1 parked:0} P{30,10,20} D{30,10,20} X{ok}"
+    assert.equal("A{n:3 named:2 extra:1 miss:1 parked:0 over:0} P{30,10,20} D{30,10,20} X{ok}"
       .. " S{stomp:4 icombat:1 disp:2 cont:0 reassert:7 park:0 stale:0 strike:0}",
       Anchor.Render(snap))
   end)
 
   it("renders an absent count as ? and an empty order as -, never as 0", function()
     local body = Anchor.Render{ named = 0, planned = {}, drawn = {} }
-    assert.equal("A{n:? named:0 extra:? miss:? parked:?} P{-} D{-} X{MISMATCH}"
+    assert.equal("A{n:? named:0 extra:? miss:? parked:? over:?} P{-} D{-} X{MISMATCH}"
       .. " S{stomp:? icombat:? disp:? cont:? reassert:? park:? stale:? strike:?}", body)
   end)
 
@@ -582,5 +582,104 @@ describe("Anchor.Render row break", function()
   it("is still deterministic for a given snapshot", function()
     local snap = with{ plannedRow0 = 2, drawnRow0 = 2 }
     assert.are.equal(Anchor.Render(snap), Anchor.Render(snap))
+  end)
+end)
+
+describe("Anchor.Cells capacity", function()
+  -- ⚠ THE OTHER HALF OF THE CLAMP. Wrapping at `cols` alone only rotates the overflow: the row
+  -- stops running off the right edge and starts running off the BOTTOM, onto a third row of a
+  -- two-row panel — still outside the rect other UI anchors to, still with no diagnostic.
+  it("gives no cell to an icon past the last row", function()
+    local layout, from = Anchor.Cells(13, nil, 6, 51, 2)
+    assert.are.equal(13, from)
+    assert.is_nil(layout[13])
+    assert.is_table(layout[12])
+    assert.are.equal(-51, layout[12].y)
+  end)
+
+  it("never places anything below the last row, even with a late break", function()
+    -- Break at 9 of 12 would otherwise wrap onto a third row.
+    local layout, from = Anchor.Cells(12, 9, 6, 51, 2)
+    for i = 1, 12 do
+      if layout[i] then assert.is_true(layout[i].y > -102, "cell " .. i .. " fell below row 1") end
+    end
+    assert.are.equal(9, from)
+  end)
+
+  it("reports no overflow when the roster fits", function()
+    local layout, from = Anchor.Cells(12, nil, 6, 51, 2)
+    assert.is_nil(from)
+    assert.are.equal(12, #layout)
+  end)
+
+  it("treats a nil row count as arithmetic without a capacity", function()
+    local _, from = Anchor.Cells(13, nil, 6, 51, nil)
+    assert.is_nil(from)
+  end)
+
+  it("scales its capacity with the row count, not a constant", function()
+    local _, from = Anchor.Cells(13, nil, 6, 51, 3)
+    assert.is_nil(from)
+    local _, from2 = Anchor.Cells(7, nil, 6, 51, 1)
+    assert.are.equal(7, from2)
+  end)
+end)
+
+describe("Anchor grid override", function()
+  local savedSpec, savedCdb
+
+  before_each(function()
+    savedSpec, savedCdb = ANS.SpecAndHero, ANS.cdb
+    ANS.SpecAndHero = function() return 577, 2456 end
+    ANS.cdb = {}
+    ANS.Style = { row = { icon_px = 50, cols = 6, rows = 2, cell_px = 50, cell_floor_px = 50, gap_px = 1 } }
+  end)
+
+  after_each(function()
+    ANS.SpecAndHero, ANS.cdb = savedSpec, savedCdb
+  end)
+
+  local function store(t)
+    ANS.cdb.grid = { ["577:2456"] = t }
+  end
+
+  it("falls back to the token when the player has set nothing", function()
+    local cols, rows_ = Anchor.Grid()
+    assert.are.equal(6, cols)
+    assert.are.equal(2, rows_)
+  end)
+
+  it("uses the player's cols and rows over the token", function()
+    store{ cols = 7, rows = 3 }
+    local cols, rows_ = Anchor.Grid()
+    assert.are.equal(7, cols)
+    assert.are.equal(3, rows_)
+  end)
+
+  it("uses the player's icon size over the token", function()
+    store{ icon_px = 75 }
+    assert.are.equal(1.5, Anchor.Scale())
+  end)
+
+  -- ⚠ Validated on READ, not only on write: saved variables are a file a player can edit and a
+  -- build can roll back into. Nonsense must fall back to the token, not propagate into geometry.
+  it("ignores a stored value that is not a usable number", function()
+    for _, bad in ipairs({ "six", true, 0, -1, 999 }) do
+      store{ cols = bad }
+      assert.are.equal(6, Anchor.Grid(), "cols accepted " .. tostring(bad))
+    end
+  end)
+
+  it("keeps one spec's grid away from another's", function()
+    ANS.cdb.grid = { ["577:2456"] = { cols = 7 }, ["266:-"] = { cols = 4 } }
+    assert.are.equal(7, Anchor.Grid())
+    ANS.SpecAndHero = function() return 266, nil end
+    assert.are.equal(4, Anchor.Grid())
+  end)
+
+  it("takes the token when the client will not say what spec this is", function()
+    ANS.SpecAndHero = function() return nil, nil end
+    store{ cols = 7 }
+    assert.are.equal(6, Anchor.Grid())
   end)
 end)
