@@ -13,6 +13,9 @@ local pool = {}
 -- Chrome-only frames for viewer rows the catalog does not claim: a keybind hint and
 -- nothing else. Kept apart from `pool` so nothing here can ever reach the verdict loop.
 local chromePool = {}
+-- `Bind.RowDigest` answers for all four viewers, and only this one holds rows cap draws on.
+-- The aura viewers carry no castable ability, so a key named there names nothing.
+local CHROME_VIEWER = "E"
 local state = { bound = nil, order = {}, rowOf = {}, itemOf = {}, dark = false }
 
 --- One pooled frame per row, carrying every primitive the shelf declares — a badge per cue
@@ -560,7 +563,7 @@ end
 local function chromeSweep(claimed)
   local live = {}
   for _, row in ipairs(ns.Bind.RowDigest()) do
-    if row.cooldownID ~= nil and not claimed[row.cooldownID] then
+    if row.cooldownID ~= nil and row.viewer == CHROME_VIEWER and not claimed[row.cooldownID] then
       live[row.cooldownID] = true
       chrome(row.cooldownID, row.primary)
     end
