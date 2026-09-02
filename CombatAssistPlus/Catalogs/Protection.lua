@@ -137,11 +137,7 @@ ns.Catalog.Register{
       markers = {
         { id = "ha_banks_bulwark",
           cue = "blocked",
-          when = {
-            { "identity", "holy_armaments", "base" },
-            { "ready", "holy_armaments" },
-            { "talent", "sentinel", negate = true },
-          },
+          when = { { "identity", "holy_armaments", "base" }, { "ready", "holy_armaments" } },
           display = {
             ability = "avenging_wrath",
             beyond = 5,
